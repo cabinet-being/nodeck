@@ -12,13 +12,15 @@
   <img src="https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white">
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react">
   <img src="https://img.shields.io/badge/vite- -9135FF?logo=vite">
+  <img src="https://img.shields.io/badge/shadcn%2Fui- -000000?logo=shadcnui">
+  <img src="https://img.shields.io/badge/tailwindcss-4-06B6D4?logo=tailwindcss">
 </p>
 
 Nodeck is a card-centered gallery for organizing visual objects, tags, and collections. Objects and tags are displayed as standalone cards, while collections behave like decks that group related cards into a focused browsing experience.
 
 ## Overview
 
-The project is built around the idea that a gallery can feel like a deck system: every object is a card, every tag is a card, and every collection is a deck. The backend exposes a small ASP.NET Core Minimal API powered by .NET 9 and MySQL, while the frontend uses React 18 and Vite for a fast, interactive card-based interface.
+The project is built around the idea that a gallery can feel like a deck system: every object is a card, every tag is a card, and every collection is a deck. The backend exposes a small ASP.NET Core Minimal API powered by .NET 9 and MySQL, while the frontend uses React 18, Vite, Tailwind CSS, and shadcn/ui for a fast, clean, card-based interface.
 
 ## Features
 
@@ -29,6 +31,8 @@ The project is built around the idea that a gallery can feel like a deck system:
 - Minimal API backend with a compact, predictable HTTP surface.
 - Docker Compose setup with the backend and database running in separate containers.
 - React 18 frontend optimized for fast gallery navigation.
+- shadcn/ui component setup for simple, consistent interface building.
+- Tailwind CSS 4 styling pipeline integrated through Vite.
 - Vite development workflow with quick reloads.
 
 ## Screenshots
@@ -104,10 +108,15 @@ nodeck/
 │   └── src/
 │
 ├── frontend/
+│   ├── components.json
 │   ├── package.json
 │   ├── vite.config.ts
 │   ├── index.html
 │   └── src/
+│       ├── components/
+│       │   └── ui/
+│       ├── lib/
+│       └── index.css
 │
 └── volumes/
     ├── app_data/
@@ -129,20 +138,24 @@ The MySQL container should store database files in `volumes/mysql_data`, while a
 
 The frontend should keep Vite configuration in the frontend project and use an environment variable for the API base URL when the backend address differs from the default development setup.
 
+shadcn/ui is configured through `frontend/components.json`. Shared UI primitives live in `frontend/src/components/ui`, shared helpers live in `frontend/src/lib`, and the `@` import alias points to `frontend/src`.
+
 ## Development
 
 - Backend: ASP.NET Core Minimal API on .NET 9.
 - Database: MySQL in a dedicated Docker container.
 - Runtime: backend container composed together with the MySQL container.
 - Frontend: React 18 with Vite.
+- UI: shadcn/ui components on top of Tailwind CSS 4.
 - UI model: objects and tags are cards; collections are decks.
 
 Recommended development flow:
 
 1. Start the composed backend and MySQL services.
 2. Start the Vite dev server.
-3. Update card, tag, or deck behavior in small increments.
-4. Keep API contracts and UI state aligned when changing gallery data models.
+3. Build interface pieces from shadcn/ui primitives in `frontend/src/components/ui`.
+4. Update card, tag, or deck behavior in small increments.
+5. Keep API contracts and UI state aligned when changing gallery data models.
 
 ## Roadmap
 
