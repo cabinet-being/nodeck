@@ -63,6 +63,10 @@ npm install
 
 4. Create a `.env` file for Docker Compose and MySQL settings.
 
+```bash
+cp .env.example .env
+```
+
 ## Usage
 
 <p align="center">
