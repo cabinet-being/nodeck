@@ -37,6 +37,12 @@ public sealed record CreateCardData(
     JsonObject Metadata,
     IReadOnlyList<CreateRelationData> Relations);
 
+public sealed record UpdateCardData(
+    string? Title,
+    string? PropertiesJson,
+    IReadOnlyList<CreateRelationData> Relations,
+    CardFileAssets? Assets);
+
 public sealed record CreateRelationData(
     long ToCardId,
     string RelationType,

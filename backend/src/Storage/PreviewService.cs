@@ -30,6 +30,8 @@ public sealed class PreviewService
         var originalExtension = GetSafeExtension(originalFileName, image.ContentType);
         var cardDirectory = Path.Combine(_appDataRoot, "cards", cardId.ToString());
         var previewDirectory = Path.Combine(_appDataRoot, "cache", "cards", cardId.ToString());
+        DeleteDirectoryIfExists(cardDirectory);
+        DeleteDirectoryIfExists(previewDirectory);
         Directory.CreateDirectory(cardDirectory);
         Directory.CreateDirectory(previewDirectory);
 
@@ -112,15 +114,8 @@ public sealed class PreviewService
         var cardDirectory = Path.Combine(_appDataRoot, "cards", cardId.ToString());
         var previewDirectory = Path.Combine(_appDataRoot, "cache", "cards", cardId.ToString());
 
-        if (Directory.Exists(cardDirectory))
-        {
-            Directory.Delete(cardDirectory, recursive: true);
-        }
-
-        if (Directory.Exists(previewDirectory))
-        {
-            Directory.Delete(previewDirectory, recursive: true);
-        }
+        DeleteDirectoryIfExists(cardDirectory);
+        DeleteDirectoryIfExists(previewDirectory);
     }
 
     private string GetFullPath(string relativePath)
@@ -135,6 +130,14 @@ public sealed class PreviewService
         }
 
         return fullPath;
+    }
+
+    private static void DeleteDirectoryIfExists(string directory)
+    {
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static string GetSafeExtension(string originalFileName, string? contentType)

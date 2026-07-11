@@ -13,6 +13,8 @@ public static class CardEndpoints
         group.MapPost("", CreateCardAsync);
         group.MapGet("", ListCardsAsync);
         group.MapGet("/{id:long}", GetCardAsync);
+        group.MapPut("/{id:long}", UpdateCardAsync);
+        group.MapDelete("/{id:long}", DeleteCardAsync);
         group.MapGet("/{id:long}/content", GetCardContentAsync);
         group.MapGet("/{id:long}/preview", GetCardPreviewAsync);
 
@@ -111,6 +113,89 @@ public static class CardEndpoints
         var card = await repository.GetByIdAsync(id);
 
         return card is null ? Results.NotFound(new { error = "Card not found." }) : Results.Ok(card);
+    }
+
+    private static async Task<IResult> UpdateCardAsync(
+        HttpRequest request,
+        CardRepository repository,
+        PreviewService previewService,
+        long id)
+    {
+        if (!request.HasFormContentType)
+        {
+            return Results.BadRequest(new { error = "Card update requires multipart form data." });
+        }
+
+        var currentCard = await repository.GetByIdAsync(id);
+
+        if (currentCard is null)
+        {
+            return Results.NotFound(new { error = "Card not found." });
+        }
+
+        var form = await request.ReadFormAsync();
+        var requestedType = NormalizeOptionalString(form["type"].ToString());
+
+        if (requestedType is not null && requestedType != currentCard.Type)
+        {
+            return Results.BadRequest(new { error = "Card type cannot be changed." });
+        }
+
+        var image = form.Files.GetFile("image") ?? form.Files.GetFile("file");
+
+        if (image is not null && currentCard.Type != "media")
+        {
+            return Results.BadRequest(new { error = "Image uploads are only supported for media cards." });
+        }
+
+        var title = NormalizeOptionalString(form["title"].ToString());
+
+        if (!TryReadOptionalJsonObject(form["properties"].ToString(), out var propertiesJson, out var propertiesError))
+        {
+            return Results.BadRequest(new { error = propertiesError });
+        }
+
+        if (!TryReadRelations(form["relations"].ToString(), out var relations, out var relationsError))
+        {
+            return Results.BadRequest(new { error = relationsError });
+        }
+
+        try
+        {
+            var assets = image is null
+                ? null
+                : await previewService.SaveImageAndCreatePreviewAsync(id, image);
+            var updated = await repository.UpdateAsync(
+                id,
+                new UpdateCardData(title, propertiesJson, relations, assets));
+
+            return updated is null ? Results.NotFound(new { error = "Card not found." }) : Results.Ok(updated);
+        }
+        catch (JsonException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    }
+
+    private static async Task<IResult> DeleteCardAsync(
+        CardRepository repository,
+        PreviewService previewService,
+        long id)
+    {
+        var deleted = await repository.DeleteAsync(id);
+
+        if (!deleted)
+        {
+            return Results.NotFound(new { error = "Card not found." });
+        }
+
+        previewService.DeleteCardFiles(id);
+
+        return Results.NoContent();
     }
 
     private static async Task<IResult> GetCardContentAsync(

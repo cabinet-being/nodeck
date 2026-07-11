@@ -74,35 +74,7 @@ public sealed class CardRepository
                 },
                 transaction);
 
-            foreach (var relation in data.Relations)
-            {
-                await connection.ExecuteAsync(
-                    """
-                    INSERT INTO card_relations (
-                        from_card_id,
-                        to_card_id,
-                        relation_type,
-                        properties,
-                        metadata
-                    )
-                    VALUES (
-                        @FromCardId,
-                        @ToCardId,
-                        @RelationType,
-                        @Properties,
-                        @Metadata
-                    );
-                    """,
-                    new
-                    {
-                        FromCardId = cardId,
-                        relation.ToCardId,
-                        relation.RelationType,
-                        Properties = relation.PropertiesJson,
-                        Metadata = relation.Metadata.ToJsonString(),
-                    },
-                    transaction);
-            }
+            await InsertRelationsAsync(connection, transaction, cardId, data.Relations);
 
             await transaction.CommitAsync();
 
@@ -180,6 +152,98 @@ public sealed class CardRepository
         return rows.Select(ToSummary).ToList();
     }
 
+    public async Task<CardDetails?> UpdateAsync(long id, UpdateCardData data)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        var card = await connection.QuerySingleOrDefaultAsync<DbCard>(
+            """
+            SELECT
+                id AS Id,
+                type AS Type,
+                title AS Title,
+                preview AS Preview,
+                properties AS Properties,
+                metadata AS Metadata
+            FROM cards
+            WHERE id = @Id
+            FOR UPDATE;
+            """,
+            new { Id = id },
+            transaction);
+
+        if (card is null)
+        {
+            await transaction.RollbackAsync();
+            return null;
+        }
+
+        var metadata = ParseRequiredJson(card.Metadata);
+        var previewPath = card.Preview;
+
+        if (data.Assets is not null)
+        {
+            metadata["media_type"] = data.Assets.MediaType;
+            metadata["mime_type"] = data.Assets.MimeType;
+            metadata["original_file_name"] = data.Assets.OriginalFileName;
+            metadata["content_path"] = data.Assets.ContentPath;
+            metadata["preview_path"] = data.Assets.PreviewPath;
+            metadata["file_size"] = data.Assets.FileSize;
+            metadata["width"] = data.Assets.Width;
+            metadata["height"] = data.Assets.Height;
+            previewPath = data.Assets.PreviewPath;
+        }
+
+        await connection.ExecuteAsync(
+            """
+            UPDATE cards
+            SET title = @Title,
+                preview = @Preview,
+                properties = @Properties,
+                metadata = @Metadata
+            WHERE id = @Id;
+            """,
+            new
+            {
+                Id = id,
+                data.Title,
+                Preview = previewPath,
+                Properties = data.PropertiesJson,
+                Metadata = metadata.ToJsonString(),
+            },
+            transaction);
+
+        await connection.ExecuteAsync(
+            """
+            DELETE FROM card_relations
+            WHERE from_card_id = @Id;
+            """,
+            new { Id = id },
+            transaction);
+
+        await InsertRelationsAsync(connection, transaction, id, data.Relations);
+        await transaction.CommitAsync();
+
+        return await GetByIdAsync(id)
+            ?? throw new InvalidOperationException("Updated card could not be loaded.");
+    }
+
+    public async Task<bool> DeleteAsync(long id)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+
+        var affectedRows = await connection.ExecuteAsync(
+            """
+            DELETE FROM cards
+            WHERE id = @Id;
+            """,
+            new { Id = id });
+
+        return affectedRows > 0;
+    }
+
     public async Task<CardDetails?> GetByIdAsync(long id)
     {
         await using var connection = new MySqlConnection(_connectionString);
@@ -230,6 +294,43 @@ public sealed class CardRepository
             new { Id = id });
 
         return rows.Select(ToRelation).ToList();
+    }
+
+    private static async Task InsertRelationsAsync(
+        IDbConnection connection,
+        IDbTransaction transaction,
+        long fromCardId,
+        IReadOnlyList<CreateRelationData> relations)
+    {
+        foreach (var relation in relations)
+        {
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO card_relations (
+                    from_card_id,
+                    to_card_id,
+                    relation_type,
+                    properties,
+                    metadata
+                )
+                VALUES (
+                    @FromCardId,
+                    @ToCardId,
+                    @RelationType,
+                    @Properties,
+                    @Metadata
+                );
+                """,
+                new
+                {
+                    FromCardId = fromCardId,
+                    relation.ToCardId,
+                    relation.RelationType,
+                    Properties = relation.PropertiesJson,
+                    Metadata = relation.Metadata.ToJsonString(),
+                },
+                transaction);
+        }
     }
 
     private static CardSummary ToSummary(DbCard card)
