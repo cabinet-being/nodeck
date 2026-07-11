@@ -45,6 +45,7 @@ export function EditCardPage({
         setValue({
           type: loadedCard.type,
           title: loadedCard.title ?? '',
+          images: [],
           properties: keyValueRowsFromRecord(loadedCard.properties),
           relations: relationRowsFromCard(loadedCard),
         });

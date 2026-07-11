@@ -11,6 +11,7 @@ import {
 const initialValue: CardFormValue = {
   type: 'media',
   title: '',
+  images: [],
   properties: [],
   relations: [],
 };
@@ -37,10 +38,19 @@ export function CreateCardPage({
     setIsSubmitting(true);
 
     try {
+      if ((value.type === 'tag' || value.type === 'source') && !value.title.trim()) {
+        throw new Error(`${value.type} cards require a title.`);
+      }
+
+      if ((value.type === 'comic' || value.type === 'set') && value.images.length < 2) {
+        throw new Error(`${value.type} cards require at least two images.`);
+      }
+
       const created = await createCard({
         type: value.type,
         title: value.title.trim() || undefined,
         image: value.image,
+        images: value.images.map((image) => image.file),
         properties: toRecord(value.properties),
         relations: toRelationInputs(value.relations),
       });

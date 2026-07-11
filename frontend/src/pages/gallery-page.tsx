@@ -22,8 +22,7 @@ export function GalleryPage({
 
   React.useEffect(() => {
     listCards({
-      type: 'media',
-      mediaType: 'image',
+      types: ['media', 'comic', 'set'],
       sort: 'created_at',
       order: 'desc',
     })
@@ -79,15 +78,17 @@ export function GalleryPage({
               view === 'grid' ? 'block aspect-square' : 'mb-3 block break-inside-avoid'
             )}
           >
-            <img
-              src={resolveApiUrl(card.previewUrl)}
-              alt=""
-              className={cn(
-                'w-full object-cover',
-                view === 'grid' ? 'size-full' : 'h-auto'
-              )}
-              loading="lazy"
-            />
+            {card.previewUrl ? (
+              <img
+                src={resolveApiUrl(card.previewUrl)}
+                alt=""
+                className={cn(
+                  'w-full object-cover',
+                  view === 'grid' ? 'size-full' : 'h-auto'
+                )}
+                loading="lazy"
+              />
+            ) : null}
           </a>
         ))}
       </div>
