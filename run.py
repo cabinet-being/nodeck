@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import socket
 import shutil
 import signal
 import subprocess
@@ -43,8 +44,8 @@ def main() -> int:
         reset_mysql_data()
 
     run([*compose, "up", "--build", "-d"], cwd=ROOT)
-    wait_for_url("http://localhost:8080/health", "backend health")
-    wait_for_url("http://localhost:8080/health/mysql", "MySQL health")
+    wait_for_url("http://localhost:8080/health", "backend health", compose)
+    wait_for_url("http://localhost:8080/health/mysql", "MySQL health", compose)
 
     if not (FRONTEND / "node_modules").exists():
         run(["npm", "install"], cwd=FRONTEND)
@@ -126,7 +127,12 @@ def reset_mysql_data() -> None:
         print("Removed volumes/mysql_data")
 
 
-def wait_for_url(url: str, label: str, timeout_seconds: int = 90) -> None:
+def wait_for_url(
+    url: str,
+    label: str,
+    compose: list[str],
+    timeout_seconds: int = 90,
+) -> None:
     deadline = time.time() + timeout_seconds
     last_error: Exception | None = None
 
@@ -138,10 +144,23 @@ def wait_for_url(url: str, label: str, timeout_seconds: int = 90) -> None:
                 if 200 <= response.status < 300:
                     print(f"{label} is ready.")
                     return
-        except (urllib.error.URLError, TimeoutError) as error:
+        except (
+            ConnectionError,
+            OSError,
+            TimeoutError,
+            socket.timeout,
+            urllib.error.URLError,
+        ) as error:
             last_error = error
 
         time.sleep(2)
+
+    print()
+    print(f"{label} did not become ready. Container status:")
+    subprocess.run([*compose, "ps"], cwd=ROOT, check=False)
+    print()
+    print("Backend logs:")
+    subprocess.run([*compose, "logs", "--tail", "80", "backend"], cwd=ROOT, check=False)
 
     raise SystemExit(f"Timed out waiting for {label}: {last_error}")
 
