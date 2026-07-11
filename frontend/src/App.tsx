@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { CardDetailsPage } from '@/pages/card-details-page';
 import { CardsPage } from '@/pages/cards-page';
 import { CreateCardPage } from '@/pages/create-card-page';
+import { EditCardPage } from '@/pages/edit-card-page';
 import { GalleryPage } from '@/pages/gallery-page';
 
 function getCurrentPath() {
@@ -107,6 +108,12 @@ function RouteContent({
 
   if (currentPath === '/gallery') {
     return <GalleryPage onNavigate={onNavigate} />;
+  }
+
+  const editCardMatch = currentPath.match(/^\/cards\/(\d+)\/edit$/);
+
+  if (editCardMatch) {
+    return <EditCardPage cardId={Number(editCardMatch[1])} onSaved={onNavigateTo} />;
   }
 
   const cardMatch = currentPath.match(/^\/cards\/(\d+)$/);

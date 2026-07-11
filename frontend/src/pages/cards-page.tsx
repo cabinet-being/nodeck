@@ -1,8 +1,10 @@
 import * as React from 'react';
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 
-import { cardTypes, listCards, type Card } from '@/api/cards';
+import { cardTypes, deleteCard, listCards, type Card } from '@/api/cards';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 
 export function CardsPage({
@@ -16,6 +18,8 @@ export function CardsPage({
   const [order, setOrder] = React.useState<'asc' | 'desc'>('desc');
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [cardToDelete, setCardToDelete] = React.useState<Card | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
 
   React.useEffect(() => {
     setIsLoading(true);
@@ -80,6 +84,7 @@ export function CardsPage({
               <th className="px-3 py-2 text-left font-medium">Title</th>
               <th className="px-3 py-2 text-left font-medium">Preview</th>
               <th className="px-3 py-2 text-left font-medium">Created</th>
+              <th className="px-3 py-2 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -96,11 +101,40 @@ export function CardsPage({
                 <td className="px-3 py-2">{card.title}</td>
                 <td className="px-3 py-2">{card.previewUrl ? 'yes' : 'no'}</td>
                 <td className="px-3 py-2">{String(card.metadata.created_at ?? '')}</td>
+                <td className="px-3 py-2">
+                  <div className="flex justify-end gap-1">
+                    <a
+                      href={`/cards/${card.id}`}
+                      onClick={onNavigate}
+                      className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+                      aria-label={`View card ${card.id}`}
+                    >
+                      <Eye className="size-4" />
+                    </a>
+                    <a
+                      href={`/cards/${card.id}/edit`}
+                      onClick={onNavigate}
+                      className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+                      aria-label={`Edit card ${card.id}`}
+                    >
+                      <Pencil className="size-4" />
+                    </a>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Delete card ${card.id}`}
+                      onClick={() => setCardToDelete(card)}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                </td>
               </tr>
             ))}
             {!isLoading && cards.length === 0 ? (
               <tr>
-                <td className="text-muted-foreground px-3 py-6 text-center" colSpan={5}>
+                <td className="text-muted-foreground px-3 py-6 text-center" colSpan={6}>
                   No cards
                 </td>
               </tr>
@@ -108,6 +142,59 @@ export function CardsPage({
           </tbody>
         </table>
       </div>
+
+      <Dialog
+        open={cardToDelete !== null}
+        title="Delete card"
+        description={
+          cardToDelete
+            ? `Delete #${cardToDelete.id}${cardToDelete.title ? ` ${cardToDelete.title}` : ''}?`
+            : undefined
+        }
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) {
+            setCardToDelete(null);
+          }
+        }}
+      >
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isDeleting}
+            onClick={() => setCardToDelete(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={isDeleting || cardToDelete === null}
+            onClick={handleDelete}
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Dialog>
     </section>
   );
+
+  async function handleDelete() {
+    if (!cardToDelete) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      await deleteCard(cardToDelete.id);
+      setCards((current) => current.filter((card) => card.id !== cardToDelete.id));
+      setCardToDelete(null);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to delete card.');
+    } finally {
+      setIsDeleting(false);
+    }
+  }
 }

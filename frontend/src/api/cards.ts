@@ -41,6 +41,13 @@ export type CreateCardInput = {
   relations?: CreateRelationInput[];
 };
 
+export type UpdateCardInput = {
+  title?: string;
+  image?: File;
+  properties?: Record<string, string>;
+  relations?: CreateRelationInput[];
+};
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
 export const cardTypes = ['media', 'comic', 'set', 'tag', 'source'] as const;
@@ -98,6 +105,42 @@ export async function createCard(input: CreateCardInput) {
   });
 
   return readJson<Card>(response);
+}
+
+export async function updateCard(id: number, input: UpdateCardInput) {
+  const formData = new FormData();
+
+  if (input.title) {
+    formData.set('title', input.title);
+  }
+
+  if (input.image) {
+    formData.set('image', input.image);
+  }
+
+  if (input.properties && Object.keys(input.properties).length > 0) {
+    formData.set('properties', JSON.stringify(input.properties));
+  }
+
+  formData.set('relations', JSON.stringify(input.relations ?? []));
+
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}`, {
+    method: 'PUT',
+    body: formData,
+  });
+
+  return readJson<Card>(response);
+}
+
+export async function deleteCard(id: number) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error ?? 'Request failed.');
+  }
 }
 
 export function resolveApiUrl(path: string | null | undefined) {
