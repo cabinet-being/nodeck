@@ -29,13 +29,13 @@ public sealed class PreviewService
         var originalFileName = Path.GetFileName(image.FileName);
         var originalExtension = GetSafeExtension(originalFileName, image.ContentType);
         var cardDirectory = Path.Combine(_appDataRoot, "cards", cardId.ToString());
-        var previewDirectory = Path.Combine(_appDataRoot, "cache", "previews");
+        var previewDirectory = Path.Combine(_appDataRoot, "cache", "cards", cardId.ToString());
         Directory.CreateDirectory(cardDirectory);
         Directory.CreateDirectory(previewDirectory);
 
         var relativeContentPath = Path.Combine("cards", cardId.ToString(), $"original{originalExtension}")
             .Replace('\\', '/');
-        var relativePreviewPath = Path.Combine("cache", "previews", $"{cardId}.webp")
+        var relativePreviewPath = Path.Combine("cache", "cards", cardId.ToString(), "preview.webp")
             .Replace('\\', '/');
 
         var originalPath = Path.Combine(_appDataRoot, relativeContentPath);
@@ -110,16 +110,16 @@ public sealed class PreviewService
     public void DeleteCardFiles(long cardId)
     {
         var cardDirectory = Path.Combine(_appDataRoot, "cards", cardId.ToString());
-        var previewPath = Path.Combine(_appDataRoot, "cache", "previews", $"{cardId}.webp");
+        var previewDirectory = Path.Combine(_appDataRoot, "cache", "cards", cardId.ToString());
 
         if (Directory.Exists(cardDirectory))
         {
             Directory.Delete(cardDirectory, recursive: true);
         }
 
-        if (File.Exists(previewPath))
+        if (Directory.Exists(previewDirectory))
         {
-            File.Delete(previewPath);
+            Directory.Delete(previewDirectory, recursive: true);
         }
     }
 
