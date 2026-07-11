@@ -13,6 +13,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 FRONTEND = ROOT / "frontend"
 ENV_FILE = ROOT / ".env"
+VOLUME_PLACEHOLDERS = [
+    ROOT / "volumes" / "app_data" / "cache" / ".gitkeep",
+    ROOT / "volumes" / "app_data" / "cards" / ".gitkeep",
+    ROOT / "volumes" / "app_data" / "config" / ".gitkeep",
+    ROOT / "volumes" / "app_data" / "uploads" / ".gitkeep",
+    ROOT / "volumes" / "app_data" / "user-data" / ".gitkeep",
+    ROOT / "volumes" / "mysql_data" / ".gitkeep",
+]
 DEFAULT_ENV = {
     "MYSQL_DATABASE": "nodeck",
     "MYSQL_USER": "nodeck",
@@ -37,9 +45,11 @@ def main() -> int:
 
     compose = get_compose_command()
     write_env_file()
+    ensure_volume_placeholders()
 
     if args.reset_db:
         reset_mysql_data(compose)
+        ensure_volume_placeholders()
 
     run([*compose, "up", "--build", "-d"], cwd=ROOT)
     wait_for_url("http://localhost:8080/health", "backend health", compose)
@@ -117,6 +127,31 @@ def read_env_file() -> dict[str, str]:
     return values
 
 
+def ensure_volume_placeholders() -> None:
+    for placeholder in VOLUME_PLACEHOLDERS:
+        try:
+            if placeholder.exists():
+                continue
+        except OSError:
+            print(f"Skipping inaccessible placeholder: {display_path(placeholder)}")
+            continue
+
+        try:
+            placeholder.parent.mkdir(parents=True, exist_ok=True)
+
+            if not placeholder.exists():
+                placeholder.touch()
+        except PermissionError:
+            print(f"Skipping Docker-owned placeholder: {display_path(placeholder)}")
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def reset_mysql_data(compose: list[str]) -> None:
     mysql_data = ROOT / "volumes" / "mysql_data"
 
@@ -126,14 +161,25 @@ def reset_mysql_data(compose: list[str]) -> None:
     run([*compose, "down"], cwd=ROOT)
 
     try:
-        shutil.rmtree(mysql_data)
-        print("Removed volumes/mysql_data")
+        remove_directory_contents(mysql_data, keep_names={".gitkeep"})
+        print("Removed volumes/mysql_data contents")
     except PermissionError as error:
         raise SystemExit(
-            "Cannot remove volumes/mysql_data because some MySQL files are owned by Docker.\n"
+            "Cannot clean volumes/mysql_data because some MySQL files are owned by Docker.\n"
             "Run this once, then retry:\n\n"
-            "  sudo rm -rf volumes/mysql_data\n"
+            "  sudo find volumes/mysql_data -mindepth 1 ! -name .gitkeep -exec rm -rf -- {} +\n"
         ) from error
+
+
+def remove_directory_contents(directory: Path, keep_names: set[str]) -> None:
+    for child in directory.iterdir():
+        if child.name in keep_names:
+            continue
+
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
 
 
 def wait_for_url(
