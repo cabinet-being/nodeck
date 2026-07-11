@@ -1,8 +1,24 @@
 using MySqlConnector;
+using MyApp.Api.Cards;
+using MyApp.Api.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddScoped<CardRepository>();
+builder.Services.AddSingleton<PreviewService>();
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyOrigin()
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
 var app = builder.Build();
+
+app.UseCors();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
@@ -20,5 +36,7 @@ app.MapGet("/health/mysql", async (IConfiguration configuration) =>
 
     return Results.Ok(new { status = "ok" });
 });
+
+app.MapCardEndpoints();
 
 app.Run();

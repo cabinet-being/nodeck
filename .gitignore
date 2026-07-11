@@ -1,6 +1,9 @@
 # Environment
 .env
 
+# Local runtime data
+/volumes/
+
 # .NET
 bin/
 obj/

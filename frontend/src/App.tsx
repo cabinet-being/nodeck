@@ -3,6 +3,10 @@ import { Search } from 'lucide-react';
 
 import { AppSidebar } from '@/components/app-sidebar';
 import { Input } from '@/components/ui/input';
+import { CardDetailsPage } from '@/pages/card-details-page';
+import { CardsPage } from '@/pages/cards-page';
+import { CreateCardPage } from '@/pages/create-card-page';
+import { GalleryPage } from '@/pages/gallery-page';
 
 function getCurrentPath() {
   return window.location.pathname || '/';
@@ -46,6 +50,13 @@ export function App() {
     }
   }, [currentPath]);
 
+  const navigateTo = React.useCallback((path: string) => {
+    if (path !== currentPath) {
+      window.history.pushState(null, '', path);
+      setCurrentPath(path);
+    }
+  }, [currentPath]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="grid min-h-screen grid-cols-[17rem_1fr]">
@@ -64,9 +75,45 @@ export function App() {
             </div>
           </header>
 
-          <main className="min-w-0 flex-1" />
+          <main className="min-w-0 flex-1">
+            <RouteContent
+              currentPath={currentPath}
+              onNavigate={navigate}
+              onNavigateTo={navigateTo}
+            />
+          </main>
         </div>
       </div>
     </div>
   );
+}
+
+function RouteContent({
+  currentPath,
+  onNavigate,
+  onNavigateTo,
+}: {
+  currentPath: string;
+  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onNavigateTo: (path: string) => void;
+}) {
+  if (currentPath === '/cards/new') {
+    return <CreateCardPage onCreated={onNavigateTo} />;
+  }
+
+  if (currentPath === '/cards') {
+    return <CardsPage onNavigate={onNavigate} />;
+  }
+
+  if (currentPath === '/gallery') {
+    return <GalleryPage onNavigate={onNavigate} />;
+  }
+
+  const cardMatch = currentPath.match(/^\/cards\/(\d+)$/);
+
+  if (cardMatch) {
+    return <CardDetailsPage cardId={Number(cardMatch[1])} />;
+  }
+
+  return null;
 }
