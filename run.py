@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import socket
 import shutil
 import signal
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -41,7 +39,7 @@ def main() -> int:
     write_env_file()
 
     if args.reset_db:
-        reset_mysql_data()
+        reset_mysql_data(compose)
 
     run([*compose, "up", "--build", "-d"], cwd=ROOT)
     wait_for_url("http://localhost:8080/health", "backend health", compose)
@@ -119,12 +117,23 @@ def read_env_file() -> dict[str, str]:
     return values
 
 
-def reset_mysql_data() -> None:
+def reset_mysql_data(compose: list[str]) -> None:
     mysql_data = ROOT / "volumes" / "mysql_data"
 
-    if mysql_data.exists():
+    if not mysql_data.exists():
+        return
+
+    run([*compose, "down"], cwd=ROOT)
+
+    try:
         shutil.rmtree(mysql_data)
         print("Removed volumes/mysql_data")
+    except PermissionError as error:
+        raise SystemExit(
+            "Cannot remove volumes/mysql_data because some MySQL files are owned by Docker.\n"
+            "Run this once, then retry:\n\n"
+            "  sudo rm -rf volumes/mysql_data\n"
+        ) from error
 
 
 def wait_for_url(
