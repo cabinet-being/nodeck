@@ -104,7 +104,7 @@ export function CardForm({
               Media file
               <Input
                 type="file"
-                accept="image/png,image/jpeg,image/webp,video/mp4,video/webm"
+                accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm"
                 onChange={(event) =>
                   onValueChange({ ...value, image: event.target.files?.[0] })
                 }
