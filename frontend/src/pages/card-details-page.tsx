@@ -102,7 +102,7 @@ function SetDetails({ card }: { card: Card }) {
         <div className="flex justify-end">
           <VisualCardViewToggle view={view} onChange={setView} />
         </div>
-        <VisualCardWall cards={containedCards} view={view} />
+        <VisualCardWall cards={containedCards} view={view} density="compact" />
       </div>
 
       <CardAside card={card} />

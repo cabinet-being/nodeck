@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export type VisualCardView = 'grid' | 'brick';
+export type VisualCardDensity = 'default' | 'compact';
 
 export const visualCardViewStorageKey = 'nodeck.visualCardView';
 
@@ -57,18 +58,26 @@ export function VisualCardViewToggle({
 export function VisualCardWall({
   cards,
   view,
+  density = 'default',
   onNavigate,
 }: {
   cards: VisualCard[];
   view: VisualCardView;
+  density?: VisualCardDensity;
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
   return (
     <div
       className={cn(
         view === 'grid'
-          ? 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6'
-          : 'columns-2 gap-3 sm:columns-3 md:columns-4 xl:columns-6'
+          ? cn(
+              'grid grid-cols-2 gap-3 sm:grid-cols-3',
+              density === 'compact' ? 'xl:grid-cols-4' : 'md:grid-cols-4 xl:grid-cols-6'
+            )
+          : cn(
+              'columns-2 gap-3 sm:columns-3',
+              density === 'compact' ? 'xl:columns-4' : 'md:columns-4 xl:columns-6'
+            )
       )}
     >
       {cards.map((card) => (
