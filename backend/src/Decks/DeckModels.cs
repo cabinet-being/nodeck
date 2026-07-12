@@ -5,7 +5,7 @@ namespace MyApp.Api.Decks;
 public sealed record DeckSummary(
     long Id,
     string Title,
-    int CardCount,
+    long CardCount,
     JsonNode? Properties,
     JsonNode Metadata,
     string? SystemKey);
@@ -48,7 +48,7 @@ internal sealed record DbDeck(
 internal sealed record DbDeckSummary(
     long Id,
     string Title,
-    int CardCount,
+    long CardCount,
     string? Properties,
     string Metadata,
     string? SystemKey);
