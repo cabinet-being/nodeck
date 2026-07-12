@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2, Upload } from 'lucide-react';
 
 import { cardTypes, relationTypes, type Card, type CreateRelationInput } from '@/api/cards';
 import { Button } from '@/components/ui/button';
@@ -17,10 +17,17 @@ export type RelationRow = {
   properties: KeyValueRow[];
 };
 
+export type UploadedImage = {
+  id: string;
+  file: File;
+  previewUrl: string;
+};
+
 export type CardFormValue = {
   type: string;
   title: string;
   image?: File;
+  images: UploadedImage[];
   properties: KeyValueRow[];
   relations: RelationRow[];
 };
@@ -48,6 +55,12 @@ export function CardForm({
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   incomingRelations?: React.ReactNode;
 }) {
+  const isMultiImageCard = !typeLocked && (value.type === 'comic' || value.type === 'set');
+  const isTextOnlyCard = value.type === 'tag' || value.type === 'source';
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
+  const [isDraggingOver, setIsDraggingOver] = React.useState(false);
+  const [draggedIndex, setDraggedIndex] = React.useState<number | null>(null);
+
   return (
     <form onSubmit={onSubmit} className="grid gap-4">
       <UiCard>
@@ -60,7 +73,14 @@ export function CardForm({
             <select
               value={value.type}
               disabled={typeLocked}
-              onChange={(event) => onValueChange({ ...value, type: event.target.value })}
+              onChange={(event) =>
+                onValueChange({
+                  ...value,
+                  type: event.target.value,
+                  image: undefined,
+                  images: [],
+                })
+              }
               className="border-input bg-background h-9 rounded-lg border px-3 text-sm disabled:opacity-70"
             >
               {cardTypes.map((cardType) => (
@@ -79,17 +99,122 @@ export function CardForm({
             />
           </label>
 
-          <label className="grid gap-2 text-sm font-medium">
-            Image
-            <Input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              disabled={value.type !== 'media'}
-              onChange={(event) =>
-                onValueChange({ ...value, image: event.target.files?.[0] })
-              }
-            />
-          </label>
+          {value.type === 'media' ? (
+            <label className="grid gap-2 text-sm font-medium">
+              Image
+              <Input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(event) =>
+                  onValueChange({ ...value, image: event.target.files?.[0] })
+                }
+              />
+            </label>
+          ) : null}
+
+          {isMultiImageCard ? (
+            <div className="grid gap-3">
+              <div
+                className={[
+                  'grid min-h-32 place-items-center rounded-lg border border-dashed p-4 text-center transition-colors',
+                  isDraggingOver ? 'border-primary bg-muted' : 'border-border',
+                ].join(' ')}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setIsDraggingOver(true);
+                }}
+                onDragLeave={() => setIsDraggingOver(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setIsDraggingOver(false);
+                  addImages(Array.from(event.dataTransfer.files));
+                }}
+              >
+                <div className="grid gap-2">
+                  <Upload className="text-muted-foreground mx-auto size-6" />
+                  <div className="text-sm font-medium">Drop images here</div>
+                  <label className="inline-flex justify-center">
+                    <span className="sr-only">Choose images</span>
+                    <Input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      multiple
+                      className="max-w-64"
+                      onChange={(event) => addImages(Array.from(event.target.files ?? []))}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {uploadError ? <div className="text-destructive text-sm">{uploadError}</div> : null}
+
+              {value.images.length > 0 ? (
+                <div className="grid gap-2">
+                  {value.images.map((image, index) => (
+                    <div
+                      key={image.id}
+                      draggable
+                      onDragStart={() => setDraggedIndex(index)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        if (draggedIndex !== null) {
+                          moveImage(draggedIndex, index);
+                        }
+                        setDraggedIndex(null);
+                      }}
+                      className="grid gap-3 rounded-lg border p-3 md:grid-cols-[auto_5rem_1fr_auto]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <GripVertical className="text-muted-foreground size-4" />
+                        <span className="text-muted-foreground w-7 text-sm">{index + 1}</span>
+                      </div>
+                      <img
+                        src={image.previewUrl}
+                        alt=""
+                        className="bg-muted size-20 rounded object-cover"
+                      />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{image.file.name}</div>
+                        {index === 0 ? (
+                          <div className="text-muted-foreground text-xs">Parent preview</div>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          disabled={index === 0}
+                          onClick={() => moveImage(index, index - 1)}
+                        >
+                          <ArrowUp className="size-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          disabled={index === value.images.length - 1}
+                          onClick={() => moveImage(index, index + 1)}
+                        >
+                          <ArrowDown className="size-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeImage(index)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {isTextOnlyCard ? null : null}
         </CardContent>
       </UiCard>
 
@@ -202,6 +327,53 @@ export function CardForm({
       </div>
     </form>
   );
+
+  function addImages(files: File[]) {
+    const supportedImages = files.filter(isSupportedImage);
+    const rejectedCount = files.length - supportedImages.length;
+
+    setUploadError(rejectedCount > 0 ? `${rejectedCount} unsupported file(s) skipped.` : null);
+
+    if (supportedImages.length === 0) {
+      return;
+    }
+
+    onValueChange({
+      ...value,
+      images: [
+        ...value.images,
+        ...supportedImages.map((file) => ({
+          id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+          file,
+          previewUrl: URL.createObjectURL(file),
+        })),
+      ],
+    });
+  }
+
+  function moveImage(fromIndex: number, toIndex: number) {
+    if (toIndex < 0 || toIndex >= value.images.length) {
+      return;
+    }
+
+    const nextImages = [...value.images];
+    const [image] = nextImages.splice(fromIndex, 1);
+    nextImages.splice(toIndex, 0, image);
+    onValueChange({ ...value, images: nextImages });
+  }
+
+  function removeImage(index: number) {
+    const image = value.images[index];
+
+    if (image) {
+      URL.revokeObjectURL(image.previewUrl);
+    }
+
+    onValueChange({
+      ...value,
+      images: value.images.filter((_, imageIndex) => imageIndex !== index),
+    });
+  }
 }
 
 export function toRecord(rows: KeyValueRow[]) {
@@ -214,6 +386,10 @@ export function toRecord(rows: KeyValueRow[]) {
 
     return record;
   }, {});
+}
+
+function isSupportedImage(file: File) {
+  return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
 }
 
 export function toRelationInputs(rows: RelationRow[]) {

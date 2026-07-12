@@ -7,6 +7,15 @@ export type CardRelation = {
   metadata: Record<string, unknown>;
 };
 
+export type ContainedCard = {
+  id: number;
+  type: string;
+  title: string | null;
+  previewUrl: string | null;
+  contentUrl: string | null;
+  position: number;
+};
+
 export type Card = {
   id: number;
   type: string;
@@ -17,12 +26,15 @@ export type Card = {
   metadata: Record<string, unknown>;
   outgoingRelations?: CardRelation[];
   incomingRelations?: CardRelation[];
+  containedCards?: ContainedCard[];
 };
 
 export type CardListParams = {
   type?: string;
+  types?: string[];
   mediaType?: string;
   search?: string;
+  excludeContainedMedia?: boolean;
   sort?: 'created_at';
   order?: 'asc' | 'desc';
 };
@@ -37,6 +49,7 @@ export type CreateCardInput = {
   type: string;
   title?: string;
   image?: File;
+  images?: File[];
   properties?: Record<string, string>;
   relations?: CreateRelationInput[];
 };
@@ -57,14 +70,17 @@ export const relationTypes = [
   'contains',
   'related_to',
   'preview_for',
+  'next_in_sequence',
 ] as const;
 
 export async function listCards(params: CardListParams = {}) {
   const searchParams = new URLSearchParams();
 
   if (params.type) searchParams.set('type', params.type);
+  if (params.types && params.types.length > 0) searchParams.set('types', params.types.join(','));
   if (params.mediaType) searchParams.set('media_type', params.mediaType);
   if (params.search) searchParams.set('search', params.search);
+  if (params.excludeContainedMedia) searchParams.set('exclude_contained_media', 'true');
   if (params.sort) searchParams.set('sort', params.sort);
   if (params.order) searchParams.set('order', params.order);
 
@@ -89,6 +105,10 @@ export async function createCard(input: CreateCardInput) {
 
   if (input.image) {
     formData.set('image', input.image);
+  }
+
+  if (input.images) {
+    input.images.forEach((image) => formData.append('images', image));
   }
 
   if (input.properties && Object.keys(input.properties).length > 0) {
@@ -176,6 +196,17 @@ function normalizeCardData(data: unknown): unknown {
 
   const record = data as Record<string, unknown>;
 
+  if ('Position' in record) {
+    return {
+      id: record.Id,
+      type: record.Type,
+      title: record.Title,
+      previewUrl: record.PreviewUrl,
+      contentUrl: record.ContentUrl,
+      position: record.Position,
+    };
+  }
+
   if ('Id' in record || 'PreviewUrl' in record || 'OutgoingRelations' in record) {
     return {
       id: record.Id,
@@ -187,6 +218,7 @@ function normalizeCardData(data: unknown): unknown {
       metadata: record.Metadata,
       outgoingRelations: normalizeCardData(record.OutgoingRelations),
       incomingRelations: normalizeCardData(record.IncomingRelations),
+      containedCards: normalizeCardData(record.ContainedCards),
     };
   }
 

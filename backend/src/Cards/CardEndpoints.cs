@@ -39,13 +39,6 @@ public static class CardEndpoints
             return Results.BadRequest(new { error = $"Unsupported card type '{type}'." });
         }
 
-        var image = form.Files.GetFile("image") ?? form.Files.GetFile("file");
-
-        if (image is not null && type != "media")
-        {
-            return Results.BadRequest(new { error = "Image uploads are only supported for media cards." });
-        }
-
         var title = NormalizeOptionalString(form["title"].ToString());
 
         if (!TryReadOptionalJsonObject(form["properties"].ToString(), out var propertiesJson, out var propertiesError))
@@ -65,6 +58,56 @@ public static class CardEndpoints
 
         try
         {
+            if (type is "comic" or "set")
+            {
+                var images = ReadImageFiles(form);
+
+                if (images.Count < 2)
+                {
+                    return Results.BadRequest(new { error = $"{type} cards require at least two images." });
+                }
+
+                foreach (var uploadedImage in images)
+                {
+                    if (!IsSupportedStaticImage(uploadedImage))
+                    {
+                        return Results.BadRequest(new { error = $"Unsupported image file '{uploadedImage.FileName}'." });
+                    }
+                }
+
+                var createdCollection = await repository.CreateCollectionAsync(
+                    new CreateCardCollectionData(type, title, propertiesJson, metadata, images, relations),
+                    previewService.SaveImageAndCreatePreviewAsync,
+                    previewService.DeleteCardFiles);
+
+                return Results.Created($"/api/cards/{createdCollection.Id}", createdCollection);
+            }
+
+            var image = form.Files.GetFile("image") ?? form.Files.GetFile("file");
+
+            if (type is "tag" or "source")
+            {
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    return Results.BadRequest(new { error = $"{type} cards require a title." });
+                }
+
+                if (form.Files.Count > 0)
+                {
+                    return Results.BadRequest(new { error = $"{type} cards do not support image uploads." });
+                }
+            }
+
+            if (image is not null && type != "media")
+            {
+                return Results.BadRequest(new { error = "Image uploads are only supported for media cards." });
+            }
+
+            if (image is not null && !IsSupportedStaticImage(image))
+            {
+                return Results.BadRequest(new { error = $"Unsupported image file '{image.FileName}'." });
+            }
+
             var created = await repository.CreateAsync(
                 new CreateCardData(type, title, propertiesJson, metadata, relations),
                 async cardId => image is null
@@ -89,19 +132,22 @@ public static class CardEndpoints
         string? type,
         string? mediaType,
         string? media_type,
+        string? types,
         string? search,
+        string? exclude_contained_media,
         string? sort,
         string? order)
     {
-        if (!string.IsNullOrWhiteSpace(type) && !CardTypes.IsSupportedCardType(type))
+        if (!TryReadTypes(type, types, out var requestedTypes, out var typeError))
         {
-            return Results.BadRequest(new { error = $"Unsupported card type '{type}'." });
+            return Results.BadRequest(new { error = typeError });
         }
 
         var cards = await repository.ListAsync(
-            type,
+            requestedTypes,
             mediaType ?? media_type,
             search,
+            IsTruthy(exclude_contained_media),
             sort ?? "created_at",
             order ?? "desc");
 
@@ -186,14 +232,17 @@ public static class CardEndpoints
         PreviewService previewService,
         long id)
     {
-        var deleted = await repository.DeleteAsync(id);
+        var deletedCardIds = await repository.DeleteAsync(id);
 
-        if (!deleted)
+        if (deletedCardIds.Count == 0)
         {
             return Results.NotFound(new { error = "Card not found." });
         }
 
-        previewService.DeleteCardFiles(id);
+        foreach (var deletedCardId in deletedCardIds)
+        {
+            previewService.DeleteCardFiles(deletedCardId);
+        }
 
         return Results.NoContent();
     }
@@ -362,5 +411,69 @@ public static class CardEndpoints
     private static string? NormalizeOptionalString(string value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static IReadOnlyList<IFormFile> ReadImageFiles(IFormCollection form)
+    {
+        var images = form.Files.GetFiles("images");
+
+        if (images.Count > 0)
+        {
+            return images;
+        }
+
+        return form.Files.ToList();
+    }
+
+    private static bool IsSupportedStaticImage(IFormFile image)
+    {
+        var extension = Path.GetExtension(image.FileName).ToLowerInvariant();
+        var contentType = image.ContentType.ToLowerInvariant();
+
+        return extension is ".jpg" or ".jpeg" or ".png" or ".webp"
+            || contentType is "image/jpeg" or "image/png" or "image/webp";
+    }
+
+    private static bool TryReadTypes(
+        string? type,
+        string? types,
+        out IReadOnlyList<string> requestedTypes,
+        out string? error)
+    {
+        requestedTypes = [];
+        error = null;
+
+        var rawTypes = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(type))
+        {
+            rawTypes.Add(type);
+        }
+
+        if (!string.IsNullOrWhiteSpace(types))
+        {
+            rawTypes.AddRange(types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        foreach (var requestedType in rawTypes)
+        {
+            if (!CardTypes.IsSupportedCardType(requestedType))
+            {
+                error = $"Unsupported card type '{requestedType}'.";
+                return false;
+            }
+        }
+
+        requestedTypes = rawTypes.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        return true;
+    }
+
+    private static bool IsTruthy(string? value)
+    {
+        return value is not null && (
+            string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase));
     }
 }

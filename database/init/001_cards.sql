@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS card_relations (
         FOREIGN KEY (to_card_id) REFERENCES cards(id)
         ON DELETE CASCADE,
     CONSTRAINT chk_card_relations_type CHECK (
-        relation_type IN ('tagged_with', 'sourced_from', 'contains', 'related_to', 'preview_for')
+        relation_type IN ('tagged_with', 'sourced_from', 'contains', 'related_to', 'preview_for', 'next_in_sequence')
     ),
     CONSTRAINT chk_card_relations_properties_json CHECK (properties IS NULL OR JSON_VALID(properties)),
     CONSTRAINT chk_card_relations_metadata_json CHECK (JSON_VALID(metadata)),

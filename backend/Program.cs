@@ -5,6 +5,7 @@ using MyApp.Api.Storage;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddScoped<CardRepository>();
+builder.Services.AddSingleton<CardDatabaseInitializer>();
 builder.Services.AddSingleton<PreviewService>();
 builder.Services.AddCors(options =>
 {
@@ -17,6 +18,11 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    await scope.ServiceProvider.GetRequiredService<CardDatabaseInitializer>().InitializeAsync();
+}
 
 app.UseCors();
 

@@ -18,6 +18,7 @@ public static class CardTypes
         "contains",
         "related_to",
         "preview_for",
+        "next_in_sequence",
     ];
 
     public static bool IsSupportedCardType(string? type) =>
