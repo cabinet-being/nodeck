@@ -31,10 +31,32 @@ export type Card = {
   containedCards?: ContainedCard[];
 };
 
+export type RelationCard = {
+  id: number;
+  type: string;
+  title: string | null;
+  previewUrl: string | null;
+};
+
+export type CardRelationEntry = {
+  id: number;
+  relationType: string;
+  direction: 'incoming' | 'outgoing';
+  relatedCard: RelationCard;
+  properties: Record<string, unknown> | null;
+};
+
+export type CardRelations = {
+  outgoingRelations: CardRelationEntry[];
+  incomingRelations: CardRelationEntry[];
+};
+
 export type CardListParams = {
   type?: string;
   types?: string[];
   mediaType?: string;
+  tags?: number[];
+  source?: number;
   search?: string;
   excludeContainedMedia?: boolean;
   sort?: 'created_at';
@@ -69,10 +91,7 @@ export const cardTypes = ['media', 'comic', 'set', 'tag', 'source'] as const;
 export const relationTypes = [
   'tagged_with',
   'sourced_from',
-  'contains',
   'related_to',
-  'preview_for',
-  'next_in_sequence',
 ] as const;
 
 export async function listCards(params: CardListParams = {}) {
@@ -81,6 +100,8 @@ export async function listCards(params: CardListParams = {}) {
   if (params.type) searchParams.set('type', params.type);
   if (params.types && params.types.length > 0) searchParams.set('types', params.types.join(','));
   if (params.mediaType) searchParams.set('media_type', params.mediaType);
+  if (params.tags && params.tags.length > 0) searchParams.set('tags', params.tags.join(','));
+  if (params.source) searchParams.set('source', String(params.source));
   if (params.search) searchParams.set('search', params.search);
   if (params.excludeContainedMedia) searchParams.set('exclude_contained_media', 'true');
   if (params.sort) searchParams.set('sort', params.sort);
@@ -95,6 +116,49 @@ export async function getCard(id: number) {
   const response = await fetch(`${apiBaseUrl}/api/cards/${id}`);
 
   return readJson<Card>(response);
+}
+
+export async function getCardRelations(id: number) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/relations`);
+
+  return readRelationJson<CardRelations>(response);
+}
+
+export async function createCardRelation(
+  cardId: number,
+  input: { toCardId: number; relationType: string; properties?: Record<string, unknown> | null }
+) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${cardId}/relations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  return readRelationJson<CardRelationEntry>(response);
+}
+
+export async function updateCardRelation(
+  relationId: number,
+  input: { properties?: Record<string, unknown> | null }
+) {
+  const response = await fetch(`${apiBaseUrl}/api/card-relations/${relationId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  return readRelationJson<CardRelationEntry>(response);
+}
+
+export async function deleteCardRelation(relationId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/card-relations/${relationId}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error ?? 'Request failed.');
+  }
 }
 
 export async function createCard(input: CreateCardInput) {
@@ -203,6 +267,16 @@ async function readJson<T>(response: Response): Promise<T> {
   return normalizeCardData(data) as T;
 }
 
+async function readRelationJson<T>(response: Response): Promise<T> {
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? 'Request failed.');
+  }
+
+  return normalizeRelationData(data) as T;
+}
+
 function normalizeCardData(data: unknown): unknown {
   if (Array.isArray(data)) {
     return data.map(normalizeCardData);
@@ -250,6 +324,44 @@ function normalizeCardData(data: unknown): unknown {
       relationType: record.RelationType,
       properties: record.Properties,
       metadata: record.Metadata,
+    };
+  }
+
+  return data;
+}
+
+function normalizeRelationData(data: unknown): unknown {
+  if (Array.isArray(data)) {
+    return data.map(normalizeRelationData);
+  }
+
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+
+  const record = data as Record<string, unknown>;
+
+  if ('OutgoingRelations' in record && 'IncomingRelations' in record) {
+    return {
+      outgoingRelations: normalizeRelationData(record.OutgoingRelations),
+      incomingRelations: normalizeRelationData(record.IncomingRelations),
+    };
+  }
+
+  if ('RelatedCard' in record) {
+    const relatedCard = record.RelatedCard as Record<string, unknown>;
+
+    return {
+      id: record.Id,
+      relationType: record.RelationType,
+      direction: String(record.Direction).toLowerCase() as 'incoming' | 'outgoing',
+      relatedCard: {
+        id: relatedCard.Id,
+        type: relatedCard.Type,
+        title: relatedCard.Title,
+        previewUrl: relatedCard.PreviewUrl,
+      },
+      properties: record.Properties,
     };
   }
 

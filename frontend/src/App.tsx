@@ -20,16 +20,27 @@ function getCurrentPath() {
   return window.location.pathname || '/';
 }
 
+function getCurrentUrl() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
 export function App() {
-  const [currentPath, setCurrentPath] = React.useState(getCurrentPath);
+  const [currentUrl, setCurrentUrl] = React.useState(getCurrentUrl);
 
   React.useEffect(() => {
-    const handlePopState = () => setCurrentPath(getCurrentPath());
+    const handlePopState = () => setCurrentUrl(getCurrentUrl());
 
     window.addEventListener('popstate', handlePopState);
 
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  const currentPath = React.useMemo(() => {
+    return new URL(currentUrl, window.location.origin).pathname || '/';
+  }, [currentUrl]);
+  const currentSearch = React.useMemo(() => {
+    return new URL(currentUrl, window.location.origin).search;
+  }, [currentUrl]);
 
   const navigate = React.useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
@@ -52,18 +63,20 @@ export function App() {
 
     event.preventDefault();
 
-    if (nextUrl.pathname !== currentPath) {
-      window.history.pushState(null, '', nextUrl.pathname);
-      setCurrentPath(nextUrl.pathname);
+    const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
+
+    if (nextPath !== currentUrl) {
+      window.history.pushState(null, '', nextPath);
+      setCurrentUrl(nextPath);
     }
-  }, [currentPath]);
+  }, [currentUrl]);
 
   const navigateTo = React.useCallback((path: string) => {
-    if (path !== currentPath) {
+    if (path !== currentUrl) {
       window.history.pushState(null, '', path);
-      setCurrentPath(path);
+      setCurrentUrl(path);
     }
-  }, [currentPath]);
+  }, [currentUrl]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -86,6 +99,7 @@ export function App() {
           <main className="min-w-0 flex-1">
             <RouteContent
               currentPath={currentPath}
+              currentSearch={currentSearch}
               onNavigate={navigate}
               onNavigateTo={navigateTo}
             />
@@ -98,10 +112,12 @@ export function App() {
 
 function RouteContent({
   currentPath,
+  currentSearch,
   onNavigate,
   onNavigateTo,
 }: {
   currentPath: string;
+  currentSearch: string;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   onNavigateTo: (path: string) => void;
 }) {
@@ -122,7 +138,7 @@ function RouteContent({
   }
 
   if (currentPath === '/gallery') {
-    return <GalleryPage onNavigate={onNavigate} />;
+    return <GalleryPage currentSearch={currentSearch} onNavigate={onNavigate} onNavigateTo={onNavigateTo} />;
   }
 
   if (currentPath === '/favorites') {
@@ -158,7 +174,7 @@ function RouteContent({
   const cardMatch = currentPath.match(/^\/cards\/(\d+)$/);
 
   if (cardMatch) {
-    return <CardDetailsPage cardId={Number(cardMatch[1])} />;
+    return <CardDetailsPage cardId={Number(cardMatch[1])} onNavigate={onNavigate} />;
   }
 
   const deckMatch = currentPath.match(/^\/decks\/(\d+)$/);

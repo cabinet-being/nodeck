@@ -413,11 +413,13 @@ export function keyValueRowsFromRecord(record: Record<string, unknown> | null | 
 }
 
 export function relationRowsFromCard(card: Card) {
-  return (card.outgoingRelations ?? []).map<RelationRow>((relation) => ({
-    toCardId: String(relation.toCardId),
-    relationType: relation.relationType,
-    properties: keyValueRowsFromRecord(relation.properties),
-  }));
+  return (card.outgoingRelations ?? [])
+    .filter((relation) => relationTypes.includes(relation.relationType as (typeof relationTypes)[number]))
+    .map<RelationRow>((relation) => ({
+      toCardId: String(relation.toCardId),
+      relationType: relation.relationType,
+      properties: keyValueRowsFromRecord(relation.properties),
+    }));
 }
 
 function updateRelation(
