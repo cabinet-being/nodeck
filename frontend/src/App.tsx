@@ -6,6 +6,10 @@ import { Input } from '@/components/ui/input';
 import { CardDetailsPage } from '@/pages/card-details-page';
 import { CardsPage } from '@/pages/cards-page';
 import { CreateCardPage } from '@/pages/create-card-page';
+import { CreateDeckPage } from '@/pages/create-deck-page';
+import { DeckDetailsPage } from '@/pages/deck-details-page';
+import { DecksPage } from '@/pages/decks-page';
+import { EditDeckPage } from '@/pages/edit-deck-page';
 import { EditCardPage } from '@/pages/edit-card-page';
 import { GalleryPage } from '@/pages/gallery-page';
 import { SourcesPage } from '@/pages/sources-page';
@@ -104,8 +108,16 @@ function RouteContent({
     return <CreateCardPage onCreated={onNavigateTo} />;
   }
 
+  if (currentPath === '/decks/new') {
+    return <CreateDeckPage onCreated={onNavigateTo} onCancel={() => onNavigateTo('/decks')} />;
+  }
+
   if (currentPath === '/cards') {
     return <CardsPage onNavigate={onNavigate} />;
+  }
+
+  if (currentPath === '/decks') {
+    return <DecksPage onNavigate={onNavigate} />;
   }
 
   if (currentPath === '/gallery') {
@@ -126,10 +138,28 @@ function RouteContent({
     return <EditCardPage cardId={Number(editCardMatch[1])} onSaved={onNavigateTo} />;
   }
 
+  const editDeckMatch = currentPath.match(/^\/decks\/(\d+)\/edit$/);
+
+  if (editDeckMatch) {
+    return (
+      <EditDeckPage
+        deckId={Number(editDeckMatch[1])}
+        onSaved={onNavigateTo}
+        onCancel={() => onNavigateTo(`/decks/${editDeckMatch[1]}`)}
+      />
+    );
+  }
+
   const cardMatch = currentPath.match(/^\/cards\/(\d+)$/);
 
   if (cardMatch) {
     return <CardDetailsPage cardId={Number(cardMatch[1])} />;
+  }
+
+  const deckMatch = currentPath.match(/^\/decks\/(\d+)$/);
+
+  if (deckMatch) {
+    return <DeckDetailsPage deckId={Number(deckMatch[1])} onNavigate={onNavigate} />;
   }
 
   return null;
