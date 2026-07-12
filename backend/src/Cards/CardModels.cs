@@ -88,7 +88,7 @@ internal sealed record DbCard(
     string? Preview,
     string? Properties,
     string Metadata,
-    bool IsFavorite);
+    long IsFavorite);
 
 internal sealed record DbCardRelation(
     long Id,
@@ -110,7 +110,7 @@ internal sealed class ContainedCardRow
 
     public string Metadata { get; init; } = "";
 
-    public bool IsFavorite { get; init; }
+    public long IsFavorite { get; init; }
 
     public int Position { get; init; }
 }
