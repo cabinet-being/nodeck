@@ -10,6 +10,7 @@ public sealed class PreviewServiceTests
     [InlineData("cards/1/original.jpg", "image/jpeg")]
     [InlineData("cards/1/original.png", "image/png")]
     [InlineData("cards/1/original.webp", "image/webp")]
+    [InlineData("cards/1/original.gif", "image/gif")]
     [InlineData("cache/cards/1/preview.gif", "image/gif")]
     [InlineData("cards/1/original.mp4", "video/mp4")]
     [InlineData("cards/1/original.webm", "video/webm")]
@@ -18,6 +19,25 @@ public sealed class PreviewServiceTests
         var service = CreateService(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
 
         Assert.Equal(expectedContentType, service.GetContentType(path));
+    }
+
+    [Fact]
+    public void CardFileAssetsPreservesGifFrameCount()
+    {
+        var assets = new CardFileAssets(
+            "cards/1/original.gif",
+            "cache/cards/1/preview.gif",
+            "gif",
+            "image/gif",
+            "animation.gif",
+            1024,
+            320,
+            240,
+            1.25,
+            8);
+
+        Assert.Equal("gif", assets.MediaType);
+        Assert.Equal(8, assets.FrameCount);
     }
 
     [Fact]
