@@ -171,6 +171,7 @@ public sealed class CardRepository
         IReadOnlyList<string> types,
         string? mediaType,
         string? search,
+        bool excludeContainedMedia,
         string sort,
         string order)
     {
@@ -196,6 +197,18 @@ public sealed class CardRepository
             conditions.Add("(CAST(id AS CHAR) = @Search OR title LIKE @SearchLike)");
             parameters.Add("Search", search);
             parameters.Add("SearchLike", $"%{search}%");
+        }
+
+        if (excludeContainedMedia)
+        {
+            conditions.Add("""
+                NOT EXISTS (
+                    SELECT 1
+                    FROM card_relations r
+                    WHERE r.to_card_id = cards.id
+                      AND r.relation_type = 'contains'
+                )
+                """);
         }
 
         var where = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : "";

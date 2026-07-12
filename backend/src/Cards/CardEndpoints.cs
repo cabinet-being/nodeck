@@ -134,6 +134,7 @@ public static class CardEndpoints
         string? media_type,
         string? types,
         string? search,
+        string? exclude_contained_media,
         string? sort,
         string? order)
     {
@@ -146,6 +147,7 @@ public static class CardEndpoints
             requestedTypes,
             mediaType ?? media_type,
             search,
+            IsTruthy(exclude_contained_media),
             sort ?? "created_at",
             order ?? "desc");
 
@@ -462,5 +464,13 @@ public static class CardEndpoints
         requestedTypes = rawTypes.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         return true;
+    }
+
+    private static bool IsTruthy(string? value)
+    {
+        return value is not null && (
+            string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase));
     }
 }
