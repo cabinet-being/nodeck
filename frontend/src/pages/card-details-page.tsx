@@ -3,6 +3,11 @@ import * as React from 'react';
 import { getCard, resolveApiUrl, type Card, type CardRelation } from '@/api/cards';
 import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  useVisualCardView,
+  VisualCardViewToggle,
+  VisualCardWall,
+} from '@/components/visual-card-wall';
 
 export function CardDetailsPage({ cardId }: { cardId: number }) {
   const [card, setCard] = React.useState<Card | null>(null);
@@ -89,27 +94,15 @@ function ComicDetails({ card }: { card: Card }) {
 
 function SetDetails({ card }: { card: Card }) {
   const containedCards = card.containedCards ?? [];
+  const [view, setView] = useVisualCardView('nodeck.setView');
 
   return (
     <section className="grid gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-        {containedCards.map((item) => (
-          <a
-            key={item.id}
-            href={`/cards/${item.id}`}
-            className="bg-muted overflow-hidden rounded-lg border"
-          >
-            {item.previewUrl ? (
-              <img
-                src={resolveApiUrl(item.previewUrl)}
-                alt={item.title ?? ''}
-                className="aspect-square w-full object-cover"
-                loading="lazy"
-              />
-            ) : null}
-            <div className="text-muted-foreground px-2 py-1 text-xs">#{item.id}</div>
-          </a>
-        ))}
+      <div className="grid gap-4">
+        <div className="flex justify-end">
+          <VisualCardViewToggle view={view} onChange={setView} />
+        </div>
+        <VisualCardWall cards={containedCards} view={view} />
       </div>
 
       <CardAside card={card} />
