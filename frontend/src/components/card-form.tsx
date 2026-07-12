@@ -101,14 +101,17 @@ export function CardForm({
 
           {value.type === 'media' ? (
             <label className="grid gap-2 text-sm font-medium">
-              Image
+              Media file
               <Input
                 type="file"
-                accept="image/png,image/jpeg,image/webp"
+                accept="image/png,image/jpeg,image/webp,video/mp4,video/webm"
                 onChange={(event) =>
                   onValueChange({ ...value, image: event.target.files?.[0] })
                 }
               />
+              {value.image ? (
+                <span className="text-muted-foreground text-xs">{value.image.name}</span>
+              ) : null}
             </label>
           ) : null}
 

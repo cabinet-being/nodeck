@@ -116,9 +116,38 @@ export function EditCardPage({
         typeLocked
         onValueChange={setValue}
         onSubmit={handleSubmit}
-        incomingRelations={<IncomingRelations card={card} />}
+        incomingRelations={
+          <>
+            {card.type === 'media' ? <CurrentMediaInfo card={card} /> : null}
+            <IncomingRelations card={card} />
+          </>
+        }
       />
     </section>
+  );
+}
+
+function CurrentMediaInfo({ card }: { card: Card }) {
+  return (
+    <UiCard>
+      <CardHeader>
+        <CardTitle>Current media</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-2 text-sm">
+        <div className="flex flex-wrap gap-2">
+          <Badge variant="outline">{String(card.metadata.media_type ?? 'unknown')}</Badge>
+          <span className="text-muted-foreground">
+            {String(card.metadata.original_file_name ?? 'No file name')}
+          </span>
+        </div>
+        <div className="text-muted-foreground">
+          {String(card.metadata.mime_type ?? 'unknown MIME')}
+          {typeof card.metadata.file_size === 'number'
+            ? ` - ${Math.round(card.metadata.file_size / 1024)} KB`
+            : ''}
+        </div>
+      </CardContent>
+    </UiCard>
   );
 }
 

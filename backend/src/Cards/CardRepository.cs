@@ -238,86 +238,121 @@ public sealed class CardRepository
         return rows.Select(ToSummary).ToList();
     }
 
-    public async Task<CardDetails?> UpdateAsync(long id, UpdateCardData data)
+    public async Task<CardDetails?> UpdateAsync(
+        long id,
+        UpdateCardData data,
+        Func<Task>? promoteAssets = null,
+        Action? rollbackAssets = null,
+        Action? cleanupPromotedAssets = null)
     {
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
+        var committed = false;
 
-        var card = await connection.QuerySingleOrDefaultAsync<DbCard>(
-            """
-            SELECT
-                id AS Id,
-                type AS Type,
-                title AS Title,
-                preview AS Preview,
-                properties AS Properties,
-                metadata AS Metadata
-            FROM cards
-            WHERE id = @Id
-            FOR UPDATE;
-            """,
-            new { Id = id },
-            transaction);
-
-        if (card is null)
+        try
         {
-            await transaction.RollbackAsync();
-            return null;
-        }
+            var card = await connection.QuerySingleOrDefaultAsync<DbCard>(
+                """
+                SELECT
+                    id AS Id,
+                    type AS Type,
+                    title AS Title,
+                    preview AS Preview,
+                    properties AS Properties,
+                    metadata AS Metadata
+                FROM cards
+                WHERE id = @Id
+                FOR UPDATE;
+                """,
+                new { Id = id },
+                transaction);
 
-        var metadata = ParseRequiredJsonObject(card.Metadata);
-        var previewPath = card.Preview;
-
-        if (data.Assets is not null)
-        {
-            ApplyAssetMetadata(metadata, data.Assets);
-            previewPath = data.Assets.PreviewPath;
-        }
-
-        await connection.ExecuteAsync(
-            """
-            UPDATE cards
-            SET title = @Title,
-                preview = @Preview,
-                properties = @Properties,
-                metadata = @Metadata
-            WHERE id = @Id;
-            """,
-            new
+            if (card is null)
             {
-                Id = id,
-                data.Title,
-                Preview = previewPath,
-                Properties = data.PropertiesJson,
-                Metadata = metadata.ToJsonString(),
-            },
-            transaction);
+                await transaction.RollbackAsync();
+                rollbackAssets?.Invoke();
+                return null;
+            }
 
-        await connection.ExecuteAsync(
-            """
-            DELETE FROM card_relations
-            WHERE from_card_id = @Id;
-            """,
-            new { Id = id },
-            transaction);
+            var metadata = ParseRequiredJsonObject(card.Metadata);
+            var previewPath = card.Preview;
 
-        await InsertRelationsAsync(connection, transaction, id, data.Relations);
+            if (data.Assets is not null)
+            {
+                ApplyAssetMetadata(metadata, data.Assets);
+                previewPath = data.Assets.PreviewPath;
+            }
 
-        var outgoingRelations = await GetRelationsAsync(connection, "from_card_id = @Id", id, transaction);
-        var incomingRelations = await GetRelationsAsync(connection, "to_card_id = @Id", id, transaction);
-        var containedCards = await GetContainedCardsAsync(connection, id, transaction);
-        var updatedCard = new DbCard(
-            id,
-            card.Type,
-            data.Title ?? card.Title,
-            previewPath,
-            data.PropertiesJson ?? card.Properties,
-            metadata.ToJsonString());
+            await connection.ExecuteAsync(
+                """
+                UPDATE cards
+                SET title = @Title,
+                    preview = @Preview,
+                    properties = @Properties,
+                    metadata = @Metadata
+                WHERE id = @Id;
+                """,
+                new
+                {
+                    Id = id,
+                    data.Title,
+                    Preview = previewPath,
+                    Properties = data.PropertiesJson,
+                    Metadata = metadata.ToJsonString(),
+                },
+                transaction);
 
-        await transaction.CommitAsync();
+            await connection.ExecuteAsync(
+                """
+                DELETE FROM card_relations
+                WHERE from_card_id = @Id;
+                """,
+                new { Id = id },
+                transaction);
 
-        return ToDetails(updatedCard, outgoingRelations, incomingRelations, containedCards);
+            await InsertRelationsAsync(connection, transaction, id, data.Relations);
+
+            var outgoingRelations = await GetRelationsAsync(connection, "from_card_id = @Id", id, transaction);
+            var incomingRelations = await GetRelationsAsync(connection, "to_card_id = @Id", id, transaction);
+            var containedCards = await GetContainedCardsAsync(connection, id, transaction);
+            var updatedCard = new DbCard(
+                id,
+                card.Type,
+                data.Title ?? card.Title,
+                previewPath,
+                data.PropertiesJson ?? card.Properties,
+                metadata.ToJsonString());
+
+            if (promoteAssets is not null)
+            {
+                await promoteAssets();
+            }
+
+            await transaction.CommitAsync();
+            committed = true;
+
+            try
+            {
+                cleanupPromotedAssets?.Invoke();
+            }
+            catch
+            {
+                // A committed media replacement must remain successful even if old-file cleanup fails.
+            }
+
+            return ToDetails(updatedCard, outgoingRelations, incomingRelations, containedCards);
+        }
+        catch
+        {
+            if (!committed)
+            {
+                await transaction.RollbackAsync();
+                rollbackAssets?.Invoke();
+            }
+
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<long>> DeleteAsync(long id)
@@ -623,6 +658,15 @@ public sealed class CardRepository
         metadata["file_size"] = assets.FileSize;
         metadata["width"] = assets.Width;
         metadata["height"] = assets.Height;
+
+        if (assets.Duration is not null)
+        {
+            metadata["duration"] = assets.Duration.Value;
+        }
+        else
+        {
+            metadata.Remove("duration");
+        }
     }
 
     private static JsonNode ParseRequiredJson(string json) =>

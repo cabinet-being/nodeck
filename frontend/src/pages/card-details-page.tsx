@@ -46,10 +46,20 @@ export function CardDetailsPage({ cardId }: { cardId: number }) {
 }
 
 function MediaDetails({ card }: { card: Card }) {
+  const isVideo = card.metadata.media_type === 'video';
+
   return (
     <section className="grid min-h-full gap-4 p-6 xl:grid-cols-[1fr_24rem]">
       <div className="bg-muted flex min-h-[28rem] items-center justify-center overflow-hidden rounded-lg border">
-        {card.contentUrl ? (
+        {card.contentUrl && isVideo ? (
+          <video
+            src={resolveApiUrl(card.contentUrl)}
+            controls
+            preload="metadata"
+            className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
+          />
+        ) : null}
+        {card.contentUrl && !isVideo ? (
           <img
             src={resolveApiUrl(card.contentUrl)}
             alt={card.title ?? ''}
