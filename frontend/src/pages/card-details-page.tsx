@@ -97,8 +97,8 @@ function SetDetails({ card }: { card: Card }) {
   const [view, setView] = useVisualCardView('nodeck.setView');
 
   return (
-    <section className="grid gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <div className="grid gap-4">
+    <section className="grid gap-4 p-6 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid min-w-0 gap-4">
         <div className="flex justify-end">
           <VisualCardViewToggle view={view} onChange={setView} />
         </div>

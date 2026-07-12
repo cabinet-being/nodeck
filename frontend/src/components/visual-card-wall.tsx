@@ -69,14 +69,19 @@ export function VisualCardWall({
   return (
     <div
       className={cn(
+        'w-full max-w-full min-w-0',
         view === 'grid'
           ? cn(
-              'grid grid-cols-2 gap-3 sm:grid-cols-3',
-              density === 'compact' ? 'xl:grid-cols-4' : 'md:grid-cols-4 xl:grid-cols-6'
+              'grid grid-cols-2 gap-3',
+              density === 'compact'
+                ? 'grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2'
+                : 'sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6'
             )
           : cn(
-              'columns-2 gap-3 sm:columns-3',
-              density === 'compact' ? 'xl:columns-4' : 'md:columns-4 xl:columns-6'
+              'columns-2 gap-3',
+              density === 'compact'
+                ? 'columns-2 sm:columns-2 md:columns-2 lg:columns-2 xl:columns-2'
+                : 'sm:columns-3 md:columns-4 xl:columns-6'
             )
       )}
     >
@@ -86,7 +91,7 @@ export function VisualCardWall({
           href={`/cards/${card.id}`}
           onClick={onNavigate}
           className={cn(
-            'bg-muted overflow-hidden rounded-lg border',
+            'bg-muted w-full max-w-full min-w-0 overflow-hidden rounded-lg border',
             view === 'grid' ? 'block aspect-square' : 'mb-3 block break-inside-avoid'
           )}
         >
