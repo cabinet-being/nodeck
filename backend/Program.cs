@@ -1,11 +1,14 @@
 using MySqlConnector;
 using MyApp.Api.Cards;
+using MyApp.Api.Decks;
 using MyApp.Api.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddScoped<CardRepository>();
+builder.Services.AddScoped<DeckRepository>();
 builder.Services.AddSingleton<CardDatabaseInitializer>();
+builder.Services.AddSingleton<DeckDatabaseInitializer>();
 builder.Services.AddSingleton<PreviewService>();
 builder.Services.AddCors(options =>
 {
@@ -22,6 +25,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     await scope.ServiceProvider.GetRequiredService<CardDatabaseInitializer>().InitializeAsync();
+    await scope.ServiceProvider.GetRequiredService<DeckDatabaseInitializer>().InitializeAsync();
 }
 
 app.UseCors();
@@ -44,5 +48,6 @@ app.MapGet("/health/mysql", async (IConfiguration configuration) =>
 });
 
 app.MapCardEndpoints();
+app.MapDeckEndpoints();
 
 app.Run();
