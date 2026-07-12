@@ -61,5 +61,22 @@ public sealed class DeckDatabaseInitializer
                 INDEX idx_deck_cards_card_id (card_id)
             );
             """);
+
+        var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+        await connection.ExecuteAsync(
+            """
+            INSERT INTO decks (title, properties, metadata, system_key)
+            VALUES (
+                'Favorites',
+                NULL,
+                JSON_OBJECT('created_at', @Now, 'updated_at', @Now),
+                'favorites'
+            )
+            ON DUPLICATE KEY UPDATE
+                title = 'Favorites',
+                system_key = 'favorites';
+            """,
+            new { Now = now });
     }
 }

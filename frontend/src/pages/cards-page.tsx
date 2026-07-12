@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 
 import { cardTypes, deleteCard, listCards, type Card } from '@/api/cards';
+import { FavoriteToggle } from '@/components/favorite-toggle';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
@@ -103,6 +104,11 @@ export function CardsPage({
                 <td className="px-3 py-2">{String(card.metadata.created_at ?? '')}</td>
                 <td className="px-3 py-2">
                   <div className="flex justify-end gap-1">
+                    <FavoriteToggle
+                      cardId={card.id}
+                      isFavorite={card.isFavorite}
+                      onChange={(isFavorite) => updateFavorite(card.id, isFavorite)}
+                    />
                     <a
                       href={`/cards/${card.id}`}
                       onClick={onNavigate}
@@ -196,5 +202,11 @@ export function CardsPage({
     } finally {
       setIsDeleting(false);
     }
+  }
+
+  function updateFavorite(cardId: number, isFavorite: boolean) {
+    setCards((current) =>
+      current.map((card) => (card.id === cardId ? { ...card, isFavorite } : card))
+    );
   }
 }

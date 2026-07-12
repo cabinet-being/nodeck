@@ -78,3 +78,19 @@ CREATE TABLE IF NOT EXISTS deck_cards (
     INDEX idx_deck_cards_deck_id (deck_id),
     INDEX idx_deck_cards_card_id (card_id)
 );
+
+INSERT INTO decks (title, properties, metadata, system_key)
+VALUES (
+    'Favorites',
+    NULL,
+    JSON_OBJECT(
+        'created_at',
+        DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ'),
+        'updated_at',
+        DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ')
+    ),
+    'favorites'
+)
+ON DUPLICATE KEY UPDATE
+    title = 'Favorites',
+    system_key = 'favorites';

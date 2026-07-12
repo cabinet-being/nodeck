@@ -41,13 +41,15 @@ export function DeckDetailsPage({
             <h1 className="text-2xl font-semibold">{deck.title}</h1>
             <div className="text-muted-foreground text-sm">Deck #{deck.id}</div>
           </div>
-          <a
-            href={`/decks/${deck.id}/edit`}
-            onClick={onNavigate}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            Edit deck
-          </a>
+          {deck.systemKey === 'favorites' ? null : (
+            <a
+              href={`/decks/${deck.id}/edit`}
+              onClick={onNavigate}
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              Edit deck
+            </a>
+          )}
         </div>
 
         <div className="grid gap-3">

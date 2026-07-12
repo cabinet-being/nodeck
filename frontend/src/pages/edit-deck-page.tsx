@@ -128,6 +128,7 @@ function createFormValue(deck: DeckDetails, cards: Card[]): DeckFormValue {
         contentUrl: deckCard.contentUrl,
         properties: deckCard.properties,
         metadata: deckCard.metadata,
+        isFavorite: false,
       },
       properties: keyValueRowsFromRecord(deckCard.membershipProperties),
     })),

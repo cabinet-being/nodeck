@@ -11,6 +11,7 @@ import { DeckDetailsPage } from '@/pages/deck-details-page';
 import { DecksPage } from '@/pages/decks-page';
 import { EditDeckPage } from '@/pages/edit-deck-page';
 import { EditCardPage } from '@/pages/edit-card-page';
+import { FavoritesPage } from '@/pages/favorites-page';
 import { GalleryPage } from '@/pages/gallery-page';
 import { SourcesPage } from '@/pages/sources-page';
 import { TagsPage } from '@/pages/tags-page';
@@ -122,6 +123,10 @@ function RouteContent({
 
   if (currentPath === '/gallery') {
     return <GalleryPage onNavigate={onNavigate} />;
+  }
+
+  if (currentPath === '/favorites') {
+    return <FavoritesPage onNavigate={onNavigate} />;
   }
 
   if (currentPath === '/tags') {

@@ -81,8 +81,15 @@ public static class DeckEndpoints
 
     private static async Task<IResult> DeleteDeckAsync(DeckRepository repository, long id)
     {
-        var deleted = await repository.DeleteAsync(id);
+        try
+        {
+            var deleted = await repository.DeleteAsync(id);
 
-        return deleted ? Results.NoContent() : Results.NotFound(new { error = "Deck not found." });
+            return deleted ? Results.NoContent() : Results.NotFound(new { error = "Deck not found." });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
     }
 }

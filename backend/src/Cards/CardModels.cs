@@ -9,7 +9,8 @@ public sealed record CardSummary(
     string? PreviewUrl,
     string? ContentUrl,
     JsonNode? Properties,
-    JsonNode Metadata);
+    JsonNode Metadata,
+    bool IsFavorite);
 
 public sealed record CardDetails(
     long Id,
@@ -19,6 +20,7 @@ public sealed record CardDetails(
     string? ContentUrl,
     JsonNode? Properties,
     JsonNode Metadata,
+    bool IsFavorite,
     IReadOnlyList<CardRelationResponse> OutgoingRelations,
     IReadOnlyList<CardRelationResponse> IncomingRelations,
     IReadOnlyList<ContainedCardResponse> ContainedCards);
@@ -29,6 +31,7 @@ public sealed record ContainedCardResponse(
     string? Title,
     string? PreviewUrl,
     string? ContentUrl,
+    bool IsFavorite,
     int Position);
 
 public sealed record CardRelationResponse(
@@ -84,7 +87,8 @@ internal sealed record DbCard(
     string? Title,
     string? Preview,
     string? Properties,
-    string Metadata);
+    string Metadata,
+    long IsFavorite);
 
 internal sealed record DbCardRelation(
     long Id,
@@ -105,6 +109,8 @@ internal sealed class ContainedCardRow
     public string? Preview { get; init; }
 
     public string Metadata { get; init; } = "";
+
+    public long IsFavorite { get; init; }
 
     public int Position { get; init; }
 }

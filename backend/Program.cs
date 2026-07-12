@@ -49,5 +49,6 @@ app.MapGet("/health/mysql", async (IConfiguration configuration) =>
 
 app.MapCardEndpoints();
 app.MapDeckEndpoints();
+app.MapFavoriteEndpoints();
 
 app.Run();

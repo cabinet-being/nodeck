@@ -92,23 +92,27 @@ export function DecksPage({
                     >
                       <Eye className="size-4" />
                     </a>
-                    <a
-                      href={`/decks/${deck.id}/edit`}
-                      onClick={onNavigate}
-                      className={buttonVariants({ variant: 'ghost', size: 'icon' })}
-                      aria-label={`Edit deck ${deck.id}`}
-                    >
-                      <Pencil className="size-4" />
-                    </a>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete deck ${deck.id}`}
-                      onClick={() => setDeckToDelete(deck)}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
+                    {deck.systemKey === 'favorites' ? null : (
+                      <>
+                        <a
+                          href={`/decks/${deck.id}/edit`}
+                          onClick={onNavigate}
+                          className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+                          aria-label={`Edit deck ${deck.id}`}
+                        >
+                          <Pencil className="size-4" />
+                        </a>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Delete deck ${deck.id}`}
+                          onClick={() => setDeckToDelete(deck)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>

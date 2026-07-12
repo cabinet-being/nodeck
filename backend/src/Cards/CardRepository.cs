@@ -137,6 +137,7 @@ public sealed class CardRepository
                     null,
                     parentPreviewPath is null ? null : $"/api/cards/{mediaCardId}/preview",
                     $"/api/cards/{mediaCardId}/content",
+                    false,
                     index))
                 .ToList();
 
@@ -150,6 +151,7 @@ public sealed class CardRepository
                 null,
                 ParseOptionalJson(data.PropertiesJson),
                 data.Metadata,
+                false,
                 relations,
                 [],
                 containedCards);
@@ -227,7 +229,8 @@ public sealed class CardRepository
                 title AS {nameof(DbCard.Title)},
                 preview AS {nameof(DbCard.Preview)},
                 properties AS {nameof(DbCard.Properties)},
-                metadata AS {nameof(DbCard.Metadata)}
+                metadata AS {nameof(DbCard.Metadata)},
+                {FavoriteSelectSql("cards.id")} AS {nameof(DbCard.IsFavorite)}
             FROM cards
             {where}
             ORDER BY {orderColumn} {orderDirection}, id {orderDirection}
@@ -253,14 +256,15 @@ public sealed class CardRepository
         try
         {
             var card = await connection.QuerySingleOrDefaultAsync<DbCard>(
-                """
+                $"""
                 SELECT
                     id AS Id,
                     type AS Type,
                     title AS Title,
                     preview AS Preview,
                     properties AS Properties,
-                    metadata AS Metadata
+                    metadata AS Metadata,
+                    {FavoriteSelectSql("cards.id")} AS IsFavorite
                 FROM cards
                 WHERE id = @Id
                 FOR UPDATE;
@@ -322,7 +326,8 @@ public sealed class CardRepository
                 data.Title ?? card.Title,
                 previewPath,
                 data.PropertiesJson ?? card.Properties,
-                metadata.ToJsonString());
+                metadata.ToJsonString(),
+                card.IsFavorite);
 
             if (promoteAssets is not null)
             {
@@ -362,14 +367,15 @@ public sealed class CardRepository
         await using var transaction = await connection.BeginTransactionAsync();
 
         var card = await connection.QuerySingleOrDefaultAsync<DbCard>(
-            """
+            $"""
             SELECT
                 id AS Id,
                 type AS Type,
                 title AS Title,
                 preview AS Preview,
                 properties AS Properties,
-                metadata AS Metadata
+                metadata AS Metadata,
+                FALSE AS IsFavorite
             FROM cards
             WHERE id = @Id
             FOR UPDATE;
@@ -421,14 +427,15 @@ public sealed class CardRepository
         await using var connection = new MySqlConnection(_connectionString);
 
         var card = await connection.QuerySingleOrDefaultAsync<DbCard>(
-            """
+            $"""
             SELECT
                 id AS Id,
                 type AS Type,
                 title AS Title,
                 preview AS Preview,
                 properties AS Properties,
-                metadata AS Metadata
+                metadata AS Metadata,
+                {FavoriteSelectSql("cards.id")} AS IsFavorite
             FROM cards
             WHERE id = @Id;
             """,
@@ -524,13 +531,14 @@ public sealed class CardRepository
         IDbTransaction? transaction = null)
     {
         var rows = await connection.QueryAsync<ContainedCardRow>(
-            """
+            $"""
             SELECT
                 c.id AS Id,
                 c.type AS Type,
                 c.title AS Title,
                 c.preview AS Preview,
                 c.metadata AS Metadata,
+                {FavoriteSelectSql("c.id")} AS IsFavorite,
                 CAST(JSON_UNQUOTE(JSON_EXTRACT(r.properties, '$.position')) AS SIGNED) AS Position
             FROM card_relations r
             JOIN cards c ON c.id = r.to_card_id
@@ -581,6 +589,17 @@ public sealed class CardRepository
         }
     }
 
+    private static string FavoriteSelectSql(string cardIdExpression) =>
+        $"""
+        CASE WHEN EXISTS (
+            SELECT 1
+            FROM deck_cards favorite_deck_cards
+            JOIN decks favorite_decks ON favorite_decks.id = favorite_deck_cards.deck_id
+            WHERE favorite_decks.system_key = 'favorites'
+              AND favorite_deck_cards.card_id = {cardIdExpression}
+        ) THEN 1 ELSE 0 END
+        """;
+
     private static CardSummary ToSummary(DbCard card)
     {
         var metadata = ParseRequiredJson(card.Metadata);
@@ -593,7 +612,8 @@ public sealed class CardRepository
             card.Preview is null ? null : $"/api/cards/{card.Id}/preview",
             contentPath is null ? null : $"/api/cards/{card.Id}/content",
             ParseOptionalJson(card.Properties),
-            metadata);
+            metadata,
+            card.IsFavorite != 0);
     }
 
     private static CardDetails ToDetails(
@@ -612,6 +632,7 @@ public sealed class CardRepository
             summary.ContentUrl,
             summary.Properties,
             summary.Metadata,
+            summary.IsFavorite,
             outgoingRelations,
             incomingRelations,
             containedCards);
@@ -639,6 +660,7 @@ public sealed class CardRepository
             card.Title,
             card.Preview is null ? null : $"/api/cards/{card.Id}/preview",
             contentPath is null ? null : $"/api/cards/{card.Id}/content",
+            card.IsFavorite != 0,
             card.Position);
     }
 
@@ -709,6 +731,7 @@ public sealed class CardRepository
             metadata["content_path"]?.GetValue<string>() is null ? null : $"/api/cards/{cardId}/content",
             ParseOptionalJson(propertiesJson),
             metadata,
+            false,
             outgoingRelations,
             [],
             []);
