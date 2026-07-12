@@ -75,7 +75,8 @@ public sealed record CardFileAssets(
     long FileSize,
     int Width,
     int Height,
-    double? Duration = null);
+    double? Duration = null,
+    int? FrameCount = null);
 
 internal sealed record DbCard(
     long Id,

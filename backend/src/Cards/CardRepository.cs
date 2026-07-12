@@ -667,6 +667,15 @@ public sealed class CardRepository
         {
             metadata.Remove("duration");
         }
+
+        if (assets.FrameCount is not null)
+        {
+            metadata["frame_count"] = assets.FrameCount.Value;
+        }
+        else
+        {
+            metadata.Remove("frame_count");
+        }
     }
 
     private static JsonNode ParseRequiredJson(string json) =>

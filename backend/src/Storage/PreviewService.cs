@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using MyApp.Api.Cards;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.Processing;
 
@@ -26,6 +27,11 @@ public sealed class PreviewService
 
     public async Task<CardFileAssets> SaveMediaAndCreatePreviewAsync(long cardId, IFormFile media)
     {
+        if (await LooksLikeGifAsync(media))
+        {
+            return await SaveGifAndCreatePreviewAsync(cardId, media);
+        }
+
         if (LooksLikeSupportedStaticImage(media))
         {
             try
@@ -94,7 +100,11 @@ public sealed class PreviewService
         {
             CardFileAssets assets;
 
-            if (LooksLikeSupportedStaticImage(media))
+            if (await LooksLikeGifAsync(media))
+            {
+                assets = await PrepareGifReplacementAsync(cardId, media, stagingCardDirectory, stagingPreviewDirectory);
+            }
+            else if (LooksLikeSupportedStaticImage(media))
             {
                 try
                 {
@@ -191,6 +201,37 @@ public sealed class PreviewService
         }
     }
 
+    private async Task<CardFileAssets> SaveGifAndCreatePreviewAsync(long cardId, IFormFile gif)
+    {
+        if (gif.Length <= 0)
+        {
+            throw new InvalidOperationException("Uploaded GIF is empty.");
+        }
+
+        var originalFileName = Path.GetFileName(gif.FileName);
+        var cardDirectory = Path.Combine(_appDataRoot, "cards", cardId.ToString());
+        var previewDirectory = Path.Combine(_appDataRoot, "cache", "cards", cardId.ToString());
+        DeleteDirectoryIfExists(cardDirectory);
+        DeleteDirectoryIfExists(previewDirectory);
+        Directory.CreateDirectory(cardDirectory);
+        Directory.CreateDirectory(previewDirectory);
+
+        try
+        {
+            return await CreateGifAssetsAsync(
+                cardId,
+                gif,
+                cardDirectory,
+                previewDirectory,
+                originalFileName);
+        }
+        catch
+        {
+            DeleteCardFiles(cardId);
+            throw;
+        }
+    }
+
     private async Task<CardFileAssets> PrepareImageReplacementAsync(
         long cardId,
         IFormFile image,
@@ -237,6 +278,25 @@ public sealed class PreviewService
             stagingCardDirectory,
             stagingPreviewDirectory,
             Path.GetFileName(video.FileName));
+    }
+
+    private async Task<CardFileAssets> PrepareGifReplacementAsync(
+        long cardId,
+        IFormFile gif,
+        string stagingCardDirectory,
+        string stagingPreviewDirectory)
+    {
+        if (gif.Length <= 0)
+        {
+            throw new InvalidOperationException("Uploaded GIF is empty.");
+        }
+
+        return await CreateGifAssetsAsync(
+            cardId,
+            gif,
+            stagingCardDirectory,
+            stagingPreviewDirectory,
+            Path.GetFileName(gif.FileName));
     }
 
     private async Task<CardFileAssets> CreateImagePreviewAsync(
@@ -324,6 +384,81 @@ public sealed class PreviewService
             probe.Width,
             probe.Height,
             probe.Duration);
+    }
+
+    private async Task<CardFileAssets> CreateGifAssetsAsync(
+        long cardId,
+        IFormFile gif,
+        string cardDirectory,
+        string previewDirectory,
+        string originalFileName)
+    {
+        var temporaryUploadPath = Path.Combine(cardDirectory, "upload.gif");
+
+        await SaveUploadedFileAsync(gif, temporaryUploadPath);
+
+        var metadata = await ReadGifMetadataAsync(temporaryUploadPath);
+        var relativeContentPath = BuildContentPath(cardId, ".gif");
+        var relativePreviewPath = BuildPreviewPath(cardId, ".gif");
+        var originalPath = Path.Combine(cardDirectory, "original.gif");
+        var previewPath = Path.Combine(previewDirectory, "preview.gif");
+
+        File.Move(temporaryUploadPath, originalPath, overwrite: true);
+        await GenerateGifPreviewAsync(originalPath, previewPath, metadata.Duration);
+
+        var fileInfo = new FileInfo(originalPath);
+
+        return new CardFileAssets(
+            relativeContentPath,
+            relativePreviewPath,
+            "gif",
+            "image/gif",
+            originalFileName,
+            fileInfo.Length,
+            metadata.Width,
+            metadata.Height,
+            metadata.Duration,
+            metadata.FrameCount);
+    }
+
+    private async Task<GifProbeResult> ReadGifMetadataAsync(string gifPath)
+    {
+        try
+        {
+            using var loadedImage = await Image.LoadAsync(gifPath);
+            var format = loadedImage.Metadata.DecodedImageFormat;
+
+            if (!string.Equals(format?.DefaultMimeType, "image/gif", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Uploaded file is not a valid GIF.");
+            }
+
+            var duration = 0.0;
+
+            foreach (var frame in loadedImage.Frames)
+            {
+                var frameDelay = frame.Metadata.GetGifMetadata().FrameDelay;
+
+                if (frameDelay > 0)
+                {
+                    duration += frameDelay / 100.0;
+                }
+            }
+
+            return new GifProbeResult(
+                loadedImage.Width,
+                loadedImage.Height,
+                loadedImage.Frames.Count,
+                duration);
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException("Uploaded GIF could not be read.", exception);
+        }
     }
 
     private async Task<VideoProbeResult> ProbeVideoAsync(string videoPath)
@@ -436,6 +571,69 @@ public sealed class PreviewService
         }
     }
 
+    private async Task GenerateGifPreviewAsync(string originalPath, string previewPath, double duration)
+    {
+        var previewDuration = Math.Min(duration, 3.0);
+        var palettePath = Path.Combine(Path.GetDirectoryName(previewPath)!, "palette.png");
+        var scaleFilter = $"scale='if(gte(iw,ih),min({MaxPreviewDimension},iw),-2)':'if(gte(ih,iw),min({MaxPreviewDimension},ih),-2)':flags=lanczos";
+        var durationArguments = previewDuration > 0
+            ? new[] { "-t", previewDuration.ToString("0.###", CultureInfo.InvariantCulture) }
+            : Array.Empty<string>();
+
+        var paletteArguments = new List<string>
+        {
+            "-y",
+        };
+        paletteArguments.AddRange(durationArguments);
+        paletteArguments.AddRange([
+            "-i",
+            originalPath,
+            "-vf",
+            $"{scaleFilter},palettegen",
+            palettePath,
+        ]);
+
+        var palette = await RunProcessAsync("ffmpeg", paletteArguments);
+
+        if (palette.ExitCode != 0)
+        {
+            throw new InvalidOperationException("Failed to generate GIF preview palette.");
+        }
+
+        ProcessResult preview;
+
+        try
+        {
+            var previewArguments = new List<string>
+            {
+                "-y",
+            };
+            previewArguments.AddRange(durationArguments);
+            previewArguments.AddRange([
+                "-i",
+                originalPath,
+                "-i",
+                palettePath,
+                "-filter_complex",
+                $"{scaleFilter}[x];[x][1:v]paletteuse",
+                "-loop",
+                "0",
+                previewPath,
+            ]);
+
+            preview = await RunProcessAsync("ffmpeg", previewArguments);
+        }
+        finally
+        {
+            File.Delete(palettePath);
+        }
+
+        if (preview.ExitCode != 0 || !File.Exists(previewPath))
+        {
+            throw new InvalidOperationException("Failed to generate compressed GIF preview.");
+        }
+    }
+
     private async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)
     {
         var startInfo = new ProcessStartInfo
@@ -517,6 +715,24 @@ public sealed class PreviewService
             || contentType is "image/jpeg" or "image/png" or "image/webp";
     }
 
+    private static async Task<bool> LooksLikeGifAsync(IFormFile file)
+    {
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        var contentType = file.ContentType.ToLowerInvariant();
+
+        if (extension == ".gif" || contentType == "image/gif")
+        {
+            return true;
+        }
+
+        var header = new byte[6];
+        await using var stream = file.OpenReadStream();
+        var bytesRead = await stream.ReadAsync(header.AsMemory(0, header.Length));
+
+        return bytesRead == header.Length
+            && (header.SequenceEqual("GIF87a"u8.ToArray()) || header.SequenceEqual("GIF89a"u8.ToArray()));
+    }
+
     private static string GetSafeImageExtension(string originalFileName, string? contentType)
     {
         var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
@@ -578,6 +794,8 @@ public sealed class PreviewService
     }
 
     private sealed record VideoProbeResult(string MimeType, int Width, int Height, double Duration);
+
+    private sealed record GifProbeResult(int Width, int Height, int FrameCount, double Duration);
 
     private sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
 }
