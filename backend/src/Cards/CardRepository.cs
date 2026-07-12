@@ -42,8 +42,14 @@ public sealed class CardRepository
             await InsertRelationsAsync(connection, transaction, cardId, data.Relations);
             await transaction.CommitAsync();
 
-            return await GetByIdAsync(cardId)
-                ?? throw new InvalidOperationException("Created card could not be loaded.");
+            return BuildCreatedCardDetails(
+                cardId,
+                data.Type,
+                data.Title,
+                previewPath,
+                metadata,
+                data.PropertiesJson,
+                data.Relations);
         }
         catch
         {
@@ -123,8 +129,30 @@ public sealed class CardRepository
             await InsertRelationsAsync(connection, transaction, parentId, data.Relations);
             await transaction.CommitAsync();
 
-            return await GetByIdAsync(parentId)
-                ?? throw new InvalidOperationException("Created card could not be loaded.");
+            var containedCards = createdCardIds
+                .Skip(1)
+                .Select((mediaCardId, index) => new ContainedCardResponse(
+                    mediaCardId,
+                    "media",
+                    null,
+                    parentPreviewPath is null ? null : $"/api/cards/{mediaCardId}/preview",
+                    $"/api/cards/{mediaCardId}/content",
+                    index))
+                .ToList();
+
+            var relations = BuildCollectionRelations(parentId, createdCardIds, data);
+
+            return new CardDetails(
+                parentId,
+                data.Type,
+                data.Title,
+                parentPreviewPath is null ? null : $"/api/cards/{parentId}/preview",
+                null,
+                ParseOptionalJson(data.PropertiesJson),
+                data.Metadata,
+                relations,
+                [],
+                containedCards);
         }
         catch
         {
@@ -262,10 +290,21 @@ public sealed class CardRepository
             transaction);
 
         await InsertRelationsAsync(connection, transaction, id, data.Relations);
+
+        var outgoingRelations = await GetRelationsAsync(connection, "from_card_id = @Id", id, transaction);
+        var incomingRelations = await GetRelationsAsync(connection, "to_card_id = @Id", id, transaction);
+        var containedCards = await GetContainedCardsAsync(connection, id, transaction);
+        var updatedCard = new DbCard(
+            id,
+            card.Type,
+            data.Title ?? card.Title,
+            previewPath,
+            data.PropertiesJson ?? card.Properties,
+            metadata.ToJsonString());
+
         await transaction.CommitAsync();
 
-        return await GetByIdAsync(id)
-            ?? throw new InvalidOperationException("Updated card could not be loaded.");
+        return ToDetails(updatedCard, outgoingRelations, incomingRelations, containedCards);
     }
 
     public async Task<bool> DeleteAsync(long id)
@@ -362,7 +401,8 @@ public sealed class CardRepository
     private static async Task<IReadOnlyList<CardRelationResponse>> GetRelationsAsync(
         IDbConnection connection,
         string condition,
-        long id)
+        long id,
+        IDbTransaction? transaction = null)
     {
         var rows = await connection.QueryAsync<DbCardRelation>(
             $"""
@@ -377,14 +417,16 @@ public sealed class CardRepository
             WHERE {condition}
             ORDER BY id ASC;
             """,
-            new { Id = id });
+            new { Id = id },
+            transaction);
 
         return rows.Select(ToRelation).ToList();
     }
 
     private static async Task<IReadOnlyList<ContainedCardResponse>> GetContainedCardsAsync(
         IDbConnection connection,
-        long id)
+        long id,
+        IDbTransaction? transaction = null)
     {
         var rows = await connection.QueryAsync<ContainedCardRow>(
             """
@@ -401,7 +443,8 @@ public sealed class CardRepository
               AND r.relation_type = 'contains'
             ORDER BY Position ASC, r.id ASC;
             """,
-            new { Id = id });
+            new { Id = id },
+            transaction);
 
         return rows.Select(ToContainedCard).ToList();
     }
@@ -446,7 +489,7 @@ public sealed class CardRepository
     private static CardSummary ToSummary(DbCard card)
     {
         var metadata = ParseRequiredJson(card.Metadata);
-        var contentPath = metadata["content_path"]?.GetValue<string>();
+        var contentPath = GetMetadataString(metadata, "content_path");
 
         return new CardSummary(
             card.Id,
@@ -493,7 +536,7 @@ public sealed class CardRepository
     private static ContainedCardResponse ToContainedCard(ContainedCardRow card)
     {
         var metadata = ParseRequiredJson(card.Metadata);
-        var contentPath = metadata["content_path"]?.GetValue<string>();
+        var contentPath = GetMetadataString(metadata, "content_path");
 
         return new ContainedCardResponse(
             card.Id,
@@ -523,11 +566,98 @@ public sealed class CardRepository
     }
 
     private static JsonNode ParseRequiredJson(string json) =>
-        JsonNode.Parse(json) ?? new JsonObject();
+        JsonNode.Parse(json) as JsonObject ?? new JsonObject();
 
     private static JsonObject ParseRequiredJsonObject(string json) =>
         JsonNode.Parse(json) as JsonObject ?? new JsonObject();
 
+    private static CardDetails BuildCreatedCardDetails(
+        long cardId,
+        string type,
+        string? title,
+        string? previewPath,
+        JsonObject metadata,
+        string? propertiesJson,
+        IReadOnlyList<CreateRelationData> relations)
+    {
+        var outgoingRelations = relations.Select((relation, index) => new CardRelationResponse(
+            index + 1,
+            cardId,
+            relation.ToCardId,
+            relation.RelationType,
+            ParseOptionalJson(relation.PropertiesJson),
+            relation.Metadata)).ToList();
+
+        return new CardDetails(
+            cardId,
+            type,
+            title,
+            previewPath is null ? null : $"/api/cards/{cardId}/preview",
+            metadata["content_path"]?.GetValue<string>() is null ? null : $"/api/cards/{cardId}/content",
+            ParseOptionalJson(propertiesJson),
+            metadata,
+            outgoingRelations,
+            [],
+            []);
+    }
+
+    private static IReadOnlyList<CardRelationResponse> BuildCollectionRelations(
+        long parentId,
+        IReadOnlyList<long> createdCardIds,
+        CreateCardCollectionData data)
+    {
+        var relations = new List<CardRelationResponse>();
+
+        var childCardIds = createdCardIds.Skip(1).ToList();
+
+        for (var index = 0; index < childCardIds.Count; index++)
+        {
+            var childCardId = childCardIds[index];
+            relations.Add(new CardRelationResponse(
+                relations.Count + 1,
+                parentId,
+                childCardId,
+                "contains",
+                new JsonObject { ["position"] = index },
+                CreateMetadata()));
+
+            if (data.Type == "comic" && index > 0)
+            {
+                relations.Add(new CardRelationResponse(
+                    relations.Count + 1,
+                    childCardId - 1,
+                    childCardId,
+                    "next_in_sequence",
+                    null,
+                    CreateMetadata()));
+            }
+        }
+
+        if (data.Relations.Count > 0)
+        {
+            var baseCount = relations.Count;
+            relations.AddRange(data.Relations.Select((relation, index) => new CardRelationResponse(
+                baseCount + index + 1,
+                parentId,
+                relation.ToCardId,
+                relation.RelationType,
+                ParseOptionalJson(relation.PropertiesJson),
+                relation.Metadata)));
+        }
+
+        return relations;
+    }
+
     private static JsonNode? ParseOptionalJson(string? json) =>
         string.IsNullOrWhiteSpace(json) ? null : JsonNode.Parse(json);
+
+    private static string? GetMetadataString(JsonNode metadata, string key)
+    {
+        if (metadata is not JsonObject metadataObject)
+        {
+            return null;
+        }
+
+        return metadataObject[key]?.GetValue<string>();
+    }
 }
