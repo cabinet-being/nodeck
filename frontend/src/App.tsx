@@ -110,6 +110,25 @@ export function App() {
   );
 }
 
+function NotFoundPage({ onNavigate }: { onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void }) {
+  return (
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-6">
+      <div className="grid gap-4 text-center">
+        <div className="text-2xl font-semibold">Page not found</div>
+        <div className="text-muted-foreground text-sm">The route you requested does not exist.</div>
+        <div className="flex items-center justify-center gap-3">
+          <a href="/gallery" onClick={onNavigate} className="text-primary text-sm font-medium">
+            Gallery
+          </a>
+          <a href="/cards" onClick={onNavigate} className="text-primary text-sm font-medium">
+            Cards
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RouteContent({
   currentPath,
   currentSearch,
@@ -183,5 +202,5 @@ function RouteContent({
     return <DeckDetailsPage deckId={Number(deckMatch[1])} onNavigate={onNavigate} />;
   }
 
-  return null;
+  return <NotFoundPage onNavigate={onNavigate} />;
 }
