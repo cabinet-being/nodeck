@@ -343,7 +343,12 @@ public sealed class CardRepository
             await connection.ExecuteAsync(
                 """
                 DELETE FROM card_relations
-                WHERE from_card_id = @Id;
+                WHERE from_card_id = @Id
+                  AND relation_type IN (
+                      'tagged_with',
+                      'sourced_from',
+                      'related_to'
+                  );
                 """,
                 new { Id = id },
                 transaction);
