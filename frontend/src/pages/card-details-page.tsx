@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { getCard, resolveApiUrl, type Card, type CardRelation } from '@/api/cards';
+import { FavoriteToggle } from '@/components/favorite-toggle';
 import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -30,22 +31,32 @@ export function CardDetailsPage({ cardId }: { cardId: number }) {
     return <div className="text-muted-foreground p-6 text-sm">Loading</div>;
   }
 
+  function updateFavorite(isFavorite: boolean) {
+    setCard((current) => (current ? { ...current, isFavorite } : current));
+  }
+
   if (card.type === 'comic') {
-    return <ComicDetails card={card} />;
+    return <ComicDetails card={card} onFavoriteChange={updateFavorite} />;
   }
 
   if (card.type === 'set') {
-    return <SetDetails card={card} />;
+    return <SetDetails card={card} onFavoriteChange={updateFavorite} />;
   }
 
   if (card.type === 'tag' || card.type === 'source') {
-    return <TextCardDetails card={card} />;
+    return <TextCardDetails card={card} onFavoriteChange={updateFavorite} />;
   }
 
-  return <MediaDetails card={card} />;
+  return <MediaDetails card={card} onFavoriteChange={updateFavorite} />;
 }
 
-function MediaDetails({ card }: { card: Card }) {
+function MediaDetails({
+  card,
+  onFavoriteChange,
+}: {
+  card: Card;
+  onFavoriteChange: (isFavorite: boolean) => void;
+}) {
   const isVideo = card.metadata.media_type === 'video';
 
   return (
@@ -68,12 +79,18 @@ function MediaDetails({ card }: { card: Card }) {
         ) : null}
       </div>
 
-      <CardAside card={card} />
+      <CardAside card={card} onFavoriteChange={onFavoriteChange} />
     </section>
   );
 }
 
-function ComicDetails({ card }: { card: Card }) {
+function ComicDetails({
+  card,
+  onFavoriteChange,
+}: {
+  card: Card;
+  onFavoriteChange: (isFavorite: boolean) => void;
+}) {
   const containedCards = card.containedCards ?? [];
 
   return (
@@ -97,12 +114,18 @@ function ComicDetails({ card }: { card: Card }) {
         ))}
       </div>
 
-      <CardAside card={card} />
+      <CardAside card={card} onFavoriteChange={onFavoriteChange} />
     </section>
   );
 }
 
-function SetDetails({ card }: { card: Card }) {
+function SetDetails({
+  card,
+  onFavoriteChange,
+}: {
+  card: Card;
+  onFavoriteChange: (isFavorite: boolean) => void;
+}) {
   const containedCards = card.containedCards ?? [];
   const [view, setView] = useVisualCardView('nodeck.setView');
 
@@ -115,12 +138,18 @@ function SetDetails({ card }: { card: Card }) {
         <VisualCardWall cards={containedCards} view={view} density="compact" />
       </div>
 
-      <CardAside card={card} />
+      <CardAside card={card} onFavoriteChange={onFavoriteChange} />
     </section>
   );
 }
 
-function TextCardDetails({ card }: { card: Card }) {
+function TextCardDetails({
+  card,
+  onFavoriteChange,
+}: {
+  card: Card;
+  onFavoriteChange: (isFavorite: boolean) => void;
+}) {
   return (
     <section className="mx-auto grid w-full max-w-4xl gap-4 p-6">
       <UiCard>
@@ -128,6 +157,11 @@ function TextCardDetails({ card }: { card: Card }) {
           <div className="flex items-start justify-between gap-3">
             <CardTitle>{card.title}</CardTitle>
             <div className="flex items-center gap-2">
+              <FavoriteToggle
+                cardId={card.id}
+                isFavorite={card.isFavorite}
+                onChange={onFavoriteChange}
+              />
               <Badge variant="outline">{card.type}</Badge>
               <div className="text-muted-foreground shrink-0 text-sm">#{card.id}</div>
             </div>
@@ -142,7 +176,13 @@ function TextCardDetails({ card }: { card: Card }) {
   );
 }
 
-function CardAside({ card }: { card: Card }) {
+function CardAside({
+  card,
+  onFavoriteChange,
+}: {
+  card: Card;
+  onFavoriteChange: (isFavorite: boolean) => void;
+}) {
   return (
     <aside className="grid content-start gap-4">
       <UiCard>
@@ -150,6 +190,11 @@ function CardAside({ card }: { card: Card }) {
           <div className="flex items-start justify-between gap-3">
             <CardTitle>{card.title}</CardTitle>
             <div className="flex items-center gap-2">
+              <FavoriteToggle
+                cardId={card.id}
+                isFavorite={card.isFavorite}
+                onChange={onFavoriteChange}
+              />
               <Badge variant="outline">{card.type}</Badge>
               <div className="text-muted-foreground shrink-0 text-sm">#{card.id}</div>
             </div>

@@ -13,6 +13,7 @@ export type ContainedCard = {
   title: string | null;
   previewUrl: string | null;
   contentUrl: string | null;
+  isFavorite: boolean;
   position: number;
 };
 
@@ -24,6 +25,7 @@ export type Card = {
   contentUrl: string | null;
   properties: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
+  isFavorite: boolean;
   outgoingRelations?: CardRelation[];
   incomingRelations?: CardRelation[];
   containedCards?: ContainedCard[];
@@ -163,6 +165,22 @@ export async function deleteCard(id: number) {
   }
 }
 
+export async function addFavorite(cardId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/favorites/${cardId}`, {
+    method: 'PUT',
+  });
+
+  return readJson<unknown>(response);
+}
+
+export async function removeFavorite(cardId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/favorites/${cardId}`, {
+    method: 'DELETE',
+  });
+
+  return readJson<unknown>(response);
+}
+
 export function resolveApiUrl(path: string | null | undefined) {
   if (!path) {
     return '';
@@ -203,6 +221,7 @@ function normalizeCardData(data: unknown): unknown {
       title: record.Title,
       previewUrl: record.PreviewUrl,
       contentUrl: record.ContentUrl,
+      isFavorite: Boolean(record.IsFavorite),
       position: record.Position,
     };
   }
@@ -216,6 +235,7 @@ function normalizeCardData(data: unknown): unknown {
       contentUrl: record.ContentUrl,
       properties: record.Properties,
       metadata: record.Metadata,
+      isFavorite: Boolean(record.IsFavorite),
       outgoingRelations: normalizeCardData(record.OutgoingRelations),
       incomingRelations: normalizeCardData(record.IncomingRelations),
       containedCards: normalizeCardData(record.ContainedCards),

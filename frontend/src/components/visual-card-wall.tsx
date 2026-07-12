@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Grid3X3, LayoutGrid } from 'lucide-react';
 
 import { resolveApiUrl, type Card } from '@/api/cards';
+import { FavoriteToggle } from '@/components/favorite-toggle';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -10,7 +11,7 @@ export type VisualCardDensity = 'default' | 'compact';
 
 export const visualCardViewStorageKey = 'nodeck.visualCardView';
 
-export type VisualCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl'>;
+export type VisualCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl' | 'isFavorite'>;
 
 export function useVisualCardView(storageKey = visualCardViewStorageKey) {
   const [view, setView] = React.useState<VisualCardView>(() => {
@@ -66,6 +67,8 @@ export function VisualCardWall({
   density?: VisualCardDensity;
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
+  const [favoriteOverrides, setFavoriteOverrides] = React.useState<Record<number, boolean>>({});
+
   return (
     <div
       className={cn(
@@ -86,27 +89,39 @@ export function VisualCardWall({
       )}
     >
       {cards.map((card) => (
-        <a
+        <div
           key={card.id}
-          href={`/cards/${card.id}`}
-          onClick={onNavigate}
           className={cn(
-            'bg-muted w-full max-w-full min-w-0 overflow-hidden rounded-lg border',
+            'bg-muted relative w-full max-w-full min-w-0 overflow-hidden rounded-lg border',
             view === 'grid' ? 'block aspect-square' : 'mb-3 block break-inside-avoid'
           )}
         >
-          {card.previewUrl ? (
-            <img
-              src={resolveApiUrl(card.previewUrl)}
-              alt={card.title ?? ''}
-              className={cn(
-                'w-full object-cover',
-                view === 'grid' ? 'size-full' : 'h-auto'
-              )}
-              loading="lazy"
-            />
-          ) : null}
-        </a>
+          <a
+            href={`/cards/${card.id}`}
+            onClick={onNavigate}
+            className={cn('block', view === 'grid' ? 'size-full' : 'w-full')}
+          >
+            {card.previewUrl ? (
+              <img
+                src={resolveApiUrl(card.previewUrl)}
+                alt={card.title ?? ''}
+                className={cn(
+                  'w-full object-cover',
+                  view === 'grid' ? 'size-full' : 'h-auto'
+                )}
+                loading="lazy"
+              />
+            ) : null}
+          </a>
+          <FavoriteToggle
+            cardId={card.id}
+            isFavorite={favoriteOverrides[card.id] ?? card.isFavorite}
+            className="absolute right-2 top-2 bg-background/90"
+            onChange={(isFavorite) =>
+              setFavoriteOverrides((current) => ({ ...current, [card.id]: isFavorite }))
+            }
+          />
+        </div>
       ))}
     </div>
   );

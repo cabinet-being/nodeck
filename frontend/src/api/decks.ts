@@ -56,6 +56,12 @@ export async function getDeck(id: number) {
   return readJson<DeckDetails>(response);
 }
 
+export async function getFavorites() {
+  const response = await fetch(`${apiBaseUrl}/api/favorites`);
+
+  return readJson<DeckDetails>(response);
+}
+
 export async function createDeck(input: DeckInput) {
   const response = await fetch(`${apiBaseUrl}/api/decks`, {
     method: 'POST',
