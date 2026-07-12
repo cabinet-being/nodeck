@@ -8,6 +8,7 @@ import { CardsPage } from '@/pages/cards-page';
 import { CreateCardPage } from '@/pages/create-card-page';
 import { EditCardPage } from '@/pages/edit-card-page';
 import { GalleryPage } from '@/pages/gallery-page';
+import { SourcesPage } from '@/pages/sources-page';
 import { TagsPage } from '@/pages/tags-page';
 
 function getCurrentPath() {
@@ -113,6 +114,10 @@ function RouteContent({
 
   if (currentPath === '/tags') {
     return <TagsPage onNavigate={onNavigate} />;
+  }
+
+  if (currentPath === '/sources') {
+    return <SourcesPage onNavigate={onNavigate} />;
   }
 
   const editCardMatch = currentPath.match(/^\/cards\/(\d+)\/edit$/);
