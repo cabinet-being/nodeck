@@ -252,6 +252,89 @@ public sealed class PreviewServiceTests
     }
 
     [Fact]
+    public async Task GifMetadataCountsFramesAndSumsDifferentFrameDelays()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var upload = Upload(await GenerateGifWithDifferentDelaysAsync(), "delays.gif", "image/gif");
+
+            var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(28, upload);
+
+            Assert.Equal("gif", assets.MediaType);
+            Assert.Equal(3, assets.FrameCount);
+            Assert.Equal(0.45, Assert.IsType<double>(assets.Duration), precision: 2);
+            Assert.Equal(8, assets.Width);
+            Assert.Equal(8, assets.Height);
+            Assert.True(File.Exists(Path.Combine(root, assets.ContentPath)));
+            Assert.True(File.Exists(Path.Combine(root, assets.PreviewPath)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task TruncatedOrMalformedGifIsRejectedWithoutLeavingFiles(int corruption)
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var validGif = await GenerateGifWithDifferentDelaysAsync();
+            Assert.Equal(0x3b, validGif[^1]);
+            var contents = corruption switch
+            {
+                0 => validGif[..20], // Incomplete global color table.
+                1 => validGif[..^1], // Missing trailer after otherwise complete frames.
+                _ => validGif,
+            };
+            if (corruption == 2)
+                contents[^1] = 0x00; // Invalid block marker in place of trailer.
+            var upload = Upload(contents, "broken.gif", "image/gif");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                CreateService(root).SaveMediaAndCreatePreviewAsync(29, upload));
+
+            Assert.False(Directory.Exists(Path.Combine(root, "cards", "29")));
+            Assert.False(Directory.Exists(Path.Combine(root, "cache", "cards", "29")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GifWithOversizedLogicalScreenIsRejectedWithoutLeavingFiles()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            // GIF89a, 5000 x 5000 logical screen, no global color table, trailer.
+            byte[] contents = [
+                0x47, 0x49, 0x46, 0x38, 0x39, 0x61,
+                0x88, 0x13, 0x88, 0x13, 0x00, 0x00, 0x00, 0x3b,
+            ];
+            var upload = Upload(contents, "oversized.gif", "image/gif");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                CreateService(root).SaveMediaAndCreatePreviewAsync(30, upload));
+
+            Assert.False(Directory.Exists(Path.Combine(root, "cards", "30")));
+            Assert.False(Directory.Exists(Path.Combine(root, "cache", "cards", "30")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task VideoPreviewAndPosterSelectVisibleSceneAfterDarkIntroduction()
     {
         if (!VideoToolsAvailable()) return;
@@ -561,6 +644,21 @@ public sealed class PreviewServiceTests
         using var gif = new Image<Rgba32>(32, 24, Color.Red);
         gif.Frames.RootFrame.Metadata.GetGifMetadata().FrameDelay = 10;
         gif.Frames.AddFrame(gif.Frames.RootFrame);
+        await using var bytes = new MemoryStream();
+        await gif.SaveAsGifAsync(bytes);
+        return bytes.ToArray();
+    }
+
+    private static async Task<byte[]> GenerateGifWithDifferentDelaysAsync()
+    {
+        using var gif = new Image<Rgba32>(8, 8, Color.Red);
+        gif.Frames.RootFrame.Metadata.GetGifMetadata().FrameDelay = 7;
+        using var blue = new Image<Rgba32>(8, 8, Color.Blue);
+        blue.Frames.RootFrame.Metadata.GetGifMetadata().FrameDelay = 13;
+        using var green = new Image<Rgba32>(8, 8, Color.Green);
+        green.Frames.RootFrame.Metadata.GetGifMetadata().FrameDelay = 25;
+        gif.Frames.AddFrame(blue.Frames.RootFrame);
+        gif.Frames.AddFrame(green.Frames.RootFrame);
         await using var bytes = new MemoryStream();
         await gif.SaveAsGifAsync(bytes);
         return bytes.ToArray();
