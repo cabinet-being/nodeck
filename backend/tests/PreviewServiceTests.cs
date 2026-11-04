@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using MyApp.Api.Cards;
 using MyApp.Api.Storage;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace MyApp.Api.Tests;
@@ -229,6 +230,103 @@ public sealed class PreviewServiceTests
     }
 
     [Fact]
+    public async Task GifPreviewAndPosterSelectVisibleSceneAfterDarkIntroduction()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var upload = Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif");
+
+            var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(21, upload);
+
+            Assert.Equal("gif", assets.MediaType);
+            Assert.True(assets.PreviewStartSeconds > 0, "Preview should skip the dark introduction.");
+            Assert.Equal("cache/cards/21/poster.webp", assets.PosterPath);
+            await AssertRedPosterAsync(root, assets.PosterPath);
+            Assert.True(File.Exists(Path.Combine(root, assets.PreviewPath)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VideoPreviewAndPosterSelectVisibleSceneAfterDarkIntroduction()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var source = Path.Combine(root, "scenes.mp4");
+            await GenerateTwoSceneVideoAsync(source);
+            var upload = Upload(await File.ReadAllBytesAsync(source), "scenes.mp4", "video/mp4");
+
+            var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(22, upload);
+
+            Assert.Equal("video", assets.MediaType);
+            Assert.True(assets.PreviewStartSeconds > 0, "Preview should skip the dark introduction.");
+            Assert.Equal("cache/cards/22/poster.webp", assets.PosterPath);
+            await AssertRedPosterAsync(root, assets.PosterPath);
+            Assert.True(File.Exists(Path.Combine(root, assets.PreviewPath)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ShortUniformGifUsesStartAndStillCreatesPoster()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var upload = Upload(await GenerateUniformGifAsync(), "uniform.gif", "image/gif");
+
+            var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(23, upload);
+
+            Assert.Equal(0, assets.PreviewStartSeconds);
+            Assert.Equal("cache/cards/23/poster.webp", assets.PosterPath);
+            await AssertRedPosterAsync(root, assets.PosterPath);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RollbackRestoresPreviousPosterAndRemovesReplacementPoster()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var previewDirectory = Path.Combine(root, "cache", "cards", "24");
+            Directory.CreateDirectory(previewDirectory);
+            var oldPoster = Path.Combine(previewDirectory, "poster.webp");
+            await File.WriteAllTextAsync(oldPoster, "old poster");
+            await File.WriteAllTextAsync(Path.Combine(previewDirectory, "preview.webp"), "old preview");
+            var upload = Upload(await GenerateTwoSceneGifAsync(), "replacement.gif", "image/gif");
+
+            var replacement = await CreateService(root).PrepareMediaReplacementAsync(24, upload);
+            Assert.Equal("cache/cards/24/poster.webp", replacement.Assets.PosterPath);
+            await replacement.PromoteAsync();
+            await AssertRedPosterAsync(root, replacement.Assets.PosterPath);
+
+            replacement.Rollback();
+
+            Assert.Equal("old poster", await File.ReadAllTextAsync(oldPoster));
+            Assert.Equal("old preview", await File.ReadAllTextAsync(Path.Combine(previewDirectory, "preview.webp")));
+            Assert.False(File.Exists(Path.Combine(previewDirectory, "preview.gif")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PendingReplacementRestoresPreviousFilesOnRollback()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -345,5 +443,64 @@ public sealed class PreviewServiceTests
         await process.StandardOutput.ReadToEndAsync();
         await process.WaitForExitAsync();
         Assert.True(process.ExitCode == 0, $"ffmpeg could not generate the {format} fixture: {await stderr}");
+    }
+
+    private static async Task<byte[]> GenerateTwoSceneGifAsync()
+    {
+        using var gif = new Image<Rgba32>(32, 24, Color.Black);
+        gif.Frames.RootFrame.Metadata.GetGifMetadata().FrameDelay = 10;
+        using var red = new Image<Rgba32>(32, 24, Color.Red);
+        red.Frames.RootFrame.Metadata.GetGifMetadata().FrameDelay = 10;
+        for (var index = 1; index < 20; index++)
+            gif.Frames.AddFrame(gif.Frames.RootFrame);
+        for (var index = 0; index < 40; index++)
+            gif.Frames.AddFrame(red.Frames.RootFrame);
+        await using var bytes = new MemoryStream();
+        await gif.SaveAsGifAsync(bytes);
+        return bytes.ToArray();
+    }
+
+    private static async Task<byte[]> GenerateUniformGifAsync()
+    {
+        using var gif = new Image<Rgba32>(32, 24, Color.Red);
+        gif.Frames.RootFrame.Metadata.GetGifMetadata().FrameDelay = 10;
+        gif.Frames.AddFrame(gif.Frames.RootFrame);
+        await using var bytes = new MemoryStream();
+        await gif.SaveAsGifAsync(bytes);
+        return bytes.ToArray();
+    }
+
+    private static async Task AssertRedPosterAsync(string root, string? relativePath)
+    {
+        var posterPath = Path.Combine(root, Assert.IsType<string>(relativePath));
+        Assert.True(File.Exists(posterPath), "Poster file should exist.");
+        using var poster = await Image.LoadAsync<Rgba32>(posterPath);
+        var pixel = poster[poster.Width / 2, poster.Height / 2];
+        Assert.True(pixel.R > 150 && pixel.G < 80 && pixel.B < 80,
+            $"Expected a red scene in the poster, got RGB({pixel.R}, {pixel.G}, {pixel.B}).");
+    }
+
+    private static async Task GenerateTwoSceneVideoAsync(string path)
+    {
+        var start = new ProcessStartInfo("ffmpeg")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in new[]
+        {
+            "-y", "-f", "lavfi", "-i", "color=c=black:s=32x24:r=10:d=2",
+            "-f", "lavfi", "-i", "color=c=red:s=32x24:r=10:d=4",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path,
+        })
+            start.ArgumentList.Add(argument);
+
+        using var process = Process.Start(start)!;
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, $"ffmpeg could not generate the two-scene fixture: {await stderr}");
     }
 }
