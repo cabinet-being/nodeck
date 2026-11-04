@@ -16,17 +16,17 @@
   <img src="https://img.shields.io/badge/tailwindcss-4-06B6D4?logo=tailwindcss">
 </p>
 
-Nodeck is a card-centered gallery for organizing visual objects, tags, and collections. Objects and tags are displayed as standalone cards, while collections behave like decks that group related cards into a focused browsing experience.
+Nodeck is a card-centered gallery for organizing media, comics, sets, tags, and decks. Cards represent content; tags and sources are reusable catalog entries. Decks collect references to cards without duplicating them.
 
 ## Overview
 
-The project is built around the idea that a gallery can feel like a deck system: every object is a card, every tag is a card, and every collection is a deck. The backend exposes a small ASP.NET Core Minimal API powered by .NET 9 and MySQL, while the frontend uses React 18, Vite, Tailwind CSS, and shadcn/ui for a fast, clean, card-based interface.
+The backend exposes an ASP.NET Core Minimal API powered by .NET 9 and MySQL. The frontend uses React 18, Vite, Tailwind CSS, and shadcn/ui. Existing tag and source cards remain in the database during migration, while new entries use dedicated catalog tables.
 
 ## Features
 
 - Card gallery for browsing saved objects.
-- Tag cards for visual grouping, filtering, and quick discovery.
-- Collection decks that combine related objects and tags.
+- Reusable tags and sources that can be assigned to content cards.
+- Comics and sets with ordered child media; decks can reference cards from anywhere in the library.
 - MySQL-backed storage for cards, tags, decks, and related gallery data.
 - Minimal API backend with a compact, predictable HTTP surface.
 - Docker Compose setup with the backend and database running in separate containers.
@@ -91,7 +91,7 @@ Typical frontend workflow:
 npm run dev
 ```
 
-Open the Vite URL in a browser. Use the gallery to create or browse object cards, assign tag cards, and organize related cards into collection decks.
+Open the Vite URL in a browser. Create media, comic, or set cards; add reusable tags and sources from a card page; organize cards in decks.
 
 ## Project Structure
 
@@ -147,7 +147,7 @@ shadcn/ui is configured through `frontend/components.json`. Shared UI primitives
 - Runtime: backend container composed together with the MySQL container.
 - Frontend: React 18 with Vite.
 - UI: shadcn/ui components on top of Tailwind CSS 4.
-- UI model: objects and tags are cards; collections are decks.
+- UI model: media, comics, and sets are cards; tags and sources are catalog entries; decks contain card references.
 
 Recommended development flow:
 

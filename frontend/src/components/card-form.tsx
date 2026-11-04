@@ -56,7 +56,7 @@ export function CardForm({
   incomingRelations?: React.ReactNode;
 }) {
   const isMultiImageCard = !typeLocked && (value.type === 'comic' || value.type === 'set');
-  const isTextOnlyCard = value.type === 'tag' || value.type === 'source';
+  const isContentCard = value.type === 'media' || value.type === 'comic' || value.type === 'set';
   const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = React.useState(false);
   const [draggedIndex, setDraggedIndex] = React.useState<number | null>(null);
@@ -88,6 +88,9 @@ export function CardForm({
                   {cardType}
                 </option>
               ))}
+              {typeLocked && !cardTypes.some((cardType) => cardType === value.type) ? (
+                <option value={value.type}>{value.type} (legacy)</option>
+              ) : null}
             </select>
           </label>
 
@@ -217,7 +220,6 @@ export function CardForm({
             </div>
           ) : null}
 
-          {isTextOnlyCard ? null : null}
         </CardContent>
       </UiCard>
 
@@ -250,7 +252,7 @@ export function CardForm({
           </div>
         </CardHeader>
         <CardContent className="grid gap-4">
-          {value.relations.map((relation, index) => (
+          {value.relations.map((relation, index) => isContentCard && relation.relationType !== 'related_to' ? null : (
             <div key={index} className="grid gap-3 rounded-lg border p-3">
               <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
                 <select
@@ -283,7 +285,7 @@ export function CardForm({
                   }
                   className="border-input bg-background h-9 rounded-lg border px-3 text-sm"
                 >
-                  {relationTypes.map((relationType) => (
+                  {(isContentCard ? ['related_to'] : relationTypes).map((relationType) => (
                     <option key={relationType} value={relationType}>
                       {relationType}
                     </option>

@@ -87,7 +87,7 @@ export type UpdateCardInput = {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
-export const cardTypes = ['media', 'comic', 'set', 'tag', 'source'] as const;
+export const cardTypes = ['media', 'comic', 'set'] as const;
 export const relationTypes = [
   'tagged_with',
   'sourced_from',

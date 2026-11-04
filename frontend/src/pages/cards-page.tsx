@@ -31,7 +31,7 @@ export function CardsPage({
     setError(null);
 
     listCards({
-      type: type || undefined,
+      types: type ? [type] : [...cardTypes],
       search: search || undefined,
       sort: 'created_at',
       order,

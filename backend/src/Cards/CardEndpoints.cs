@@ -76,6 +76,11 @@ public static class CardEndpoints
             return Results.BadRequest(new { error = $"Unsupported card type '{type}'." });
         }
 
+        if (type is "tag" or "source")
+        {
+            return Results.BadRequest(new { error = "Create tags and sources through their catalog endpoints." });
+        }
+
         var title = NormalizeOptionalString(form["title"].ToString());
 
         if (!TryReadOptionalJsonObject(form["properties"].ToString(), out var propertiesJson, out var propertiesError))
@@ -121,19 +126,6 @@ public static class CardEndpoints
             }
 
             var image = form.Files.GetFile("image") ?? form.Files.GetFile("file");
-
-            if (type is "tag" or "source")
-            {
-                if (string.IsNullOrWhiteSpace(title))
-                {
-                    return Results.BadRequest(new { error = $"{type} cards require a title." });
-                }
-
-                if (form.Files.Count > 0)
-                {
-                    return Results.BadRequest(new { error = $"{type} cards do not support media uploads." });
-                }
-            }
 
             if (image is not null && type != "media")
             {
