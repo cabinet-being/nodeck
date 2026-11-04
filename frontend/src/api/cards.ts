@@ -193,6 +193,28 @@ export async function createCard(input: CreateCardInput) {
   return readJson<Card>(response);
 }
 
+export async function createCollectionFromCards(input: {
+  type: 'comic' | 'set';
+  title?: string;
+  childCardIds: number[];
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/collections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return readJson<Card>(response);
+}
+
+export async function updateCollectionChildren(id: number, childCardIds: number[]) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/children`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ childCardIds }),
+  });
+  return readJson<Card>(response);
+}
+
 export async function updateCard(id: number, input: UpdateCardInput) {
   const formData = new FormData();
 
@@ -218,8 +240,9 @@ export async function updateCard(id: number, input: UpdateCardInput) {
   return readJson<Card>(response);
 }
 
-export async function deleteCard(id: number) {
-  const response = await fetch(`${apiBaseUrl}/api/cards/${id}`, {
+export async function deleteCard(id: number, deleteContents = false) {
+  const query = deleteContents ? '?delete_contents=true' : '';
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}${query}`, {
     method: 'DELETE',
   });
 
@@ -227,6 +250,16 @@ export async function deleteCard(id: number) {
     const data = await response.json().catch(() => null);
     throw new Error(data?.error ?? 'Request failed.');
   }
+}
+
+export type CardDeletionImpact = {
+  parentOnly: { cardCount: number; deckMembershipCount: number };
+  withContents: { cardCount: number; deckMembershipCount: number };
+};
+
+export async function getCardDeletionImpact(id: number) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/deletion-impact`);
+  return readJson<CardDeletionImpact>(response);
 }
 
 export async function addFavorite(cardId: number) {

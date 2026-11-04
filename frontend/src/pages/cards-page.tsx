@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Eye, Pencil, Trash2 } from 'lucide-react';
 
-import { cardTypes, deleteCard, listCards, type Card } from '@/api/cards';
+import { cardTypes, deleteCard, getCard, getCardDeletionImpact, listCards, type Card, type CardDeletionImpact } from '@/api/cards';
 import { FavoriteToggle } from '@/components/favorite-toggle';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -21,6 +21,10 @@ export function CardsPage({
   const [isLoading, setIsLoading] = React.useState(true);
   const [cardToDelete, setCardToDelete] = React.useState<Card | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
+  const [deleteDetails, setDeleteDetails] = React.useState<Card | null>(null);
+  const [deleteImpact, setDeleteImpact] = React.useState<CardDeletionImpact | null>(null);
+  const [deleteDetailsError, setDeleteDetailsError] = React.useState<string | null>(null);
+  const deleteRequestId = React.useRef(0);
 
   React.useEffect(() => {
     setIsLoading(true);
@@ -130,7 +134,7 @@ export function CardsPage({
                       variant="ghost"
                       size="icon"
                       aria-label={`Delete card ${card.id}`}
-                      onClick={() => setCardToDelete(card)}
+                      onClick={() => openDelete(card)}
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -159,11 +163,20 @@ export function CardsPage({
         }
         onOpenChange={(open) => {
           if (!open && !isDeleting) {
+            deleteRequestId.current += 1;
             setCardToDelete(null);
           }
         }}
       >
-        <div className="flex justify-end gap-2">
+        {deleteDetailsError ? <p className="text-destructive text-sm" role="alert">{deleteDetailsError}</p> : null}
+        {cardToDelete && !deleteImpact && !deleteDetailsError ? <p className="text-muted-foreground text-sm">Loading deletion impact...</p> : null}
+        {deleteImpact ? (
+          <p className="text-muted-foreground text-sm">
+            Delete card only: {deleteImpact.parentOnly.cardCount} card(s), {deleteImpact.parentOnly.deckMembershipCount} deck membership(s).
+            {cardToDelete?.type === 'comic' || cardToDelete?.type === 'set' ? ` Delete with contents: ${deleteImpact.withContents.cardCount} card(s), ${deleteImpact.withContents.deckMembershipCount} deck membership(s).` : ''}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap justify-end gap-2">
           <Button
             type="button"
             variant="outline"
@@ -175,17 +188,43 @@ export function CardsPage({
           <Button
             type="button"
             variant="destructive"
-            disabled={isDeleting || cardToDelete === null}
-            onClick={handleDelete}
+            disabled={isDeleting || cardToDelete === null || !deleteImpact}
+            onClick={() => handleDelete(false)}
           >
-            {isDeleting ? 'Deleting...' : 'Delete'}
+            {isDeleting ? 'Deleting...' : cardToDelete?.type === 'comic' || cardToDelete?.type === 'set' ? 'Delete collection only' : 'Delete'}
           </Button>
+          {cardToDelete && (cardToDelete.type === 'comic' || cardToDelete.type === 'set') ? (
+            <Button type="button" variant="destructive" disabled={isDeleting || !deleteImpact || !deleteDetails} onClick={() => handleDelete(true)}>
+              Delete with {deleteImpact ? deleteImpact.withContents.cardCount - 1 : 0} contents
+            </Button>
+          ) : null}
         </div>
       </Dialog>
     </section>
   );
 
-  async function handleDelete() {
+  function openDelete(card: Card) {
+    const requestId = ++deleteRequestId.current;
+    setCardToDelete(card);
+    setDeleteDetails(null);
+    setDeleteImpact(null);
+    setDeleteDetailsError(null);
+    const isCollection = card.type === 'comic' || card.type === 'set';
+    Promise.all([
+      getCardDeletionImpact(card.id),
+      isCollection ? getCard(card.id) : Promise.resolve(null),
+    ])
+      .then(([impact, details]) => {
+        if (deleteRequestId.current !== requestId) return;
+        setDeleteImpact(impact);
+        setDeleteDetails(details);
+      })
+      .catch((cause) => {
+        if (deleteRequestId.current === requestId) setDeleteDetailsError(cause instanceof Error ? cause.message : 'Unable to load deletion impact.');
+      });
+  }
+
+  async function handleDelete(deleteContents: boolean) {
     if (!cardToDelete) {
       return;
     }
@@ -194,8 +233,9 @@ export function CardsPage({
     setError(null);
 
     try {
-      await deleteCard(cardToDelete.id);
-      setCards((current) => current.filter((card) => card.id !== cardToDelete.id));
+      await deleteCard(cardToDelete.id, deleteContents);
+      const removedIds = new Set([cardToDelete.id, ...(deleteContents ? (deleteDetails?.containedCards ?? []).map((item) => item.id) : [])]);
+      setCards((current) => current.filter((card) => !removedIds.has(card.id)));
       setCardToDelete(null);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to delete card.');

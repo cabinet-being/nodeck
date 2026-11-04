@@ -82,6 +82,11 @@ public sealed record CreateCardCollectionData(
     IReadOnlyList<IFormFile> Images,
     IReadOnlyList<CreateRelationData> Relations);
 
+public sealed record CreateExistingCollectionRequest(string Type, string? Title, IReadOnlyList<long> ChildCardIds);
+public sealed record UpdateCollectionChildrenRequest(IReadOnlyList<long> ChildCardIds);
+public sealed record DeletionImpact(long CardCount, long DeckMembershipCount);
+public sealed record CardDeletionPreview(DeletionImpact ParentOnly, DeletionImpact WithContents);
+
 public sealed record UpdateCardData(
     string? Title,
     string? PropertiesJson,

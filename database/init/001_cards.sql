@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS card_relations (
     from_card_id BIGINT NOT NULL,
     to_card_id BIGINT NOT NULL,
     relation_type VARCHAR(32) NOT NULL,
+    contained_child_id BIGINT GENERATED ALWAYS AS (CASE WHEN relation_type = 'contains' THEN to_card_id ELSE NULL END) VIRTUAL,
     properties JSON NULL,
     metadata JSON NOT NULL,
     PRIMARY KEY (id),
@@ -38,7 +39,8 @@ CREATE TABLE IF NOT EXISTS card_relations (
     CONSTRAINT chk_card_relations_metadata_json CHECK (JSON_VALID(metadata)),
     INDEX idx_card_relations_from_card_id (from_card_id),
     INDEX idx_card_relations_to_card_id (to_card_id),
-    INDEX idx_card_relations_relation_type (relation_type)
+    INDEX idx_card_relations_relation_type (relation_type),
+    UNIQUE INDEX uq_card_relations_contained_child (contained_child_id)
 );
 
 CREATE TABLE IF NOT EXISTS decks (

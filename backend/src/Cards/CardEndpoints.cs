@@ -11,14 +11,51 @@ public static class CardEndpoints
         var group = app.MapGroup("/api/cards");
 
         group.MapPost("", CreateCardAsync);
+        group.MapPost("/collections", CreateExistingCollectionAsync);
         group.MapGet("", ListCardsAsync);
         group.MapGet("/{id:long}", GetCardAsync);
         group.MapPut("/{id:long}", UpdateCardAsync);
+        group.MapPut("/{id:long}/children", UpdateCollectionChildrenAsync);
+        group.MapGet("/{id:long}/deletion-impact", GetDeletionImpactAsync);
         group.MapDelete("/{id:long}", DeleteCardAsync);
         group.MapGet("/{id:long}/content", GetCardContentAsync);
         group.MapGet("/{id:long}/preview", GetCardPreviewAsync);
 
         return app;
+    }
+
+    private static async Task<IResult> CreateExistingCollectionAsync(
+        CreateExistingCollectionRequest request, CardRepository repository)
+    {
+        try
+        {
+            var card = await repository.CreateCollectionFromExistingAsync(request);
+            return Results.Created($"/api/cards/{card.Id}", card);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    }
+
+    private static async Task<IResult> UpdateCollectionChildrenAsync(
+        long id, UpdateCollectionChildrenRequest request, CardRepository repository)
+    {
+        try
+        {
+            var card = await repository.UpdateCollectionChildrenAsync(id, request.ChildCardIds);
+            return card is null ? Results.NotFound(new { error = "Card not found." }) : Results.Ok(card);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    }
+
+    private static async Task<IResult> GetDeletionImpactAsync(long id, CardRepository repository)
+    {
+        var impact = await repository.GetDeletionImpactAsync(id);
+        return impact is null ? Results.NotFound(new { error = "Card not found." }) : Results.Ok(impact);
     }
 
     private static async Task<IResult> CreateCardAsync(
@@ -240,9 +277,10 @@ public static class CardEndpoints
     private static async Task<IResult> DeleteCardAsync(
         CardRepository repository,
         PreviewService previewService,
-        long id)
+        long id,
+        bool delete_contents = false)
     {
-        var deletedCardIds = await repository.DeleteAsync(id);
+        var deletedCardIds = await repository.DeleteAsync(id, delete_contents);
 
         if (deletedCardIds.Count == 0)
         {

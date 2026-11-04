@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { getCard, listCards, updateCard, type Card } from '@/api/cards';
+import { getCard, listCards, updateCard, updateCollectionChildren, type Card } from '@/api/cards';
 import {
   CardForm,
   keyValueRowsFromRecord,
@@ -11,6 +11,8 @@ import {
 } from '@/components/card-form';
 import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ExistingMediaPicker } from '@/components/existing-media-picker';
+import { Button } from '@/components/ui/button';
 
 export function EditCardPage({
   cardId,
@@ -25,6 +27,9 @@ export function EditCardPage({
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [selectedMedia, setSelectedMedia] = React.useState<Card[]>([]);
+  const [isSavingChildren, setIsSavingChildren] = React.useState(false);
+  const [childrenMessage, setChildrenMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     let isCurrent = true;
@@ -41,6 +46,11 @@ export function EditCardPage({
         }
 
         setCard(loadedCard);
+        setSelectedMedia((loadedCard.containedCards ?? []).map((item) => ({
+          ...item,
+          properties: null,
+          metadata: {},
+        })));
         setAvailableCards(cards.filter((item) => item.id !== loadedCard.id));
         setValue({
           type: loadedCard.type,
@@ -123,8 +133,35 @@ export function EditCardPage({
           </>
         }
       />
+      {card.type === 'comic' || card.type === 'set' ? (
+        <UiCard>
+          <CardHeader><CardTitle>Collection contents</CardTitle></CardHeader>
+          <CardContent className="grid gap-4">
+            <p className="text-muted-foreground text-sm">Add, remove, or reorder existing media. Removed media remain in the library.</p>
+            <ExistingMediaPicker selected={selectedMedia} onChange={(cards) => { setSelectedMedia(cards); setChildrenMessage(null); }} disabled={isSavingChildren} />
+            {childrenMessage ? <p className="text-sm" role="status">{childrenMessage}</p> : null}
+            <Button type="button" disabled={isSavingChildren || selectedMedia.length < 2} onClick={saveChildren}>
+              {isSavingChildren ? 'Saving contents...' : 'Save contents'}
+            </Button>
+          </CardContent>
+        </UiCard>
+      ) : null}
     </section>
   );
+
+  async function saveChildren() {
+    setIsSavingChildren(true);
+    setChildrenMessage(null);
+    try {
+      const updated = await updateCollectionChildren(cardId, selectedMedia.map((item) => item.id));
+      setCard(updated);
+      setChildrenMessage('Collection contents saved.');
+    } catch (cause) {
+      setChildrenMessage(cause instanceof Error ? cause.message : 'Unable to save contents.');
+    } finally {
+      setIsSavingChildren(false);
+    }
+  }
 }
 
 function CurrentMediaInfo({ card }: { card: Card }) {
