@@ -1,5 +1,6 @@
 using MySqlConnector;
 using MyApp.Api.Cards;
+using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
 using MyApp.Api.Storage;
 
@@ -8,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddScoped<CardRepository>();
 builder.Services.AddScoped<DeckRepository>();
 builder.Services.AddSingleton<CardDatabaseInitializer>();
+builder.Services.AddSingleton<CatalogDatabaseInitializer>();
 builder.Services.AddSingleton<DeckDatabaseInitializer>();
 builder.Services.AddSingleton<PreviewService>();
 builder.Services.AddCors(options =>
@@ -26,6 +28,7 @@ using (var scope = app.Services.CreateScope())
 {
     await scope.ServiceProvider.GetRequiredService<CardDatabaseInitializer>().InitializeAsync();
     await scope.ServiceProvider.GetRequiredService<DeckDatabaseInitializer>().InitializeAsync();
+    await scope.ServiceProvider.GetRequiredService<CatalogDatabaseInitializer>().InitializeAsync();
 }
 
 app.UseCors();
