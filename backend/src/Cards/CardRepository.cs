@@ -1271,6 +1271,7 @@ public sealed class CardRepository
         metadata["file_size"] = assets.FileSize;
         metadata["width"] = assets.Width;
         metadata["height"] = assets.Height;
+        metadata["has_audio"] = assets.HasAudio;
 
         if (assets.Duration is not null)
         {

@@ -383,7 +383,8 @@ public sealed class PreviewService
             fileInfo.Length,
             probe.Width,
             probe.Height,
-            probe.Duration);
+            probe.Duration,
+            HasAudio: probe.HasAudio);
     }
 
     private async Task<CardFileAssets> CreateGifAssetsAsync(
@@ -498,21 +499,32 @@ public sealed class PreviewService
             throw new InvalidOperationException("Uploaded video has no readable duration.");
         }
 
+        var width = 0;
+        var height = 0;
+        var hasAudio = false;
         foreach (var stream in root.GetProperty("streams").EnumerateArray())
         {
-            if (!string.Equals(stream.GetProperty("codec_type").GetString(), "video", StringComparison.OrdinalIgnoreCase))
+            var codecType = stream.GetProperty("codec_type").GetString();
+            if (string.Equals(codecType, "audio", StringComparison.OrdinalIgnoreCase))
             {
+                hasAudio = true;
                 continue;
             }
+            if (!string.Equals(codecType, "video", StringComparison.OrdinalIgnoreCase))
+                continue;
 
-            var width = stream.TryGetProperty("width", out var widthElement) ? widthElement.GetInt32() : 0;
-            var height = stream.TryGetProperty("height", out var heightElement) ? heightElement.GetInt32() : 0;
+            var streamWidth = stream.TryGetProperty("width", out var widthElement) ? widthElement.GetInt32() : 0;
+            var streamHeight = stream.TryGetProperty("height", out var heightElement) ? heightElement.GetInt32() : 0;
 
-            if (width > 0 && height > 0)
+            if (streamWidth > 0 && streamHeight > 0 && width == 0)
             {
-                return new VideoProbeResult(mimeType, width, height, duration);
+                width = streamWidth;
+                height = streamHeight;
             }
         }
+
+        if (width > 0 && height > 0)
+            return new VideoProbeResult(mimeType, width, height, duration, hasAudio);
 
         throw new InvalidOperationException("Uploaded file does not contain a readable video stream.");
     }
@@ -793,7 +805,7 @@ public sealed class PreviewService
         }
     }
 
-    private sealed record VideoProbeResult(string MimeType, int Width, int Height, double Duration);
+    private sealed record VideoProbeResult(string MimeType, int Width, int Height, double Duration, bool HasAudio);
 
     private sealed record GifProbeResult(int Width, int Height, int FrameCount, double Duration);
 

@@ -109,7 +109,8 @@ public sealed record CardFileAssets(
     int Width,
     int Height,
     double? Duration = null,
-    int? FrameCount = null);
+    int? FrameCount = null,
+    bool HasAudio = false);
 
 internal sealed record DbCard(
     long Id,
