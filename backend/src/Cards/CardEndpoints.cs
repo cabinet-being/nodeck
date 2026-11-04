@@ -15,6 +15,7 @@ public static class CardEndpoints
         group.MapGet("", ListCardsAsync);
         group.MapGet("/{id:long}", GetCardAsync);
         group.MapPut("/{id:long}", UpdateCardAsync);
+        group.MapPut("/{id:long}/preview", UpdatePreviewStartAsync);
         group.MapPut("/{id:long}/children", UpdateCollectionChildrenAsync);
         group.MapGet("/{id:long}/deletion-impact", GetDeletionImpactAsync);
         group.MapDelete("/{id:long}", DeleteCardAsync);
@@ -257,6 +258,32 @@ public static class CardEndpoints
         catch (JsonException exception)
         {
             return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    }
+
+    private static async Task<IResult> UpdatePreviewStartAsync(
+        long id,
+        JsonElement request,
+        CardRepository repository,
+        PreviewService previewService)
+    {
+        if (request.ValueKind != JsonValueKind.Object ||
+            !request.TryGetProperty("startSeconds", out var startElement) ||
+            startElement.ValueKind is not (JsonValueKind.Number or JsonValueKind.Null) ||
+            (startElement.ValueKind == JsonValueKind.Number && !startElement.TryGetDouble(out _)))
+        {
+            return Results.BadRequest(new { error = "startSeconds must be a number or null." });
+        }
+
+        var startSeconds = startElement.ValueKind == JsonValueKind.Null ? (double?)null : startElement.GetDouble();
+        try
+        {
+            var card = await repository.UpdatePreviewStartAsync(id, startSeconds, previewService.PreparePreviewOverrideAsync);
+            return card is null ? Results.NotFound(new { error = "Card not found." }) : Results.Ok(card);
         }
         catch (InvalidOperationException exception)
         {

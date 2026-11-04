@@ -133,6 +133,54 @@ public sealed class PreviewService
         }
     }
 
+    public async Task<PendingPreviewReplacement> PreparePreviewOverrideAsync(
+        long cardId, string contentPath, double duration, double? startSeconds)
+    {
+        if (!double.IsFinite(duration) || duration < 0)
+            throw new InvalidOperationException("Preview duration must be finite and nonnegative.");
+        var latestStart = Math.Max(0, duration - Math.Min(3, duration));
+        if (startSeconds is not null &&
+            (!double.IsFinite(startSeconds.Value) || startSeconds.Value < 0 || startSeconds.Value > latestStart))
+            throw new InvalidOperationException($"startSeconds must be between 0 and {latestStart}.");
+
+        var originalPath = GetFullPath(contentPath);
+        if (!File.Exists(originalPath))
+            throw new InvalidOperationException("Original media file is missing.");
+
+        var stagingRoot = Path.Combine(_appDataRoot, "tmp", "preview-overrides", Guid.NewGuid().ToString("N"));
+        var stagingPreviewDirectory = Path.Combine(stagingRoot, "preview");
+        Directory.CreateDirectory(stagingPreviewDirectory);
+        var previewPath = Path.Combine(stagingPreviewDirectory, "preview.gif");
+        var posterPath = Path.Combine(stagingPreviewDirectory, "poster.webp");
+
+        try
+        {
+            double selectedStart;
+            if (startSeconds is null)
+            {
+                selectedStart = await GenerateAnimatedAssetsAsync(originalPath, previewPath, posterPath, duration);
+            }
+            else
+            {
+                var clock = Stopwatch.StartNew();
+                await RenderAnimatedAssetsAtStartAsync(originalPath, previewPath, posterPath,
+                    startSeconds.Value, duration, clock);
+                selectedStart = startSeconds.Value;
+            }
+
+            return new PendingPreviewReplacement(
+                stagingRoot, stagingPreviewDirectory,
+                Path.Combine(_appDataRoot, "cache", "cards", cardId.ToString()),
+                Path.Combine(_appDataRoot, "tmp", "preview-override-backups", Guid.NewGuid().ToString("N")),
+                selectedStart);
+        }
+        catch
+        {
+            DeleteDirectoryIfExists(stagingRoot);
+            throw;
+        }
+    }
+
     public FileStream? OpenRead(string relativePath)
     {
         var fullPath = GetFullPath(relativePath);
@@ -619,19 +667,9 @@ public sealed class PreviewService
             {
                 try
                 {
-                    var renderTimeLeft = TimeSpan.FromSeconds(90) - clock.Elapsed;
-                    if (renderTimeLeft <= TimeSpan.Zero) break;
-                    await RenderAnimatedPreviewAsync(originalPath, previewPath, candidate.Start, window, clock);
-                    var posterTime = candidate.Start + (duration > 0 ? window / 2 : 0);
-                    var poster = await RunProcessAsync("ffmpeg", [
-                        "-v", "error", "-y", "-ss", FormatSeconds(posterTime), "-i", originalPath,
-                        "-an", "-frames:v", "1", "-vf", $"scale={MaxPreviewDimension}:{MaxPreviewDimension}:force_original_aspect_ratio=decrease",
-                        "-c:v", "libwebp", "-quality", PreviewQuality.ToString(CultureInfo.InvariantCulture),
-                        "-threads", "1", posterPath,
-                    ], TimeSpan.FromTicks(Math.Max(1, Math.Min(
-                        (TimeSpan.FromSeconds(90) - clock.Elapsed).Ticks, TimeSpan.FromSeconds(20).Ticks))));
-                    if (poster.ExitCode != 0 || !File.Exists(posterPath) || new FileInfo(posterPath).Length == 0)
-                        throw new InvalidOperationException("Failed to generate preview poster.");
+                    if (TimeSpan.FromSeconds(90) - clock.Elapsed <= TimeSpan.Zero) break;
+                    await RenderAnimatedAssetsAtStartAsync(originalPath, previewPath, posterPath,
+                        candidate.Start, duration, clock);
                     return candidate.Start;
                 }
                 catch (InvalidOperationException)
@@ -644,6 +682,23 @@ public sealed class PreviewService
             throw new InvalidOperationException("Failed to generate animated preview and poster.");
         }
         finally { File.Delete(samplePath); }
+    }
+
+    private async Task RenderAnimatedAssetsAtStartAsync(string originalPath, string previewPath,
+        string posterPath, double start, double duration, Stopwatch clock)
+    {
+        var window = duration > 0 ? Math.Min(Math.Max(duration, 0.1), 3.0) : 3.0;
+        await RenderAnimatedPreviewAsync(originalPath, previewPath, start, window, clock);
+        var posterTime = start + (duration > 0 ? window / 2 : 0);
+        var poster = await RunProcessAsync("ffmpeg", [
+            "-v", "error", "-y", "-ss", FormatSeconds(posterTime), "-i", originalPath,
+            "-an", "-frames:v", "1", "-vf", $"scale={MaxPreviewDimension}:{MaxPreviewDimension}:force_original_aspect_ratio=decrease",
+            "-c:v", "libwebp", "-quality", PreviewQuality.ToString(CultureInfo.InvariantCulture),
+            "-threads", "1", posterPath,
+        ], TimeSpan.FromTicks(Math.Max(1, Math.Min(
+            (TimeSpan.FromSeconds(90) - clock.Elapsed).Ticks, TimeSpan.FromSeconds(20).Ticks))));
+        if (poster.ExitCode != 0 || !File.Exists(posterPath) || new FileInfo(posterPath).Length == 0)
+            throw new InvalidOperationException("Failed to generate preview poster.");
     }
 
     private async Task RenderAnimatedPreviewAsync(string originalPath, string previewPath,
@@ -900,5 +955,59 @@ public sealed class PendingCardFileReplacement
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+}
+
+public sealed class PendingPreviewReplacement
+{
+    private readonly string _stagingRoot;
+    private readonly string _stagingPreviewDirectory;
+    private readonly string _finalPreviewDirectory;
+    private readonly string _backupPreviewDirectory;
+    private bool _oldPreviewBackedUp;
+    private bool _newPreviewPromoted;
+
+    public PendingPreviewReplacement(string stagingRoot, string stagingPreviewDirectory,
+        string finalPreviewDirectory, string backupPreviewDirectory, double previewStartSeconds)
+    {
+        _stagingRoot = stagingRoot;
+        _stagingPreviewDirectory = stagingPreviewDirectory;
+        _finalPreviewDirectory = finalPreviewDirectory;
+        _backupPreviewDirectory = backupPreviewDirectory;
+        PreviewStartSeconds = previewStartSeconds;
+    }
+
+    public double PreviewStartSeconds { get; }
+
+    public Task PromoteAsync()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_backupPreviewDirectory)!);
+        if (Directory.Exists(_finalPreviewDirectory))
+        {
+            Directory.Move(_finalPreviewDirectory, _backupPreviewDirectory);
+            _oldPreviewBackedUp = true;
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(_finalPreviewDirectory)!);
+        Directory.Move(_stagingPreviewDirectory, _finalPreviewDirectory);
+        _newPreviewPromoted = true;
+        return Task.CompletedTask;
+    }
+
+    public void Rollback()
+    {
+        if (_newPreviewPromoted && Directory.Exists(_finalPreviewDirectory))
+            Directory.Delete(_finalPreviewDirectory, recursive: true);
+        if (_oldPreviewBackedUp && Directory.Exists(_backupPreviewDirectory))
+            Directory.Move(_backupPreviewDirectory, _finalPreviewDirectory);
+        if (Directory.Exists(_stagingRoot))
+            Directory.Delete(_stagingRoot, recursive: true);
+    }
+
+    public void CleanupAfterCommit()
+    {
+        if (Directory.Exists(_backupPreviewDirectory))
+            Directory.Delete(_backupPreviewDirectory, recursive: true);
+        if (Directory.Exists(_stagingRoot))
+            Directory.Delete(_stagingRoot, recursive: true);
     }
 }

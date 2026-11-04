@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dapper;
 using MySqlConnector;
+using MyApp.Api.Storage;
 
 namespace MyApp.Api.Cards;
 
@@ -555,6 +556,84 @@ public sealed class CardRepository
                 rollbackAssets?.Invoke();
             }
 
+            throw;
+        }
+    }
+
+    public async Task<CardDetails?> UpdatePreviewStartAsync(
+        long id,
+        double? startSeconds,
+        Func<long, string, double, double?, Task<PendingPreviewReplacement>> preparePreview)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        PendingPreviewReplacement? replacement = null;
+        var committed = false;
+
+        try
+        {
+            var card = await connection.QuerySingleOrDefaultAsync<DbCard>(
+                $"""
+                SELECT id AS Id, type AS Type, title AS Title, preview AS Preview,
+                       properties AS Properties, metadata AS Metadata,
+                       {FavoriteSelectSql("cards.id")} AS IsFavorite
+                FROM cards WHERE id = @Id FOR UPDATE;
+                """,
+                new { Id = id }, transaction);
+
+            if (card is null) return null;
+
+            var metadata = ParseRequiredJsonObject(card.Metadata);
+            var mediaType = metadata["media_type"]?.GetValue<string>();
+            var contentPath = metadata["content_path"]?.GetValue<string>();
+            var duration = metadata["duration"]?.GetValue<double?>();
+            if (card.Type != "media" || mediaType is not ("video" or "gif") ||
+                string.IsNullOrWhiteSpace(contentPath) || duration is null ||
+                !double.IsFinite(duration.Value) || duration.Value < 0)
+                throw new InvalidOperationException("Card must have video or GIF content with a valid duration.");
+
+            var latestStart = Math.Max(0, duration.Value - Math.Min(3, duration.Value));
+            if (startSeconds is not null &&
+                (!double.IsFinite(startSeconds.Value) || startSeconds.Value < 0 || startSeconds.Value > latestStart))
+                throw new InvalidOperationException($"startSeconds must be between 0 and {latestStart}.");
+
+            replacement = await preparePreview(id, contentPath, duration.Value, startSeconds);
+            metadata["preview_start_seconds"] = replacement.PreviewStartSeconds;
+            metadata["preview_start_manual"] = startSeconds is not null;
+            var previewPath = Path.Combine("cache", "cards", id.ToString(), "preview.gif").Replace('\\', '/');
+            var posterPath = Path.Combine("cache", "cards", id.ToString(), "poster.webp").Replace('\\', '/');
+            metadata["preview_path"] = previewPath;
+            metadata["poster_path"] = posterPath;
+
+            await connection.ExecuteAsync(
+                "UPDATE cards SET preview = @Preview, metadata = @Metadata WHERE id = @Id;",
+                new { Id = id, Preview = previewPath, Metadata = metadata.ToJsonString() }, transaction);
+
+            var outgoing = await GetRelationsAsync(connection, "from_card_id = @Id", id, transaction);
+            var incoming = await GetRelationsAsync(connection, "to_card_id = @Id", id, transaction);
+            var contained = await GetContainedCardsAsync(connection, id, transaction);
+            await replacement.PromoteAsync();
+            await transaction.CommitAsync();
+            committed = true;
+            try { replacement.CleanupAfterCommit(); }
+            catch { /* Preview metadata is committed; old-file cleanup can be retried separately. */ }
+
+            return ToDetails(card with { Preview = previewPath, Metadata = metadata.ToJsonString() }, outgoing, incoming, contained);
+        }
+        catch
+        {
+            if (!committed)
+            {
+                try
+                {
+                    await transaction.RollbackAsync();
+                }
+                finally
+                {
+                    replacement?.Rollback();
+                }
+            }
             throw;
         }
     }
@@ -1325,6 +1404,7 @@ public sealed class CardRepository
         metadata["playback_path"] = assets.PlaybackPath;
         metadata["poster_path"] = assets.PosterPath;
         metadata["preview_start_seconds"] = assets.PreviewStartSeconds;
+        metadata["preview_start_manual"] = false;
 
         if (assets.Duration is not null)
         {
