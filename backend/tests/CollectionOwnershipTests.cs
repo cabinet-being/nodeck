@@ -3,6 +3,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using MyApp.Api.Cards;
 using MyApp.Api.Decks;
+using MyApp.Api.Storage;
 using MySqlConnector;
 
 namespace MyApp.Api.Tests;
@@ -30,6 +31,71 @@ public sealed class DatabaseFactAttribute : FactAttribute
 [Collection("Collection database")]
 public sealed class CollectionOwnershipTests
 {
+    [DatabaseFact]
+    public async Task PreviewOverridePersistsManualMetadataAndRejectsOutOfRangeWithoutChangingFiles()
+    {
+        await using var scope = await TestScope.CreateAsync();
+        var root = Path.Combine(Path.GetTempPath(), "nodeck-preview-repository-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var card = await scope.Cards.CreateAsync(
+                new CreateCardData("media", "GIF", null,
+                    new JsonObject { ["created_at"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ") }, []),
+                id => Task.FromResult<CardFileAssets?>(new CardFileAssets(
+                    $"cards/{id}/original.gif", $"cache/cards/{id}/preview.gif", "gif", "image/gif",
+                    "fixture.gif", 10, 32, 24, 6, 60,
+                    PosterPath: $"cache/cards/{id}/poster.webp", PreviewStartSeconds: 2)),
+                _ => { });
+            scope.TrackCard(card.Id);
+            var finalDirectory = Path.Combine(root, "cache", "cards", card.Id.ToString());
+            Directory.CreateDirectory(finalDirectory);
+            var previewPath = Path.Combine(finalDirectory, "preview.gif");
+            var posterPath = Path.Combine(finalDirectory, "poster.webp");
+            await File.WriteAllTextAsync(previewPath, "old preview");
+            await File.WriteAllTextAsync(posterPath, "old poster");
+
+            var prepared = false;
+            var updated = await scope.Cards.UpdatePreviewStartAsync(card.Id, 0, async (id, contentPath, duration, start) =>
+            {
+                prepared = true;
+                Assert.Equal(card.Id, id);
+                Assert.Equal($"cards/{card.Id}/original.gif", contentPath);
+                Assert.Equal(6, duration);
+                Assert.Equal(0, start);
+                var stagingRoot = Path.Combine(root, "tmp", "preview-overrides", Guid.NewGuid().ToString("N"));
+                var stagingDirectory = Path.Combine(stagingRoot, "preview");
+                Directory.CreateDirectory(stagingDirectory);
+                await File.WriteAllTextAsync(Path.Combine(stagingDirectory, "preview.gif"), "new preview");
+                await File.WriteAllTextAsync(Path.Combine(stagingDirectory, "poster.webp"), "new poster");
+                return new PendingPreviewReplacement(stagingRoot, stagingDirectory, finalDirectory,
+                    Path.Combine(root, "tmp", "preview-override-backups", Guid.NewGuid().ToString("N")), 0);
+            });
+
+            Assert.True(prepared);
+            Assert.NotNull(updated);
+            Assert.Equal(0, updated.Metadata["preview_start_seconds"]!.GetValue<double>());
+            Assert.True(updated.Metadata["preview_start_manual"]!.GetValue<bool>());
+            Assert.Equal("new preview", await File.ReadAllTextAsync(previewPath));
+            Assert.Equal("new poster", await File.ReadAllTextAsync(posterPath));
+            var storedMetadata = await scope.GetStoredMetadataAsync(card.Id);
+            Assert.Equal(0, storedMetadata["preview_start_seconds"]!.GetValue<double>());
+            Assert.True(storedMetadata["preview_start_manual"]!.GetValue<bool>());
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                scope.Cards.UpdatePreviewStartAsync(card.Id, 4, (_, _, _, _) =>
+                    throw new Xunit.Sdk.XunitException("Invalid start must not prepare files.")));
+
+            Assert.Equal(storedMetadata.ToJsonString(), (await scope.GetStoredMetadataAsync(card.Id)).ToJsonString());
+            Assert.Equal("new preview", await File.ReadAllTextAsync(previewPath));
+            Assert.Equal("new poster", await File.ReadAllTextAsync(posterPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [DatabaseFact]
     public async Task ExistingMediaCanBeGroupedAndReorderedWithoutDuplication()
     {
@@ -199,6 +265,14 @@ public sealed class CollectionOwnershipTests
         {
             await using var connection = new MySqlConnection(_connectionString);
             return await connection.QuerySingleOrDefaultAsync<string>("SELECT preview FROM cards WHERE id = @Id;", new { Id = id });
+        }
+
+        public async Task<JsonNode> GetStoredMetadataAsync(long id)
+        {
+            await using var connection = new MySqlConnection(_connectionString);
+            var json = await connection.QuerySingleAsync<string>(
+                "SELECT metadata FROM cards WHERE id = @Id;", new { Id = id });
+            return JsonNode.Parse(json)!;
         }
 
         public async Task<long?> GetParentAsync(long childId)

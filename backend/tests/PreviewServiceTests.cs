@@ -327,6 +327,102 @@ public sealed class PreviewServiceTests
     }
 
     [Fact]
+    public async Task ManualPreviewStartSelectsRequestedSceneAndResetSelectsAutomaticScene()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root);
+            var upload = Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif");
+            var assets = await service.SaveMediaAndCreatePreviewAsync(25, upload);
+            Assert.True(assets.PreviewStartSeconds > 0);
+            await AssertRedPosterAsync(root, assets.PosterPath);
+
+            var manual = await service.PreparePreviewOverrideAsync(25, assets.ContentPath, assets.Duration!.Value, 0);
+            Assert.Equal(0, manual.PreviewStartSeconds);
+            await manual.PromoteAsync();
+            await AssertBlackPosterAsync(root, assets.PosterPath);
+            Assert.True(new FileInfo(Path.Combine(root, assets.PreviewPath)).Length > 0);
+            manual.CleanupAfterCommit();
+
+            var automatic = await service.PreparePreviewOverrideAsync(25, assets.ContentPath, assets.Duration.Value, null);
+            Assert.True(automatic.PreviewStartSeconds > 0);
+            await automatic.PromoteAsync();
+            await AssertRedPosterAsync(root, assets.PosterPath);
+            Assert.True(new FileInfo(Path.Combine(root, assets.PreviewPath)).Length > 0);
+            automatic.CleanupAfterCommit();
+            AssertNoTemporaryPreviewFiles(root);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(-0.1)]
+    [InlineData(6.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public async Task InvalidPreviewStartPreservesExistingPreviewAndPoster(double startSeconds)
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root);
+            var upload = Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif");
+            var assets = await service.SaveMediaAndCreatePreviewAsync(26, upload);
+            var previewPath = Path.Combine(root, assets.PreviewPath);
+            var posterPath = Path.Combine(root, Assert.IsType<string>(assets.PosterPath));
+            var previousPreview = await File.ReadAllBytesAsync(previewPath);
+            var previousPoster = await File.ReadAllBytesAsync(posterPath);
+
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                service.PreparePreviewOverrideAsync(26, assets.ContentPath, assets.Duration!.Value, startSeconds));
+
+            Assert.Equal(previousPreview, await File.ReadAllBytesAsync(previewPath));
+            Assert.Equal(previousPoster, await File.ReadAllBytesAsync(posterPath));
+            AssertNoTemporaryPreviewFiles(root);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PreviewOverrideRollbackRestoresBothPreviousFilesAndCleansTemporaryFiles()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root);
+            var upload = Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif");
+            var assets = await service.SaveMediaAndCreatePreviewAsync(27, upload);
+            var previewPath = Path.Combine(root, assets.PreviewPath);
+            var posterPath = Path.Combine(root, Assert.IsType<string>(assets.PosterPath));
+            var previousPreview = await File.ReadAllBytesAsync(previewPath);
+            var previousPoster = await File.ReadAllBytesAsync(posterPath);
+
+            var replacement = await service.PreparePreviewOverrideAsync(27, assets.ContentPath, assets.Duration!.Value, 0);
+            await replacement.PromoteAsync();
+            await AssertBlackPosterAsync(root, assets.PosterPath);
+            replacement.Rollback();
+
+            Assert.Equal(previousPreview, await File.ReadAllBytesAsync(previewPath));
+            Assert.Equal(previousPoster, await File.ReadAllBytesAsync(posterPath));
+            AssertNoTemporaryPreviewFiles(root);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PendingReplacementRestoresPreviousFilesOnRollback()
     {
         var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -478,6 +574,26 @@ public sealed class PreviewServiceTests
         var pixel = poster[poster.Width / 2, poster.Height / 2];
         Assert.True(pixel.R > 150 && pixel.G < 80 && pixel.B < 80,
             $"Expected a red scene in the poster, got RGB({pixel.R}, {pixel.G}, {pixel.B}).");
+    }
+
+    private static async Task AssertBlackPosterAsync(string root, string? relativePath)
+    {
+        var posterPath = Path.Combine(root, Assert.IsType<string>(relativePath));
+        Assert.True(File.Exists(posterPath), "Poster file should exist.");
+        using var poster = await Image.LoadAsync<Rgba32>(posterPath);
+        var pixel = poster[poster.Width / 2, poster.Height / 2];
+        Assert.True(pixel.R < 80 && pixel.G < 80 && pixel.B < 80,
+            $"Expected a black scene in the poster, got RGB({pixel.R}, {pixel.G}, {pixel.B}).");
+    }
+
+    private static void AssertNoTemporaryPreviewFiles(string root)
+    {
+        foreach (var directoryName in new[] { "preview-overrides", "preview-override-backups" })
+        {
+            var directory = Path.Combine(root, "tmp", directoryName);
+            Assert.False(Directory.Exists(directory) && Directory.EnumerateFileSystemEntries(directory).Any(),
+                $"Preview override should clean its {directoryName} directory.");
+        }
     }
 
     private static async Task GenerateTwoSceneVideoAsync(string path)
