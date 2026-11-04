@@ -27,6 +27,7 @@ The backend exposes an ASP.NET Core Minimal API powered by .NET 9 and MySQL. The
 - Card gallery for browsing saved objects.
 - Reusable tags and sources that can be assigned to content cards.
 - Comics and sets with ordered child media; decks can reference cards from anywhere in the library.
+- Media uploads recognize JPEG, PNG, WebP, GIF, MP4, MOV, and WebM from file content. The original is retained; video that fails the current browser compatibility check also gets an H.264/AAC MP4 playback copy.
 - MySQL-backed storage for cards, tags, decks, and related gallery data.
 - Minimal API backend with a compact, predictable HTTP surface.
 - Docker Compose setup with the backend and database running in separate containers.
@@ -92,6 +93,8 @@ npm run dev
 ```
 
 Open the Vite URL in a browser. Create media, comic, or set cards; add reusable tags and sources from a card page; organize cards in decks.
+
+Video and GIF processing requires `ffmpeg` and `ffprobe`. The backend Docker image includes them; install FFmpeg separately when running the backend outside Docker. Video transcoding runs during the upload request with a 10-minute timeout, so an incompatible video may take longer to save. The card API keeps `contentUrl` for the original and supplies `playbackUrl` when it creates a playback copy; the card page uses that copy for playback and links to the original file.
 
 ## Database upgrades and recovery
 
