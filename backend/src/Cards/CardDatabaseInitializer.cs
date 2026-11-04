@@ -18,34 +18,6 @@ public sealed class CardDatabaseInitializer
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        var relationTypeConstraint = await connection.QuerySingleOrDefaultAsync<string>(
-            """
-            SELECT cc.CHECK_CLAUSE
-            FROM information_schema.CHECK_CONSTRAINTS cc
-            JOIN information_schema.TABLE_CONSTRAINTS tc
-              ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
-             AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
-            WHERE tc.TABLE_SCHEMA = DATABASE()
-              AND tc.TABLE_NAME = 'card_relations'
-              AND tc.CONSTRAINT_NAME = 'chk_card_relations_type';
-            """);
-
-        if (relationTypeConstraint?.Contains("next_in_sequence", StringComparison.OrdinalIgnoreCase) != true)
-        {
-            if (relationTypeConstraint is not null)
-            {
-                await connection.ExecuteAsync("ALTER TABLE card_relations DROP CHECK chk_card_relations_type;");
-            }
-
-            await connection.ExecuteAsync(
-                """
-                ALTER TABLE card_relations
-                ADD CONSTRAINT chk_card_relations_type CHECK (
-                    relation_type IN ('tagged_with', 'sourced_from', 'contains', 'related_to', 'preview_for', 'next_in_sequence')
-                );
-                """);
-        }
-
         var ownershipColumnKind = await connection.QuerySingleOrDefaultAsync<string>(
             """
             SELECT EXTRA FROM information_schema.COLUMNS
@@ -101,6 +73,31 @@ public sealed class CardDatabaseInitializer
             LIMIT 1;
             """);
         if (badPosition is not null) throw new InvalidOperationException($"Collection {badPosition} has duplicate or missing positions; resolve before migration.");
+
+        var relationTypeConstraint = await connection.QuerySingleOrDefaultAsync<string>(
+            """
+            SELECT cc.CHECK_CLAUSE
+            FROM information_schema.CHECK_CONSTRAINTS cc
+            JOIN information_schema.TABLE_CONSTRAINTS tc
+              ON tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+             AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+            WHERE tc.TABLE_SCHEMA = DATABASE()
+              AND tc.TABLE_NAME = 'card_relations'
+              AND tc.CONSTRAINT_NAME = 'chk_card_relations_type';
+            """);
+
+        if (relationTypeConstraint?.Contains("next_in_sequence", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            if (relationTypeConstraint is not null)
+                await connection.ExecuteAsync("ALTER TABLE card_relations DROP CHECK chk_card_relations_type;");
+            await connection.ExecuteAsync(
+                """
+                ALTER TABLE card_relations
+                ADD CONSTRAINT chk_card_relations_type CHECK (
+                    relation_type IN ('tagged_with', 'sourced_from', 'contains', 'related_to', 'preview_for', 'next_in_sequence')
+                );
+                """);
+        }
 
         if (ownershipColumnKind is null)
             await connection.ExecuteAsync(

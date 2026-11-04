@@ -89,6 +89,18 @@ public sealed class CatalogDatabaseInitializer
             );
             """);
 
+        await ReconcileLegacyAsync(connection);
+    }
+
+    public async Task ReconcileLegacyAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await ReconcileLegacyAsync(connection);
+    }
+
+    private async Task ReconcileLegacyAsync(MySqlConnection connection)
+    {
         await using var transaction = await connection.BeginTransactionAsync();
         var committed = false;
         try
