@@ -109,25 +109,34 @@ function MediaDetails({
   onFavoriteChange: (isFavorite: boolean) => void;
 }) {
   const isVideo = card.metadata.media_type === 'video';
+  const videoUrl = card.playbackUrl || card.contentUrl;
 
   return (
     <section className="grid gap-4 p-6">
       <div className="grid gap-4 xl:grid-cols-[1fr_24rem]">
-        <div className="bg-muted flex min-h-[28rem] items-center justify-center overflow-hidden rounded-lg border">
-          {card.contentUrl && isVideo ? (
-            <video
-              src={resolveApiUrl(card.contentUrl)}
-              controls
-              preload="metadata"
-              className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
-            />
-          ) : null}
-          {card.contentUrl && !isVideo ? (
-            <img
-              src={resolveApiUrl(card.contentUrl)}
-              alt={card.title ?? ''}
-              className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
-            />
+        <div className="grid gap-2">
+          <div className="bg-muted flex min-h-[28rem] items-center justify-center overflow-hidden rounded-lg border">
+            {videoUrl && isVideo ? (
+              <video
+                src={resolveApiUrl(videoUrl)}
+                controls
+                preload="metadata"
+                className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
+              />
+            ) : null}
+            {card.contentUrl && !isVideo ? (
+              <img
+                src={resolveApiUrl(card.contentUrl)}
+                alt={card.title ?? ''}
+                className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
+              />
+            ) : null}
+          </div>
+
+          {isVideo && card.contentUrl ? (
+            <a href={resolveApiUrl(card.contentUrl)} className="text-primary w-fit text-sm underline">
+              Original file
+            </a>
           ) : null}
         </div>
 
