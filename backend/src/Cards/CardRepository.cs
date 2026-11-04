@@ -292,6 +292,8 @@ public sealed class CardRepository
         bool excludeContainedMedia,
         IReadOnlyList<long> tagIds,
         long? sourceId,
+        IReadOnlyList<long> catalogTagIds,
+        long? catalogSourceId,
         string sort,
         string order)
     {
@@ -358,6 +360,37 @@ public sealed class CardRepository
                 )
                 """);
             parameters.Add("SourceId", sourceId.Value);
+        }
+
+        for (var index = 0; index < catalogTagIds.Count; index++)
+        {
+            var parameterName = $"CatalogTagId{index}";
+            conditions.Add($"""
+                (EXISTS (
+                    SELECT 1 FROM card_tags ct WHERE ct.card_id = cards.id
+                      AND ct.tag_id = @{parameterName} AND ct.legacy_relation_id IS NULL
+                ) OR EXISTS (
+                    SELECT 1 FROM card_relations r JOIN tags t ON t.legacy_card_id = r.to_card_id
+                    WHERE r.from_card_id = cards.id AND r.relation_type = 'tagged_with'
+                      AND t.id = @{parameterName}
+                ))
+                """);
+            parameters.Add(parameterName, catalogTagIds[index]);
+        }
+
+        if (catalogSourceId is not null)
+        {
+            conditions.Add("""
+                (EXISTS (
+                    SELECT 1 FROM card_sources cs WHERE cs.card_id = cards.id
+                      AND cs.source_id = @CatalogSourceId AND cs.legacy_relation_id IS NULL
+                ) OR EXISTS (
+                    SELECT 1 FROM card_relations r JOIN sources s ON s.legacy_card_id = r.to_card_id
+                    WHERE r.from_card_id = cards.id AND r.relation_type = 'sourced_from'
+                      AND s.id = @CatalogSourceId
+                ))
+                """);
+            parameters.Add("CatalogSourceId", catalogSourceId.Value);
         }
 
         var where = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : "";

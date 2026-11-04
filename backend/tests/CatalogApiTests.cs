@@ -19,6 +19,7 @@ public sealed class CatalogApiTests
         await EnsureSchemaAsync(connectionString, configuration);
         var catalog = new CatalogRepository(configuration);
         var assignments = new CardCatalogRepository(configuration);
+        var cards = new CardRepository(configuration);
         await using var connection = new MySqlConnection(connectionString);
         await connection.OpenAsync();
         var token = Guid.NewGuid().ToString("N");
@@ -58,6 +59,10 @@ public sealed class CatalogApiTests
             Assert.Equal(url, (await assignments.ListSourcesAsync(cardId))
                 .Single(source => source.Id == legacySourceId).OriginalUrl);
             Assert.Equal(1, (await catalog.GetSourceAsync(legacySourceId))!.ReferenceCount);
+            Assert.Contains(await cards.ListAsync(["media"], null, null, false, [], null,
+                [legacyTagId], legacySourceId, "created_at", "desc"), item => item.Id == cardId);
+            Assert.Contains(await cards.ListAsync(["media"], null, null, false, [], null,
+                [customTagId], customSourceId, "created_at", "desc"), item => item.Id == cardId);
             Assert.Equal(1, await connection.ExecuteScalarAsync<long>("""
                 SELECT COUNT(*) FROM card_relations WHERE from_card_id = @CardId
                     AND to_card_id = @SourceCardId AND relation_type = 'sourced_from';
@@ -73,6 +78,8 @@ public sealed class CatalogApiTests
             Assert.True(await assignments.DeleteSourceAsync(cardId, legacySourceId));
             Assert.Equal(0, (await catalog.GetTagAsync(legacyTagId))!.ReferenceCount);
             Assert.Equal(0, (await catalog.GetSourceAsync(legacySourceId))!.ReferenceCount);
+            Assert.DoesNotContain(await cards.ListAsync(["media"], null, null, false, [], null,
+                [legacyTagId], null, "created_at", "desc"), item => item.Id == cardId);
             Assert.Single(await assignments.ListTagsAsync(cardId));
             Assert.Single(await assignments.ListSourcesAsync(cardId));
             await connection.ExecuteAsync("""

@@ -159,6 +159,8 @@ public static class CardEndpoints
         string? types,
         string? tags,
         string? source,
+        string? catalog_tags,
+        string? catalog_source,
         string? search,
         string? exclude_contained_media,
         string? sort,
@@ -176,6 +178,8 @@ public static class CardEndpoints
             IsTruthy(exclude_contained_media),
             ParseLongList(tags),
             ParseLongOrNull(source),
+            ParseLongList(catalog_tags),
+            ParseLongOrNull(catalog_source),
             sort ?? "created_at",
             order ?? "desc");
 
