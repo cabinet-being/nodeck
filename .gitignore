@@ -3,6 +3,7 @@
 
 # Local runtime data
 /volumes/
+/backups/
 
 # .NET
 bin/

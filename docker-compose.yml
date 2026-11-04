@@ -7,10 +7,12 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Default: Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD};
       NODECK_APP_DATA: /app/data
+      NODECK_MIGRATION_BACKUP_MANIFEST: ${NODECK_MIGRATION_BACKUP_MANIFEST:-}
     ports:
       - "${BACKEND_HTTP_PORT}:8080"
     volumes:
       - ./volumes/app_data:/app/data
+      - ${NODECK_MIGRATION_BACKUP_DIR:-./backups}:/app/migration-backup:ro
     depends_on:
       mysql:
         condition: service_healthy
