@@ -119,6 +119,7 @@ function MediaDetails({
             {videoUrl && isVideo ? (
               <video
                 src={resolveApiUrl(videoUrl)}
+                poster={card.posterUrl ? resolveApiUrl(card.posterUrl) : undefined}
                 controls
                 preload="metadata"
                 className="max-h-[calc(100vh-8rem)] max-w-full object-contain"

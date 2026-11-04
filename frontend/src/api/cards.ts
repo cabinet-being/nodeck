@@ -24,6 +24,7 @@ export type Card = {
   previewUrl: string | null;
   contentUrl: string | null;
   playbackUrl?: string | null;
+  posterUrl?: string | null;
   properties: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
   isFavorite: boolean;
@@ -346,6 +347,7 @@ function normalizeCardData(data: unknown): unknown {
       previewUrl: record.PreviewUrl,
       contentUrl: record.ContentUrl,
       playbackUrl: record.PlaybackUrl,
+      posterUrl: record.PosterUrl,
       properties: record.Properties,
       metadata: record.Metadata,
       isFavorite: Boolean(record.IsFavorite),
