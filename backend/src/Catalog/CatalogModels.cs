@@ -24,3 +24,8 @@ public sealed class SourceEntry
 
 public sealed class CatalogValidationException(string message) : Exception(message);
 public sealed class CatalogConflictException(string message) : Exception(message);
+public sealed class CatalogMissingException(string message) : Exception(message);
+
+public sealed record CardTagEntry(long Id, string Name, string Category, string Origin);
+public sealed record CardSourceEntry(long Id, string Name, string? OriginalUrl);
+public sealed record CardSourceRequest(string? OriginalUrl);

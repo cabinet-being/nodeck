@@ -20,7 +20,10 @@ public sealed class CatalogRepository
         await using var connection = await OpenAsync();
         var entries = (await connection.QueryAsync<TagEntry>("""
             SELECT t.id, t.name, t.category, t.origin, t.name_conflict AS NameConflict,
-                   (SELECT COUNT(*) FROM card_tags ct WHERE ct.tag_id = t.id) AS ReferenceCount
+                   ((SELECT COUNT(*) FROM card_tags ct
+                     WHERE ct.tag_id = t.id AND ct.legacy_relation_id IS NULL)
+                    + (SELECT COUNT(*) FROM card_relations r
+                       WHERE r.relation_type = 'tagged_with' AND r.to_card_id = t.legacy_card_id)) AS ReferenceCount
             FROM tags t
             WHERE @Search IS NULL OR LOCATE(@Search, t.name) > 0
                 OR EXISTS (SELECT 1 FROM tag_aliases a WHERE a.tag_id = t.id AND LOCATE(@Search, a.alias) > 0)
@@ -35,7 +38,10 @@ public sealed class CatalogRepository
         await using var connection = await OpenAsync();
         var entry = await connection.QuerySingleOrDefaultAsync<TagEntry>("""
             SELECT t.id, t.name, t.category, t.origin, t.name_conflict AS NameConflict,
-                   (SELECT COUNT(*) FROM card_tags ct WHERE ct.tag_id = t.id) AS ReferenceCount
+                   ((SELECT COUNT(*) FROM card_tags ct
+                     WHERE ct.tag_id = t.id AND ct.legacy_relation_id IS NULL)
+                    + (SELECT COUNT(*) FROM card_relations r
+                       WHERE r.relation_type = 'tagged_with' AND r.to_card_id = t.legacy_card_id)) AS ReferenceCount
             FROM tags t WHERE t.id = @Id;
             """, new { Id = id });
         if (entry is not null)
@@ -74,7 +80,7 @@ public sealed class CatalogRepository
         try
         {
             var existing = await connection.QuerySingleOrDefaultAsync<TagProtectionRow>(
-                "SELECT legacy_card_id, category, origin FROM tags WHERE id = @Id FOR UPDATE;",
+                "SELECT legacy_card_id AS LegacyCardId, category, origin FROM tags WHERE id = @Id FOR UPDATE;",
                 new { Id = id }, transaction);
             if (existing is null)
                 return null;
@@ -115,7 +121,10 @@ public sealed class CatalogRepository
         await using var connection = await OpenAsync();
         return (await connection.QueryAsync<SourceEntry>("""
             SELECT s.id, s.name, s.name_conflict AS NameConflict,
-                   (SELECT COUNT(*) FROM card_sources cs WHERE cs.source_id = s.id) AS ReferenceCount
+                   ((SELECT COUNT(*) FROM card_sources cs
+                     WHERE cs.source_id = s.id AND cs.legacy_relation_id IS NULL)
+                    + (SELECT COUNT(*) FROM card_relations r
+                       WHERE r.relation_type = 'sourced_from' AND r.to_card_id = s.legacy_card_id)) AS ReferenceCount
             FROM sources s WHERE @Search IS NULL OR LOCATE(@Search, s.name) > 0
             ORDER BY s.name, s.id LIMIT 200;
             """, new { Search = NormalizeSearch(search) })).ToList();
@@ -126,7 +135,10 @@ public sealed class CatalogRepository
         await using var connection = await OpenAsync();
         return await connection.QuerySingleOrDefaultAsync<SourceEntry>("""
             SELECT s.id, s.name, s.name_conflict AS NameConflict,
-                   (SELECT COUNT(*) FROM card_sources cs WHERE cs.source_id = s.id) AS ReferenceCount
+                   ((SELECT COUNT(*) FROM card_sources cs
+                     WHERE cs.source_id = s.id AND cs.legacy_relation_id IS NULL)
+                    + (SELECT COUNT(*) FROM card_relations r
+                       WHERE r.relation_type = 'sourced_from' AND r.to_card_id = s.legacy_card_id)) AS ReferenceCount
             FROM sources s WHERE s.id = @Id;
             """, new { Id = id });
     }
@@ -158,7 +170,7 @@ public sealed class CatalogRepository
         try
         {
             var existing = await connection.QuerySingleOrDefaultAsync<SourceProtectionRow>(
-                "SELECT id, legacy_card_id FROM sources WHERE id = @Id FOR UPDATE;",
+                "SELECT id, legacy_card_id AS LegacyCardId FROM sources WHERE id = @Id FOR UPDATE;",
                 new { Id = id }, transaction);
             if (existing is null) return null;
             if (existing.LegacyCardId is not null)

@@ -12,6 +12,97 @@ namespace MyApp.Api.Tests;
 public sealed class CatalogApiTests
 {
     [DatabaseFact]
+    public async Task CardAssignmentsBridgeLegacyRelationsAndNewCatalogEntries()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var catalog = new CatalogRepository(configuration);
+        var assignments = new CardCatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var cardId = await InsertCardAsync(connection, "media", $"media-{token}");
+        var legacyTagCardId = await InsertCardAsync(connection, "tag", $"legacy-tag-{token}");
+        var legacySourceCardId = await InsertCardAsync(connection, "source", $"legacy-source-{token}");
+        long customTagId = 0;
+        long customSourceId = 0;
+        try
+        {
+            await new CatalogDatabaseInitializer(configuration, NullLogger<CatalogDatabaseInitializer>.Instance)
+                .InitializeAsync();
+            var legacyTagId = await connection.ExecuteScalarAsync<long>(
+                "SELECT id FROM tags WHERE legacy_card_id = @Id;", new { Id = legacyTagCardId });
+            var legacySourceId = await connection.ExecuteScalarAsync<long>(
+                "SELECT id FROM sources WHERE legacy_card_id = @Id;", new { Id = legacySourceCardId });
+            customTagId = (await catalog.CreateTagAsync(new TagRequest($"custom-{token}", null))).Id;
+            customSourceId = (await catalog.CreateSourceAsync(new SourceRequest($"custom-source-{token}"))).Id;
+
+            await assignments.SetTagAsync(cardId, legacyTagId);
+            await assignments.SetTagAsync(cardId, legacyTagId);
+            await assignments.SetTagAsync(cardId, customTagId);
+            Assert.Equal(2, (await assignments.ListTagsAsync(cardId)).Count);
+            Assert.Equal(1, (await catalog.GetTagAsync(legacyTagId))!.ReferenceCount);
+            Assert.Equal(1, await connection.ExecuteScalarAsync<long>("""
+                SELECT COUNT(*) FROM card_relations WHERE from_card_id = @CardId
+                    AND to_card_id = @TagCardId AND relation_type = 'tagged_with';
+                """, new { CardId = cardId, TagCardId = legacyTagCardId }));
+
+            var url = $"https://example.test/{token}/original";
+            await assignments.SetSourceAsync(cardId, legacySourceId, new CardSourceRequest(url));
+            await assignments.SetSourceAsync(cardId, customSourceId,
+                new CardSourceRequest($"https://example.test/{token}/other"));
+            Assert.Equal(2, (await assignments.ListSourcesAsync(cardId)).Count);
+            Assert.Equal(url, (await assignments.ListSourcesAsync(cardId))
+                .Single(source => source.Id == legacySourceId).OriginalUrl);
+            Assert.Equal(1, (await catalog.GetSourceAsync(legacySourceId))!.ReferenceCount);
+            Assert.Equal(1, await connection.ExecuteScalarAsync<long>("""
+                SELECT COUNT(*) FROM card_relations WHERE from_card_id = @CardId
+                    AND to_card_id = @SourceCardId AND relation_type = 'sourced_from';
+                """, new { CardId = cardId, SourceCardId = legacySourceCardId }));
+            await Assert.ThrowsAsync<CatalogConflictException>(() =>
+                catalog.UpdateSourceAsync(legacySourceId, new SourceRequest($"changed-source-{token}")));
+            var updatedUrl = $"https://example.test/{token}/changed";
+            await assignments.SetSourceAsync(cardId, legacySourceId, new CardSourceRequest(updatedUrl));
+            Assert.Equal(updatedUrl, (await assignments.ListSourcesAsync(cardId))
+                .Single(source => source.Id == legacySourceId).OriginalUrl);
+
+            Assert.True(await assignments.DeleteTagAsync(cardId, legacyTagId));
+            Assert.True(await assignments.DeleteSourceAsync(cardId, legacySourceId));
+            Assert.Equal(0, (await catalog.GetTagAsync(legacyTagId))!.ReferenceCount);
+            Assert.Equal(0, (await catalog.GetSourceAsync(legacySourceId))!.ReferenceCount);
+            Assert.Single(await assignments.ListTagsAsync(cardId));
+            Assert.Single(await assignments.ListSourcesAsync(cardId));
+            await connection.ExecuteAsync("""
+                INSERT INTO card_relations (from_card_id, to_card_id, relation_type, metadata)
+                VALUES (@CardId, @TagCardId, 'tagged_with', JSON_OBJECT());
+                INSERT INTO card_relations (from_card_id, to_card_id, relation_type, properties, metadata)
+                VALUES (@CardId, @SourceCardId, 'sourced_from', JSON_OBJECT('original_url', @Url), JSON_OBJECT());
+                """, new { CardId = cardId, TagCardId = legacyTagCardId,
+                    SourceCardId = legacySourceCardId, Url = url });
+            Assert.Equal(2, (await assignments.ListTagsAsync(cardId)).Count);
+            Assert.Equal(2, (await assignments.ListSourcesAsync(cardId)).Count);
+            Assert.Equal(1, (await catalog.GetTagAsync(legacyTagId))!.ReferenceCount);
+            Assert.Equal(1, (await catalog.GetSourceAsync(legacySourceId))!.ReferenceCount);
+            await Assert.ThrowsAsync<CatalogValidationException>(() => assignments.SetSourceAsync(
+                cardId, customSourceId, new CardSourceRequest("javascript:invalid")));
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM tags WHERE legacy_card_id = @Id;",
+                new { Id = legacyTagCardId });
+            await connection.ExecuteAsync("DELETE FROM sources WHERE legacy_card_id = @Id;",
+                new { Id = legacySourceCardId });
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id IN @Ids;",
+                new { Ids = new[] { cardId, legacyTagCardId, legacySourceCardId } });
+            if (customTagId != 0)
+                await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = customTagId });
+            if (customSourceId != 0)
+                await connection.ExecuteAsync("DELETE FROM sources WHERE id = @Id;", new { Id = customSourceId });
+        }
+    }
+
+    [DatabaseFact]
     public async Task CustomTagNamesAliasesAndProtectedLegacyRowsRemainUnambiguous()
     {
         var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
@@ -122,6 +213,12 @@ public sealed class CatalogApiTests
     private static IConfiguration Configuration(string connectionString) => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Default"] = connectionString })
         .Build();
+
+    private static Task<long> InsertCardAsync(MySqlConnection connection, string type, string title) =>
+        connection.ExecuteScalarAsync<long>("""
+            INSERT INTO cards (type, title, metadata) VALUES (@Type, @Title, JSON_OBJECT());
+            SELECT LAST_INSERT_ID();
+            """, new { Type = type, Title = title });
 
     private static async Task EnsureSchemaAsync(string connectionString, IConfiguration configuration)
     {

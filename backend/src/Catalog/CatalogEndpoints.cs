@@ -37,6 +37,34 @@ public static class CatalogEndpoints
         sources.MapDelete("/{id:long}", async (long id, CatalogRepository repository) =>
             await RunAsync(async () =>
                 await repository.DeleteSourceAsync(id) ? Results.NoContent() : Results.NotFound()));
+
+        var cardTags = app.MapGroup("/api/cards/{cardId:long}/tags");
+        cardTags.MapGet("", async (long cardId, CardCatalogRepository repository) =>
+            await RunAsync(async () => Results.Ok(await repository.ListTagsAsync(cardId))));
+        cardTags.MapPut("/{tagId:long}", async (long cardId, long tagId, CardCatalogRepository repository) =>
+            await RunAsync(async () =>
+            {
+                await repository.SetTagAsync(cardId, tagId);
+                return Results.NoContent();
+            }));
+        cardTags.MapDelete("/{tagId:long}", async (long cardId, long tagId, CardCatalogRepository repository) =>
+            await RunAsync(async () =>
+                await repository.DeleteTagAsync(cardId, tagId) ? Results.NoContent() : Results.NotFound()));
+
+        var cardSources = app.MapGroup("/api/cards/{cardId:long}/sources");
+        cardSources.MapGet("", async (long cardId, CardCatalogRepository repository) =>
+            await RunAsync(async () => Results.Ok(await repository.ListSourcesAsync(cardId))));
+        cardSources.MapPut("/{sourceId:long}", async (
+            long cardId, long sourceId, CardSourceRequest request, CardCatalogRepository repository) =>
+            await RunAsync(async () =>
+            {
+                await repository.SetSourceAsync(cardId, sourceId, request);
+                return Results.NoContent();
+            }));
+        cardSources.MapDelete("/{sourceId:long}", async (
+            long cardId, long sourceId, CardCatalogRepository repository) =>
+            await RunAsync(async () =>
+                await repository.DeleteSourceAsync(cardId, sourceId) ? Results.NoContent() : Results.NotFound()));
         return app;
     }
 
@@ -50,6 +78,10 @@ public static class CatalogEndpoints
         catch (CatalogConflictException exception)
         {
             return Results.Conflict(new { error = exception.Message });
+        }
+        catch (CatalogMissingException exception)
+        {
+            return Results.NotFound(new { error = exception.Message });
         }
     }
 }
