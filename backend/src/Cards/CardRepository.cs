@@ -1237,7 +1237,10 @@ public sealed class CardRepository
             contentPath is null ? null : $"/api/cards/{card.Id}/content",
             ParseOptionalJson(card.Properties),
             metadata,
-            card.IsFavorite != 0);
+            card.IsFavorite != 0)
+        {
+            PlaybackUrl = metadata["playback_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/playback",
+        };
     }
 
     private static CardDetails ToDetails(
@@ -1259,7 +1262,10 @@ public sealed class CardRepository
             summary.IsFavorite,
             outgoingRelations,
             incomingRelations,
-            containedCards);
+            containedCards)
+        {
+            PlaybackUrl = summary.PlaybackUrl,
+        };
     }
 
     private static CardRelationResponse ToRelation(DbCardRelation relation)
@@ -1285,7 +1291,10 @@ public sealed class CardRepository
             card.Preview is null ? null : $"/api/cards/{card.Id}/preview",
             contentPath is null ? null : $"/api/cards/{card.Id}/content",
             card.IsFavorite != 0,
-            card.Position);
+            card.Position)
+        {
+            PlaybackUrl = metadata["playback_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/playback",
+        };
     }
 
     private static JsonObject CreateMetadata() =>
@@ -1305,6 +1314,12 @@ public sealed class CardRepository
         metadata["width"] = assets.Width;
         metadata["height"] = assets.Height;
         metadata["has_audio"] = assets.HasAudio;
+        metadata["container"] = assets.Container;
+        metadata["video_codec"] = assets.VideoCodec;
+        metadata["audio_codec"] = assets.AudioCodec;
+        metadata["audio_channels"] = assets.AudioChannels;
+        metadata["audio_sample_rate"] = assets.AudioSampleRate;
+        metadata["playback_path"] = assets.PlaybackPath;
 
         if (assets.Duration is not null)
         {
@@ -1359,7 +1374,10 @@ public sealed class CardRepository
             false,
             outgoingRelations,
             [],
-            []);
+            [])
+        {
+            PlaybackUrl = metadata["playback_path"]?.GetValue<string>() is null ? null : $"/api/cards/{cardId}/playback",
+        };
     }
 
     private static IReadOnlyList<CardRelationResponse> BuildCollectionRelations(

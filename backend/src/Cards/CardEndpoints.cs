@@ -19,6 +19,7 @@ public static class CardEndpoints
         group.MapGet("/{id:long}/deletion-impact", GetDeletionImpactAsync);
         group.MapDelete("/{id:long}", DeleteCardAsync);
         group.MapGet("/{id:long}/content", GetCardContentAsync);
+        group.MapGet("/{id:long}/playback", GetCardPlaybackAsync);
         group.MapGet("/{id:long}/preview", GetCardPreviewAsync);
 
         return app;
@@ -107,14 +108,6 @@ public static class CardEndpoints
                 if (images.Count < 2)
                 {
                     return Results.BadRequest(new { error = $"{type} cards require at least two images." });
-                }
-
-                foreach (var uploadedImage in images)
-                {
-                    if (!IsSupportedStaticImage(uploadedImage))
-                    {
-                        return Results.BadRequest(new { error = $"Unsupported image file '{uploadedImage.FileName}'." });
-                    }
                 }
 
                 var createdCollection = await repository.CreateCollectionAsync(
@@ -311,6 +304,22 @@ public static class CardEndpoints
             : Results.File(stream, previewService.GetContentType(contentPath), enableRangeProcessing: true);
     }
 
+    private static async Task<IResult> GetCardPlaybackAsync(
+        CardRepository repository,
+        PreviewService previewService,
+        long id)
+    {
+        var card = await repository.GetByIdAsync(id);
+        var playbackPath = card?.Metadata["playback_path"]?.GetValue<string>();
+        if (playbackPath is null)
+            return Results.NotFound(new { error = "Card playback file not found." });
+
+        var stream = previewService.OpenRead(playbackPath);
+        return stream is null
+            ? Results.NotFound(new { error = "Card playback file not found." })
+            : Results.File(stream, previewService.GetContentType(playbackPath), enableRangeProcessing: true);
+    }
+
     private static async Task<IResult> GetCardPreviewAsync(
         CardRepository repository,
         PreviewService previewService,
@@ -467,15 +476,6 @@ public static class CardEndpoints
         }
 
         return form.Files.ToList();
-    }
-
-    private static bool IsSupportedStaticImage(IFormFile image)
-    {
-        var extension = Path.GetExtension(image.FileName).ToLowerInvariant();
-        var contentType = image.ContentType.ToLowerInvariant();
-
-        return extension is ".jpg" or ".jpeg" or ".png" or ".webp"
-            || contentType is "image/jpeg" or "image/png" or "image/webp";
     }
 
     private static bool TryReadTypes(

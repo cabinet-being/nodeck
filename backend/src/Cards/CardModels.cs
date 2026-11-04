@@ -10,7 +10,10 @@ public sealed record CardSummary(
     string? ContentUrl,
     JsonNode? Properties,
     JsonNode Metadata,
-    bool IsFavorite);
+    bool IsFavorite)
+{
+    public string? PlaybackUrl { get; init; }
+}
 
 public sealed record CardDetails(
     long Id,
@@ -23,7 +26,10 @@ public sealed record CardDetails(
     bool IsFavorite,
     IReadOnlyList<CardRelationResponse> OutgoingRelations,
     IReadOnlyList<CardRelationResponse> IncomingRelations,
-    IReadOnlyList<ContainedCardResponse> ContainedCards);
+    IReadOnlyList<ContainedCardResponse> ContainedCards)
+{
+    public string? PlaybackUrl { get; init; }
+}
 
 public sealed record ContainedCardResponse(
     long Id,
@@ -32,7 +38,10 @@ public sealed record ContainedCardResponse(
     string? PreviewUrl,
     string? ContentUrl,
     bool IsFavorite,
-    int Position);
+    int Position)
+{
+    public string? PlaybackUrl { get; init; }
+}
 
 public sealed record RelationCardSummary(
     long Id,
@@ -110,7 +119,13 @@ public sealed record CardFileAssets(
     int Height,
     double? Duration = null,
     int? FrameCount = null,
-    bool HasAudio = false);
+    bool HasAudio = false,
+    string? Container = null,
+    string? VideoCodec = null,
+    string? AudioCodec = null,
+    string? PlaybackPath = null,
+    int? AudioChannels = null,
+    int? AudioSampleRate = null);
 
 internal sealed record DbCard(
     long Id,
