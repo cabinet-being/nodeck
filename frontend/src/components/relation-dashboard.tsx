@@ -108,13 +108,15 @@ export function RelationDashboard({
   const backlinks = relations.incomingRelations.filter((relation) =>
     editableRelationTypes.has(relation.relationType)
   );
+  const isContentCard = card.type === 'media' || card.type === 'comic' || card.type === 'set';
 
   return (
     <section className="grid gap-4">
       {localError ? <div className="text-destructive text-sm">{localError}</div> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className={cn('grid gap-4', !isContentCard && 'xl:grid-cols-[minmax(0,1fr)_20rem]')}>
         <div className="grid gap-4">
+          {!isContentCard ? <>
           <RelationSection
             title="Tags"
             emptyMessage="No tags"
@@ -152,6 +154,7 @@ export function RelationDashboard({
               />
             ))}
           </RelationSection>
+          </> : null}
 
           <RelationSection
             title="Related cards"
@@ -169,6 +172,7 @@ export function RelationDashboard({
             ))}
           </RelationSection>
 
+          {!isContentCard ? <>
           <RelationSection title="Structural relations" emptyMessage="No structural relations">
             {structuralRelations.map((relation) => (
               <RelationCardRow
@@ -185,12 +189,13 @@ export function RelationDashboard({
               <RelationCardRow key={relation.id} relation={relation} onNavigate={onNavigate} readOnly />
             ))}
           </RelationSection>
+          </> : null}
         </div>
 
-        <div className="grid gap-4 content-start">
+        {!isContentCard ? <div className="grid gap-4 content-start">
           <RelationGraph card={card} relations={relations} onNavigate={onNavigate} />
           <RelationLegend />
-        </div>
+        </div> : null}
       </div>
 
       <Dialog

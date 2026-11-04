@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { getCard, getCardRelations, resolveApiUrl, type Card, type CardRelations } from '@/api/cards';
 import { FavoriteToggle } from '@/components/favorite-toggle';
+import { CardCatalogPanel } from '@/components/card-catalog-panel';
 import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -293,6 +294,7 @@ function CardAside({
         </CardHeader>
       </UiCard>
 
+      <CardCatalogPanel cardId={card.id} metadata={card.metadata} />
       <JsonPanel title="Properties" value={card.properties} />
       <JsonPanel title="Metadata" value={card.metadata} />
     </aside>
