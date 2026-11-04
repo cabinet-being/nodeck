@@ -13,6 +13,7 @@ public sealed record CardSummary(
     bool IsFavorite)
 {
     public string? PlaybackUrl { get; init; }
+    public string? PosterUrl { get; init; }
 }
 
 public sealed record CardDetails(
@@ -29,6 +30,7 @@ public sealed record CardDetails(
     IReadOnlyList<ContainedCardResponse> ContainedCards)
 {
     public string? PlaybackUrl { get; init; }
+    public string? PosterUrl { get; init; }
 }
 
 public sealed record ContainedCardResponse(
@@ -41,6 +43,7 @@ public sealed record ContainedCardResponse(
     int Position)
 {
     public string? PlaybackUrl { get; init; }
+    public string? PosterUrl { get; init; }
 }
 
 public sealed record RelationCardSummary(
@@ -125,7 +128,9 @@ public sealed record CardFileAssets(
     string? AudioCodec = null,
     string? PlaybackPath = null,
     int? AudioChannels = null,
-    int? AudioSampleRate = null);
+    int? AudioSampleRate = null,
+    string? PosterPath = null,
+    double? PreviewStartSeconds = null);
 
 internal sealed record DbCard(
     long Id,

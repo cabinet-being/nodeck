@@ -1240,6 +1240,7 @@ public sealed class CardRepository
             card.IsFavorite != 0)
         {
             PlaybackUrl = metadata["playback_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/playback",
+            PosterUrl = metadata["poster_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/poster",
         };
     }
 
@@ -1265,6 +1266,7 @@ public sealed class CardRepository
             containedCards)
         {
             PlaybackUrl = summary.PlaybackUrl,
+            PosterUrl = summary.PosterUrl,
         };
     }
 
@@ -1294,6 +1296,7 @@ public sealed class CardRepository
             card.Position)
         {
             PlaybackUrl = metadata["playback_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/playback",
+            PosterUrl = metadata["poster_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/poster",
         };
     }
 
@@ -1320,6 +1323,8 @@ public sealed class CardRepository
         metadata["audio_channels"] = assets.AudioChannels;
         metadata["audio_sample_rate"] = assets.AudioSampleRate;
         metadata["playback_path"] = assets.PlaybackPath;
+        metadata["poster_path"] = assets.PosterPath;
+        metadata["preview_start_seconds"] = assets.PreviewStartSeconds;
 
         if (assets.Duration is not null)
         {
@@ -1377,6 +1382,7 @@ public sealed class CardRepository
             [])
         {
             PlaybackUrl = metadata["playback_path"]?.GetValue<string>() is null ? null : $"/api/cards/{cardId}/playback",
+            PosterUrl = metadata["poster_path"]?.GetValue<string>() is null ? null : $"/api/cards/{cardId}/poster",
         };
     }
 

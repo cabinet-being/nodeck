@@ -21,6 +21,7 @@ public static class CardEndpoints
         group.MapGet("/{id:long}/content", GetCardContentAsync);
         group.MapGet("/{id:long}/playback", GetCardPlaybackAsync);
         group.MapGet("/{id:long}/preview", GetCardPreviewAsync);
+        group.MapGet("/{id:long}/poster", GetCardPosterAsync);
 
         return app;
     }
@@ -344,6 +345,22 @@ public static class CardEndpoints
         return stream is null
             ? Results.NotFound(new { error = "Card preview file not found." })
             : Results.File(stream, previewService.GetContentType(previewPath), enableRangeProcessing: true);
+    }
+
+    private static async Task<IResult> GetCardPosterAsync(
+        CardRepository repository,
+        PreviewService previewService,
+        long id)
+    {
+        var card = await repository.GetByIdAsync(id);
+        var posterPath = card?.Metadata["poster_path"]?.GetValue<string>();
+        if (posterPath is null)
+            return Results.NotFound(new { error = "Card poster not found." });
+
+        var stream = previewService.OpenRead(posterPath);
+        return stream is null
+            ? Results.NotFound(new { error = "Card poster file not found." })
+            : Results.File(stream, previewService.GetContentType(posterPath), enableRangeProcessing: true);
     }
 
     private static bool TryReadOptionalJsonObject(
