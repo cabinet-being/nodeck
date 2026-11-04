@@ -35,6 +35,7 @@ function json(body: unknown, method: string): RequestInit {
 
 export const listTags = (search = '') =>
   request<Tag[]>(`/api/tags${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+export const getTag = (id: number) => request<Tag>(`/api/tags/${id}`);
 export const createTag = (name: string, aliases: string[] = []) =>
   request<Tag>('/api/tags', json({ name, aliases }, 'POST'));
 export const updateTag = (id: number, name: string, aliases: string[]) =>
@@ -44,6 +45,7 @@ export const deleteTag = (id: number) =>
 
 export const listSources = (search = '') =>
   request<Source[]>(`/api/sources${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+export const getSource = (id: number) => request<Source>(`/api/sources/${id}`);
 export const createSource = (name: string) =>
   request<Source>('/api/sources', json({ name }, 'POST'));
 export const updateSource = (id: number, name: string) =>

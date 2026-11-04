@@ -57,6 +57,8 @@ export type CardListParams = {
   mediaType?: string;
   tags?: number[];
   source?: number;
+  catalogTags?: number[];
+  catalogSource?: number;
   search?: string;
   excludeContainedMedia?: boolean;
   sort?: 'created_at';
@@ -102,6 +104,8 @@ export async function listCards(params: CardListParams = {}) {
   if (params.mediaType) searchParams.set('media_type', params.mediaType);
   if (params.tags && params.tags.length > 0) searchParams.set('tags', params.tags.join(','));
   if (params.source) searchParams.set('source', String(params.source));
+  if (params.catalogTags && params.catalogTags.length > 0) searchParams.set('catalog_tags', params.catalogTags.join(','));
+  if (params.catalogSource) searchParams.set('catalog_source', String(params.catalogSource));
   if (params.search) searchParams.set('search', params.search);
   if (params.excludeContainedMedia) searchParams.set('exclude_contained_media', 'true');
   if (params.sort) searchParams.set('sort', params.sort);
