@@ -120,7 +120,8 @@ public sealed class CatalogRepository
     {
         await using var connection = await OpenAsync();
         return (await connection.QueryAsync<SourceEntry>("""
-            SELECT s.id, s.name, s.name_conflict AS NameConflict,
+            SELECT s.id, s.name, s.legacy_card_id IS NOT NULL AS IsLegacy,
+                   s.name_conflict AS NameConflict,
                    ((SELECT COUNT(*) FROM card_sources cs
                      WHERE cs.source_id = s.id AND cs.legacy_relation_id IS NULL)
                     + (SELECT COUNT(*) FROM card_relations r
@@ -134,7 +135,8 @@ public sealed class CatalogRepository
     {
         await using var connection = await OpenAsync();
         return await connection.QuerySingleOrDefaultAsync<SourceEntry>("""
-            SELECT s.id, s.name, s.name_conflict AS NameConflict,
+            SELECT s.id, s.name, s.legacy_card_id IS NOT NULL AS IsLegacy,
+                   s.name_conflict AS NameConflict,
                    ((SELECT COUNT(*) FROM card_sources cs
                      WHERE cs.source_id = s.id AND cs.legacy_relation_id IS NULL)
                     + (SELECT COUNT(*) FROM card_relations r

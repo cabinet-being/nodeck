@@ -35,8 +35,10 @@ public sealed class CatalogApiTests
                 "SELECT id FROM tags WHERE legacy_card_id = @Id;", new { Id = legacyTagCardId });
             var legacySourceId = await connection.ExecuteScalarAsync<long>(
                 "SELECT id FROM sources WHERE legacy_card_id = @Id;", new { Id = legacySourceCardId });
+            Assert.True((await catalog.GetSourceAsync(legacySourceId))!.IsLegacy);
             customTagId = (await catalog.CreateTagAsync(new TagRequest($"custom-{token}", null))).Id;
             customSourceId = (await catalog.CreateSourceAsync(new SourceRequest($"custom-source-{token}"))).Id;
+            Assert.False((await catalog.GetSourceAsync(customSourceId))!.IsLegacy);
 
             await assignments.SetTagAsync(cardId, legacyTagId);
             await assignments.SetTagAsync(cardId, legacyTagId);

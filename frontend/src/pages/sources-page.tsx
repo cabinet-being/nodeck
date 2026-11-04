@@ -1,18 +1,5 @@
-import * as React from 'react';
+import { CatalogPage } from '@/pages/catalog-page';
 
-import { TextCardIndexPage } from '@/pages/tags-page';
-
-export function SourcesPage({
-  onNavigate,
-}: {
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-}) {
-  return (
-    <TextCardIndexPage
-      title="Sources"
-      cardType="source"
-      emptyMessage="No sources"
-      onNavigate={onNavigate}
-    />
-  );
+export function SourcesPage() {
+  return <CatalogPage kind="source" />;
 }

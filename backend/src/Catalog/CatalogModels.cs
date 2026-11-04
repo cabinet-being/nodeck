@@ -18,6 +18,7 @@ public sealed class SourceEntry
 {
     public long Id { get; set; }
     public string Name { get; set; } = "";
+    public bool IsLegacy { get; set; }
     public bool NameConflict { get; set; }
     public long ReferenceCount { get; set; }
 }
