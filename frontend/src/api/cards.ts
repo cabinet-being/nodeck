@@ -246,6 +246,16 @@ export async function updateCard(id: number, input: UpdateCardInput) {
   return readJson<Card>(response);
 }
 
+export async function updateCardPreview(id: number, startSeconds: number | null) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/preview`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ startSeconds }),
+  });
+
+  return readJson<Card>(response);
+}
+
 export async function deleteCard(id: number, deleteContents = false) {
   const query = deleteContents ? '?delete_contents=true' : '';
   const response = await fetch(`${apiBaseUrl}/api/cards/${id}${query}`, {

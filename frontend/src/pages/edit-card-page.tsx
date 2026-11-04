@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { getCard, listCards, updateCard, updateCollectionChildren, type Card } from '@/api/cards';
+import { getCard, listCards, resolveApiUrl, updateCard, updateCardPreview, updateCollectionChildren, type Card } from '@/api/cards';
 import {
   CardForm,
   keyValueRowsFromRecord,
@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ExistingMediaPicker } from '@/components/existing-media-picker';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export function EditCardPage({
   cardId,
@@ -129,6 +130,9 @@ export function EditCardPage({
         incomingRelations={
           <>
             {card.type === 'media' ? <CurrentMediaInfo card={card} /> : null}
+            {card.type === 'media' && !value.image ? (
+              <PreviewStartControl key={card.id} card={card} onUpdated={setCard} />
+            ) : null}
             <IncomingRelations card={card} />
           </>
         }
@@ -162,6 +166,117 @@ export function EditCardPage({
       setIsSavingChildren(false);
     }
   }
+}
+
+function PreviewStartControl({ card, onUpdated }: { card: Card; onUpdated: (card: Card) => void }) {
+  const duration = card.metadata.duration;
+  const mediaType = card.metadata.media_type;
+  const canAdjust = (mediaType === 'video' || mediaType === 'gif')
+    && typeof duration === 'number' && Number.isFinite(duration) && duration > 0;
+  const maxStart = canAdjust ? Math.max(0, duration - Math.min(3, duration)) : 0;
+  const currentStart = typeof card.metadata.preview_start_seconds === 'number'
+    ? card.metadata.preview_start_seconds : 0;
+  const [startSeconds, setStartSeconds] = React.useState(String(currentStart));
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [previewVersion, setPreviewVersion] = React.useState(0);
+
+  if (!canAdjust) return null;
+
+  const manual = card.metadata.preview_start_manual === true;
+  const selectedStart = Number(startSeconds);
+  const validStart = startSeconds.trim() !== '' && Number.isFinite(selectedStart)
+    && selectedStart >= 0 && selectedStart <= maxStart;
+  const previewUrl = card.previewUrl ? versionedUrl(resolveApiUrl(card.previewUrl), previewVersion) : null;
+  const posterUrl = card.posterUrl ? versionedUrl(resolveApiUrl(card.posterUrl), previewVersion) : null;
+
+  async function savePreview(nextStart: number | null) {
+    setIsSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const updated = await updateCardPreview(card.id, nextStart);
+      onUpdated(updated);
+      setStartSeconds(String(typeof updated.metadata.preview_start_seconds === 'number'
+        ? updated.metadata.preview_start_seconds : 0));
+      setPreviewVersion(Date.now());
+      setMessage(nextStart === null ? 'Automatic preview restored.' : 'Preview saved.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to update preview.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function updateStart(rawValue: number) {
+    if (Number.isFinite(rawValue)) {
+      setStartSeconds(String(Math.min(maxStart, Math.max(0, rawValue))));
+      setMessage(null);
+    }
+  }
+
+  return (
+    <UiCard>
+      <CardHeader><CardTitle>Preview start</CardTitle></CardHeader>
+      <CardContent className="grid gap-4 text-sm">
+        <div className="flex flex-wrap gap-4">
+          {posterUrl ? (
+            <div className="grid gap-1">
+              <span className="text-muted-foreground">Poster</span>
+              <img src={posterUrl} alt="Current preview poster" className="bg-muted h-32 w-32 rounded object-cover" />
+            </div>
+          ) : null}
+          {previewUrl ? (
+            <div className="grid gap-1">
+              <span className="text-muted-foreground">Animation</span>
+              <img src={previewUrl} alt="Current animated preview" className="bg-muted h-32 w-32 rounded object-cover" />
+            </div>
+          ) : null}
+        </div>
+        <p className="text-muted-foreground">{manual ? 'Manual' : 'Automatic'} start: {currentStart.toFixed(1)}s of {duration.toFixed(1)}s</p>
+        <label className="grid gap-2 font-medium">
+          Start time (seconds)
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="range"
+              min={0}
+              max={maxStart}
+              step="any"
+              value={validStart ? selectedStart : 0}
+              disabled={isSaving || maxStart === 0}
+              onChange={(event) => updateStart(event.currentTarget.valueAsNumber)}
+              className="min-w-40 flex-1 accent-primary"
+            />
+            <Input
+              type="number"
+              min={0}
+              max={maxStart}
+              step="any"
+              value={startSeconds}
+              disabled={isSaving}
+              onChange={(event) => { setStartSeconds(event.currentTarget.value); setMessage(null); }}
+              className="w-24"
+            />
+          </div>
+        </label>
+        {error ? <p role="alert" className="text-destructive">{error}</p> : null}
+        {message ? <p role="status">{message}</p> : null}
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" disabled={isSaving || !validStart} onClick={() => savePreview(selectedStart)}>
+            {isSaving ? 'Saving preview...' : 'Save preview'}
+          </Button>
+          <Button type="button" variant="outline" disabled={isSaving || !manual} onClick={() => savePreview(null)}>
+            Reset to automatic
+          </Button>
+        </div>
+      </CardContent>
+    </UiCard>
+  );
+}
+
+function versionedUrl(url: string, version: number) {
+  return version ? `${url}${url.includes('?') ? '&' : '?'}v=${version}` : url;
 }
 
 function CurrentMediaInfo({ card }: { card: Card }) {
