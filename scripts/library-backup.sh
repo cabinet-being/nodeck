@@ -97,7 +97,7 @@ table_count() {
 
 write_counts() {
     local output="$1" table count
-    for table in cards card_relations deck_cards decks tags sources tag_aliases card_tags card_sources; do
+    for table in cards card_relations deck_cards decks tags sources tag_aliases card_tags card_sources card_tag_suggestions; do
         count="$(table_count "$table")"
         [[ "$count" =~ ^[0-9]+$ ]] || die "Invalid row count for $table"
         printf 'count.%s=%s\n' "$table" "$count" >> "$output"

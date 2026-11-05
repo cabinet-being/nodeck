@@ -81,10 +81,10 @@ public sealed class SchemaMigrationTests
             "SELECT COUNT(*) FROM card_relations WHERE id = @Id;", new { Id = relationId }));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM card_tags WHERE legacy_relation_id = @Id;", new { Id = relationId }));
-        Assert.Equal(4, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
+        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
 
         await runner.InitializeAsync();
-        Assert.Equal(4, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
+        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
         await connection.ExecuteAsync("DELETE FROM card_relations WHERE id = @Id;", new { Id = relationId });
         await runner.InitializeAsync();
         Assert.Equal(0, await connection.ExecuteScalarAsync<int>(
@@ -147,8 +147,9 @@ public sealed class SchemaMigrationTests
 
         await CreateRunner(schema.ConfigurationWithManifest(manifest)).InitializeAsync();
 
-        Assert.Equal(4, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
         Assert.True(await schema.TableExistsAsync("danbooru_import_state"));
+        Assert.True(await schema.TableExistsAsync("card_tag_suggestions"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM tag_aliases WHERE alias = 'legacy_alias' AND origin = 'user' AND danbooru_id IS NULL;"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tags;"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_sources;"));
@@ -175,11 +176,78 @@ public sealed class SchemaMigrationTests
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM tag_aliases;"));
     }
 
+    [DatabaseFact]
+    public async Task VersionFiveUpgradePreservesExistingAssignmentsAndCreatesSuggestionTable()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+        await SeedVersionFourAsync(schema);
+        await using var connection = await schema.OpenAsync();
+        var manifest = await schema.WriteMatchingBackupManifestAsync(startingVersion: 4);
+
+        await CreateRunner(schema.ConfigurationWithManifest(manifest)).InitializeAsync();
+
+        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+        Assert.True(await schema.TableExistsAsync("card_tag_suggestions"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tags WHERE assignment_source = 'manual';"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM tag_aliases WHERE origin = 'user';"));
+        await CreateRunner(schema.Configuration).InitializeAsync();
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tags;"));
+    }
+
+    [DatabaseFact]
+    public async Task VersionFiveUpgradeRejectsStaleAssignmentBackupBeforeSchemaWrite()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+        await SeedVersionFourAsync(schema);
+        var manifest = await schema.WriteMatchingBackupManifestAsync(startingVersion: 4);
+        await File.WriteAllLinesAsync(manifest, (await File.ReadAllLinesAsync(manifest))
+            .Select(line => line.StartsWith("count.card_tags=", StringComparison.Ordinal)
+                ? "count.card_tags=0" : line));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateRunner(schema.ConfigurationWithManifest(manifest)).InitializeAsync());
+        Assert.Contains("backup", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await schema.TableExistsAsync("card_tag_suggestions"));
+        await using var connection = await schema.OpenAsync();
+        Assert.Equal(4, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tags;"));
+    }
+
+    private static async Task SeedVersionFourAsync(IsolatedSchema schema)
+    {
+        await schema.ApplySqlAsync("001_cards.sql", "002_catalog.sql");
+        await using var connection = await schema.OpenAsync();
+        await connection.ExecuteAsync("DROP TABLE IF EXISTS card_tag_suggestions;");
+        await connection.ExecuteAsync("""
+            CREATE TABLE schema_migrations (
+                version INT NOT NULL PRIMARY KEY, name VARCHAR(128) NOT NULL,
+                checksum CHAR(64) NOT NULL, applied_at_utc DATETIME(6) NOT NULL);
+            """);
+        foreach (var (version, name) in new[] {
+            (1, "card-ownership-v1"), (2, "decks-v1"), (3, "catalog-v1"),
+            (4, "danbooru-vocabulary-v1") })
+            await connection.ExecuteAsync("""
+                INSERT INTO schema_migrations (version, name, checksum, applied_at_utc)
+                VALUES (@Version, @Name, @Checksum, UTC_TIMESTAMP(6));
+                """, new { Version = version, Name = name,
+                    Checksum = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name))).ToLowerInvariant() });
+        var cardId = await InsertCardAsync(connection, "media");
+        var tagId = await connection.ExecuteScalarAsync<long>("""
+            INSERT INTO tags (name, canonical_key, category, origin)
+            VALUES ('existing_tag', 'existing_tag', 'general', 'user');
+            SELECT LAST_INSERT_ID();
+            """);
+        await connection.ExecuteAsync("INSERT INTO tag_aliases (tag_id, alias) VALUES (@TagId, 'existing_alias');", new { TagId = tagId });
+        await connection.ExecuteAsync("INSERT INTO card_tags (card_id, tag_id, assignment_source) VALUES (@CardId, @TagId, 'manual');",
+            new { CardId = cardId, TagId = tagId });
+    }
+
     private static async Task SeedVersionThreeAsync(IsolatedSchema schema)
     {
         await schema.ApplySqlAsync("001_cards.sql", "002_catalog.sql");
         await using var connection = await schema.OpenAsync();
         // The checked-in bootstrap schema may already include v4 additions; reconstruct v3 explicitly.
+        await connection.ExecuteAsync("DROP TABLE IF EXISTS card_tag_suggestions;");
         await connection.ExecuteAsync("DROP TABLE IF EXISTS danbooru_import_state;");
         if (await connection.ExecuteScalarAsync<int>("""
             SELECT COUNT(*) FROM information_schema.STATISTICS
@@ -341,6 +409,7 @@ public sealed class SchemaMigrationTests
             var tagAliases = await CountIfTableExistsAsync(connection, "tag_aliases");
             var cardTags = await CountIfTableExistsAsync(connection, "card_tags");
             var cardSources = await CountIfTableExistsAsync(connection, "card_sources");
+            var suggestions = await CountIfTableExistsAsync(connection, "card_tag_suggestions");
             await File.WriteAllLinesAsync(manifestPath,
             [
                 "format=1",
@@ -358,6 +427,7 @@ public sealed class SchemaMigrationTests
                 $"count.tag_aliases={tagAliases}",
                 $"count.card_tags={cardTags}",
                 $"count.card_sources={cardSources}",
+                $"count.card_tag_suggestions={suggestions}",
             ]);
             return manifestPath;
         }

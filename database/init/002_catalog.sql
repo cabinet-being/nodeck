@@ -59,6 +59,22 @@ CREATE TABLE IF NOT EXISTS card_tags (
     CONSTRAINT fk_card_tags_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS card_tag_suggestions (
+    card_id BIGINT NOT NULL,
+    tag_id BIGINT NOT NULL,
+    state VARCHAR(16) NOT NULL DEFAULT 'pending',
+    confidence DECIMAL(6,5) NULL,
+    model_key VARCHAR(128) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (card_id, tag_id),
+    KEY idx_card_tag_suggestions_card_state (card_id, state),
+    CONSTRAINT chk_card_tag_suggestions_state CHECK (state IN ('pending', 'accepted', 'rejected')),
+    CONSTRAINT chk_card_tag_suggestions_confidence CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
+    CONSTRAINT fk_card_tag_suggestions_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+    CONSTRAINT fk_card_tag_suggestions_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS card_sources (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     card_id BIGINT NOT NULL,
