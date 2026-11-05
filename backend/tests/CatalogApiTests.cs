@@ -45,6 +45,8 @@ public sealed class CatalogApiTests
             await assignments.SetTagAsync(cardId, legacyTagId);
             await assignments.SetTagAsync(cardId, customTagId);
             Assert.Equal(2, (await assignments.ListTagsAsync(cardId)).Count);
+            Assert.All(await assignments.ListTagsAsync(cardId),
+                tag => Assert.Equal("manual", tag.AssignmentSource));
             Assert.Equal(1, (await catalog.GetTagAsync(legacyTagId))!.ReferenceCount);
             Assert.Equal(1, await connection.ExecuteScalarAsync<long>("""
                 SELECT COUNT(*) FROM card_relations WHERE from_card_id = @CardId
@@ -298,6 +300,134 @@ public sealed class CatalogApiTests
                 await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
             if (sourceId != 0)
                 await connection.ExecuteAsync("DELETE FROM sources WHERE id = @Id;", new { Id = sourceId });
+        }
+    }
+
+    [DatabaseFact]
+    public async Task SuggestedTagsRequireReviewAndReanalysisPreservesDecisions()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var catalog = new CatalogRepository(configuration);
+        var assignments = new CardCatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var cardId = await InsertCardAsync(connection, "media", $"suggested-{token}");
+        var manualId = 0L;
+        var acceptId = 0L;
+        var rejectId = 0L;
+        try
+        {
+            manualId = (await catalog.CreateTagAsync(new TagRequest($"manual-{token}", null))).Id;
+            acceptId = (await catalog.CreateTagAsync(new TagRequest($"accept-{token}", null))).Id;
+            rejectId = (await catalog.CreateTagAsync(new TagRequest($"reject-{token}", null))).Id;
+            await assignments.SetTagAsync(cardId, manualId);
+
+            await assignments.UpsertSuggestionsAsync(cardId,
+            [
+                new TagSuggestionProposal(manualId, 0.99m, "test-model:v1"),
+                new TagSuggestionProposal(acceptId, 0.91m, "test-model:v1"),
+                new TagSuggestionProposal(rejectId, 0.87m, "test-model:v1")
+            ]);
+            Assert.Equal(new[] { acceptId, rejectId },
+                (await assignments.ListPendingSuggestionsAsync(cardId))
+                    .Select(item => item.TagId).Order().ToArray());
+            Assert.Equal(new[] { manualId },
+                (await assignments.ListTagsAsync(cardId)).Select(item => item.Id).ToArray());
+            await assignments.UpsertSuggestionsAsync(cardId,
+                [new TagSuggestionProposal(acceptId, 0.92m, "test-model:v2")]);
+            Assert.Equal(0.92m, (await assignments.ListPendingSuggestionsAsync(cardId))
+                .Single(item => item.TagId == acceptId).Confidence);
+
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, acceptId, "accepted"));
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, acceptId, "accepted"));
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, rejectId, "rejected"));
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, rejectId, "rejected"));
+            Assert.False(await assignments.DecideSuggestionAsync(cardId, manualId, "accepted"));
+            Assert.Empty(await assignments.ListPendingSuggestionsAsync(cardId));
+            Assert.Equal("confirmed", (await assignments.ListTagsAsync(cardId))
+                .Single(item => item.Id == acceptId).AssignmentSource);
+            Assert.Equal(0.92m, await connection.ExecuteScalarAsync<decimal>("""
+                SELECT confidence FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = acceptId }));
+
+            await assignments.UpsertSuggestionsAsync(cardId,
+            [
+                new TagSuggestionProposal(manualId, 0.01m, "test-model:v2"),
+                new TagSuggestionProposal(acceptId, 0.01m, "test-model:v2"),
+                new TagSuggestionProposal(rejectId, 0.99m, "test-model:v2")
+            ]);
+            Assert.Empty(await assignments.ListPendingSuggestionsAsync(cardId));
+            Assert.Equal(0.92m, await connection.ExecuteScalarAsync<decimal>("""
+                SELECT confidence FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = acceptId }));
+            Assert.Equal("rejected", await connection.ExecuteScalarAsync<string>("""
+                SELECT state FROM card_tag_suggestions WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = rejectId }));
+            await Assert.ThrowsAsync<CatalogConflictException>(() =>
+                assignments.DecideSuggestionAsync(cardId, rejectId, "accepted"));
+            await Assert.ThrowsAsync<CatalogValidationException>(() =>
+                assignments.DecideSuggestionAsync(cardId, acceptId, "unknown"));
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
+            foreach (var tagId in new[] { manualId, acceptId, rejectId }.Where(id => id > 0))
+                await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = tagId });
+        }
+    }
+
+    [DatabaseFact]
+    public async Task ManualRemovalSuppressesFutureProposalsAndCardDeletionCascades()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var catalog = new CatalogRepository(configuration);
+        var assignments = new CardCatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var cardId = await InsertCardAsync(connection, "media", $"manual-review-{token}");
+        var tagId = 0L;
+        var pendingId = 0L;
+        try
+        {
+            tagId = (await catalog.CreateTagAsync(new TagRequest($"manual-review-{token}", null))).Id;
+            pendingId = (await catalog.CreateTagAsync(new TagRequest($"pending-review-{token}", null))).Id;
+            await assignments.SetTagAsync(cardId, tagId);
+            Assert.True(await assignments.DeleteTagAsync(cardId, tagId));
+            Assert.False(await assignments.DeleteTagAsync(cardId, tagId));
+            Assert.Equal("rejected", await connection.ExecuteScalarAsync<string>("""
+                SELECT state FROM card_tag_suggestions WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = tagId }));
+            await assignments.UpsertSuggestionsAsync(cardId,
+                [new TagSuggestionProposal(tagId, 0.99m, "test-model:v2")]);
+            Assert.Empty(await assignments.ListPendingSuggestionsAsync(cardId));
+            Assert.Empty(await assignments.ListTagsAsync(cardId));
+
+            await assignments.SetTagAsync(cardId, tagId);
+            Assert.Equal("manual", Assert.Single(await assignments.ListTagsAsync(cardId)).AssignmentSource);
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("""
+                SELECT COUNT(*) FROM card_tag_suggestions WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = tagId }));
+            await assignments.UpsertSuggestionsAsync(cardId,
+                [new TagSuggestionProposal(pendingId, 0.75m, "test-model:v3")]);
+            Assert.Single(await assignments.ListPendingSuggestionsAsync(cardId));
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("""
+                SELECT COUNT(*) FROM card_tag_suggestions WHERE card_id = @CardId;
+                """, new { CardId = cardId }));
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
+            if (tagId != 0)
+                await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = tagId });
+            if (pendingId != 0)
+                await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = pendingId });
         }
     }
 
