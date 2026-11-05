@@ -81,10 +81,10 @@ public sealed class SchemaMigrationTests
             "SELECT COUNT(*) FROM card_relations WHERE id = @Id;", new { Id = relationId }));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM card_tags WHERE legacy_relation_id = @Id;", new { Id = relationId }));
-        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
+        Assert.Equal(6, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
 
         await runner.InitializeAsync();
-        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
+        Assert.Equal(6, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM schema_migrations;"));
         await connection.ExecuteAsync("DELETE FROM card_relations WHERE id = @Id;", new { Id = relationId });
         await runner.InitializeAsync();
         Assert.Equal(0, await connection.ExecuteScalarAsync<int>(
@@ -147,7 +147,7 @@ public sealed class SchemaMigrationTests
 
         await CreateRunner(schema.ConfigurationWithManifest(manifest)).InitializeAsync();
 
-        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+        Assert.Equal(6, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
         Assert.True(await schema.TableExistsAsync("danbooru_import_state"));
         Assert.True(await schema.TableExistsAsync("card_tag_suggestions"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM tag_aliases WHERE alias = 'legacy_alias' AND origin = 'user' AND danbooru_id IS NULL;"));
@@ -186,7 +186,7 @@ public sealed class SchemaMigrationTests
 
         await CreateRunner(schema.ConfigurationWithManifest(manifest)).InitializeAsync();
 
-        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+        Assert.Equal(6, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
         Assert.True(await schema.TableExistsAsync("card_tag_suggestions"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tags WHERE assignment_source = 'manual';"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM tag_aliases WHERE origin = 'user';"));
@@ -211,6 +211,72 @@ public sealed class SchemaMigrationTests
         await using var connection = await schema.OpenAsync();
         Assert.Equal(4, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tags;"));
+    }
+
+    [DatabaseFact]
+    public async Task VersionSixUpgradePreservesSuggestionsAndCreatesJobTable()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+        await SeedVersionFiveAsync(schema);
+        await using var connection = await schema.OpenAsync();
+        var manifest = await schema.WriteMatchingBackupManifestAsync(startingVersion: 5);
+
+        await CreateRunner(schema.ConfigurationWithManifest(manifest)).InitializeAsync();
+
+        Assert.Equal(6, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+        Assert.True(await schema.TableExistsAsync("card_image_analysis_jobs"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tag_suggestions WHERE state = 'pending';"));
+        await CreateRunner(schema.Configuration).InitializeAsync();
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tag_suggestions WHERE state = 'pending';"));
+    }
+
+    [DatabaseFact]
+    public async Task VersionSixUpgradeRejectsStaleSuggestionBackupBeforeSchemaWrite()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+        await SeedVersionFiveAsync(schema);
+        var manifest = await schema.WriteMatchingBackupManifestAsync(startingVersion: 5);
+        await File.WriteAllLinesAsync(manifest, (await File.ReadAllLinesAsync(manifest))
+            .Select(line => line.StartsWith("count.card_tag_suggestions=", StringComparison.Ordinal)
+                ? "count.card_tag_suggestions=0" : line));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateRunner(schema.ConfigurationWithManifest(manifest)).InitializeAsync());
+        Assert.Contains("backup", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await schema.TableExistsAsync("card_image_analysis_jobs"));
+        await using var connection = await schema.OpenAsync();
+        Assert.Equal(5, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM card_tag_suggestions;"));
+    }
+
+    private static async Task SeedVersionFiveAsync(IsolatedSchema schema)
+    {
+        await schema.ApplySqlAsync("001_cards.sql", "002_catalog.sql");
+        await using var connection = await schema.OpenAsync();
+        await connection.ExecuteAsync("DROP TABLE IF EXISTS card_image_analysis_jobs;");
+        await connection.ExecuteAsync("""
+            CREATE TABLE schema_migrations (
+                version INT NOT NULL PRIMARY KEY, name VARCHAR(128) NOT NULL,
+                checksum CHAR(64) NOT NULL, applied_at_utc DATETIME(6) NOT NULL);
+            """);
+        foreach (var (version, name) in new[] {
+            (1, "card-ownership-v1"), (2, "decks-v1"), (3, "catalog-v1"),
+            (4, "danbooru-vocabulary-v1"), (5, "tag-suggestions-v1") })
+            await connection.ExecuteAsync("""
+                INSERT INTO schema_migrations (version, name, checksum, applied_at_utc)
+                VALUES (@Version, @Name, @Checksum, UTC_TIMESTAMP(6));
+                """, new { Version = version, Name = name,
+                    Checksum = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name))).ToLowerInvariant() });
+        var cardId = await InsertCardAsync(connection, "media");
+        var tagId = await connection.ExecuteScalarAsync<long>("""
+            INSERT INTO tags (name, canonical_key, category, origin)
+            VALUES ('existing_suggestion', 'existing_suggestion', 'general', 'user');
+            SELECT LAST_INSERT_ID();
+            """);
+        await connection.ExecuteAsync("""
+            INSERT INTO card_tag_suggestions (card_id, tag_id, state)
+            VALUES (@CardId, @TagId, 'pending');
+            """, new { CardId = cardId, TagId = tagId });
     }
 
     private static async Task SeedVersionFourAsync(IsolatedSchema schema)
@@ -410,6 +476,7 @@ public sealed class SchemaMigrationTests
             var cardTags = await CountIfTableExistsAsync(connection, "card_tags");
             var cardSources = await CountIfTableExistsAsync(connection, "card_sources");
             var suggestions = await CountIfTableExistsAsync(connection, "card_tag_suggestions");
+            var imageAnalysisJobs = await CountIfTableExistsAsync(connection, "card_image_analysis_jobs");
             await File.WriteAllLinesAsync(manifestPath,
             [
                 "format=1",
@@ -428,6 +495,7 @@ public sealed class SchemaMigrationTests
                 $"count.card_tags={cardTags}",
                 $"count.card_sources={cardSources}",
                 $"count.card_tag_suggestions={suggestions}",
+                $"count.card_image_analysis_jobs={imageAnalysisJobs}",
             ]);
             return manifestPath;
         }

@@ -18,6 +18,7 @@ public sealed class SchemaMigrationRunner
         (3, "catalog-v1"),
         (4, "danbooru-vocabulary-v1"),
         (5, "tag-suggestions-v1"),
+        (6, "image-analysis-jobs-v1"),
     ];
 
     private readonly string _connectionString;
@@ -103,6 +104,7 @@ public sealed class SchemaMigrationRunner
                     case 3: await _catalog.InitializeAsync(); break;
                     case 4: await _catalog.InitializeDanbooruVocabularyAsync(); break;
                     case 5: await _catalog.InitializeTagSuggestionsAsync(); break;
+                    case 6: await _catalog.InitializeImageAnalysisJobsAsync(); break;
                 }
 
                 var after = await SnapshotAsync(connection);
@@ -122,6 +124,10 @@ public sealed class SchemaMigrationRunner
                     after.CardTagSuggestions != previous.CardTagSuggestions))
                     throw new InvalidOperationException(
                         "Migration 5 changed existing catalog or suggestion counts. " +
+                        "Stop the API and restore the pre-migration backup before accepting writes.");
+                if (version == 6 && after != previous)
+                    throw new InvalidOperationException(
+                        "Migration 6 changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");
                 await VerifyReferencesAsync(connection);
                 await VerifyCollectionOwnershipAsync(connection);
@@ -190,6 +196,7 @@ public sealed class SchemaMigrationRunner
             await Count("card_tags"),
             await Count("card_sources"),
             await Count("card_tag_suggestions"),
+            await Count("card_image_analysis_jobs"),
             appFiles,
             userDecks);
     }
@@ -224,6 +231,7 @@ public sealed class SchemaMigrationRunner
             Number("count.card_tags") != snapshot.CardTags ||
             Number("count.card_sources") != snapshot.CardSources ||
             Number("count.card_tag_suggestions") != snapshot.CardTagSuggestions ||
+            Number("count.card_image_analysis_jobs") != snapshot.CardImageAnalysisJobs ||
             Number("app_file_count") != snapshot.AppFiles)
             throw new InvalidOperationException("Backup manifest does not match the current database and files. Create a new backup.");
 
@@ -320,10 +328,11 @@ public sealed class SchemaMigrationRunner
     private sealed record DatabaseSnapshot(
         long Cards, long CardRelations, long Decks, long DeckCards,
         long Tags, long Sources, long TagAliases, long CardTags, long CardSources,
-        long CardTagSuggestions, long AppFiles, long UserDecks)
+        long CardTagSuggestions, long CardImageAnalysisJobs, long AppFiles, long UserDecks)
     {
         public bool HasUserData => Cards > 0 || CardRelations > 0 || DeckCards > 0 ||
             UserDecks > 0 || Tags > 0 || Sources > 0 || TagAliases > 0 ||
-            CardTags > 0 || CardSources > 0 || CardTagSuggestions > 0 || AppFiles > 0;
+            CardTags > 0 || CardSources > 0 || CardTagSuggestions > 0 ||
+            CardImageAnalysisJobs > 0 || AppFiles > 0;
     }
 }
