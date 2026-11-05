@@ -144,30 +144,36 @@ public sealed class CardCatalogRepository
 
     public async Task UpsertSuggestionsAsync(long cardId, IReadOnlyCollection<TagSuggestionProposal> proposals)
     {
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await RequireContentCardAsync(connection, transaction, cardId);
+        await UpsertSuggestionsAsync(connection, transaction, cardId, proposals);
+        await transaction.CommitAsync();
+    }
+
+    public static async Task UpsertSuggestionsAsync(MySqlConnection connection, MySqlTransaction transaction,
+        long cardId, IReadOnlyCollection<TagSuggestionProposal> proposals, CancellationToken cancellationToken = default)
+    {
         ArgumentNullException.ThrowIfNull(proposals);
         var items = proposals.ToArray();
         if (items.Any(item => item.TagId <= 0 || item.Confidence is < 0 or > 1 ||
                               string.IsNullOrWhiteSpace(item.ModelKey) || item.ModelKey.Length > 128) ||
             items.Select(item => item.TagId).Distinct().Count() != items.Length)
             throw new CatalogValidationException("Suggestions need distinct tags, confidence from 0 to 1, and a model key.");
-
-        await using var connection = await OpenAsync();
-        await using var transaction = await connection.BeginTransactionAsync();
-        await RequireContentCardAsync(connection, transaction, cardId);
         foreach (var item in items)
         {
-            var tag = await connection.QuerySingleOrDefaultAsync<TagIdentity>("""
+            var tag = await connection.QuerySingleOrDefaultAsync<TagIdentity>(new CommandDefinition("""
                 SELECT id, legacy_card_id AS LegacyCardId FROM tags WHERE id = @TagId;
-                """, new { item.TagId }, transaction);
+                """, new { item.TagId }, transaction, cancellationToken: cancellationToken));
             if (tag is null)
                 throw new CatalogMissingException($"Tag {item.TagId} not found.");
             if (tag.LegacyCardId is not null)
                 throw new CatalogValidationException("Legacy tag cards cannot be proposed by the tagger.");
-            if (await connection.ExecuteScalarAsync<long>("""
+            if (await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
                 SELECT COUNT(*) FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId;
-                """, new { CardId = cardId, item.TagId }, transaction) != 0)
+                """, new { CardId = cardId, item.TagId }, transaction, cancellationToken: cancellationToken)) != 0)
                 continue;
-            await connection.ExecuteAsync("""
+            await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO card_tag_suggestions
                     (card_id, tag_id, state, confidence, model_key, created_at_utc, updated_at_utc)
                 VALUES (@CardId, @TagId, 'pending', @Confidence, @ModelKey,
@@ -176,9 +182,9 @@ public sealed class CardCatalogRepository
                     confidence = IF(state = 'pending', VALUES(confidence), confidence),
                     model_key = IF(state = 'pending', VALUES(model_key), model_key),
                     updated_at_utc = IF(state = 'pending', UTC_TIMESTAMP(6), updated_at_utc);
-                """, new { CardId = cardId, item.TagId, item.Confidence, item.ModelKey }, transaction);
+                """, new { CardId = cardId, item.TagId, item.Confidence, item.ModelKey }, transaction,
+                cancellationToken: cancellationToken));
         }
-        await transaction.CommitAsync();
     }
 
     public async Task<bool> DecideSuggestionAsync(long cardId, long tagId, string decision)

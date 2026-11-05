@@ -48,6 +48,8 @@ public sealed class CardRepository
 
             await UpdateCardAssetsAsync(connection, transaction, cardId, previewPath, metadata);
             await InsertRelationsAsync(connection, transaction, cardId, data.Relations);
+            if (data.Type == "media" && assets?.MediaType == "image")
+                await RefreshImageAnalysisJobAsync(connection, transaction, cardId, "image");
             await transaction.CommitAsync();
 
             return BuildCreatedCardDetails(
@@ -98,6 +100,8 @@ public sealed class CardRepository
                 var assets = await createAssets(mediaId, data.Images[index]);
                 ApplyAssetMetadata(mediaMetadata, assets);
                 await UpdateCardAssetsAsync(connection, transaction, mediaId, assets.PreviewPath, mediaMetadata);
+                if (assets.MediaType == "image")
+                    await RefreshImageAnalysisJobAsync(connection, transaction, mediaId, "image");
 
                 parentPreviewPath ??= assets.PreviewPath;
 
@@ -490,6 +494,7 @@ public sealed class CardRepository
 
             if (data.Assets is not null && card.Type == "media")
             {
+                await RefreshImageAnalysisJobAsync(connection, transaction, id, data.Assets.MediaType);
                 await connection.ExecuteAsync(
                     """
                     UPDATE cards parent
@@ -1384,6 +1389,34 @@ public sealed class CardRepository
         {
             ["created_at"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
         };
+
+    private static async Task RefreshImageAnalysisJobAsync(
+        MySqlConnection connection, MySqlTransaction transaction, long cardId, string mediaType)
+    {
+        await connection.ExecuteAsync("""
+            DELETE FROM card_tag_suggestions
+            WHERE card_id = @CardId AND state = 'pending';
+            """, new { CardId = cardId }, transaction);
+
+        if (mediaType != "image")
+        {
+            await connection.ExecuteAsync(
+                "DELETE FROM card_image_analysis_jobs WHERE card_id = @CardId;",
+                new { CardId = cardId }, transaction);
+            return;
+        }
+
+        await connection.ExecuteAsync("""
+            INSERT INTO card_image_analysis_jobs
+                (card_id, revision, state, attempts, available_at_utc,
+                 lease_token, lease_until_utc, last_error)
+            VALUES (@CardId, @Revision, 'pending', 0, UTC_TIMESTAMP(6), NULL, NULL, NULL)
+            ON DUPLICATE KEY UPDATE
+                revision = VALUES(revision), state = 'pending', attempts = 0,
+                available_at_utc = UTC_TIMESTAMP(6), lease_token = NULL,
+                lease_until_utc = NULL, last_error = NULL;
+            """, new { CardId = cardId, Revision = Guid.NewGuid().ToString("D") }, transaction);
+    }
 
     private static void ApplyAssetMetadata(JsonObject metadata, CardFileAssets assets)
     {

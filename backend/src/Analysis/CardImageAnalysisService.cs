@@ -8,6 +8,8 @@ namespace MyApp.Api.Analysis;
 
 public sealed record CardImageAnalysisResult(
     long CardId, int Predictions, int MatchedTags, int SubmittedSuggestions);
+public sealed record PreparedCardImageAnalysis(
+    CardImageAnalysisResult Result, IReadOnlyList<TagSuggestionProposal> Proposals, string Metadata);
 
 /// <summary>Runs an already-uploaded still image through a local tagger outside the upload transaction.</summary>
 public sealed class CardImageAnalysisService
@@ -31,6 +33,14 @@ public sealed class CardImageAnalysisService
     }
 
     public async Task<CardImageAnalysisResult> AnalyzeAsync(long cardId, CancellationToken cancellationToken = default)
+    {
+        var prepared = await PrepareAsync(cardId, cancellationToken);
+        await _catalog.UpsertSuggestionsAsync(cardId, prepared.Proposals);
+        return prepared.Result;
+    }
+
+    public async Task<PreparedCardImageAnalysis> PrepareAsync(long cardId,
+        CancellationToken cancellationToken = default)
     {
         if (cardId <= 0) throw new ArgumentOutOfRangeException(nameof(cardId));
         cancellationToken.ThrowIfCancellationRequested();
@@ -79,8 +89,9 @@ public sealed class CardImageAnalysisService
             !previewHash.SequenceEqual(await HashFileAsync(previewPath, cancellationToken)))
             throw new InvalidOperationException("The card image changed during analysis. Run analysis again.");
         cancellationToken.ThrowIfCancellationRequested();
-        await _catalog.UpsertSuggestionsAsync(cardId, proposals);
-        return new CardImageAnalysisResult(cardId, predictions.Count, matched.Length, proposals.Length);
+        return new PreparedCardImageAnalysis(
+            new CardImageAnalysisResult(cardId, predictions.Count, matched.Length, proposals.Length),
+            proposals, asset.Metadata);
     }
 
     private static string? CategoryName(int category) => category switch
@@ -103,7 +114,7 @@ public sealed class CardImageAnalysisService
         var preview = root.TryGetProperty("preview_path", out var previewPath) ? previewPath.GetString() : null;
         if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(preview))
             throw new InvalidOperationException("The card image paths are missing.");
-        return new CardAsset(content, preview);
+        return new CardAsset(content, preview, row.Metadata);
     }
 
     private string ResolveAssetPath(long cardId, string relativePath, bool isPreview)
@@ -127,7 +138,7 @@ public sealed class CardImageAnalysisService
         return await SHA256.HashDataAsync(file, ct);
     }
 
-    private sealed record CardAsset(string ContentPath, string PreviewPath);
+    private sealed record CardAsset(string ContentPath, string PreviewPath, string Metadata);
     private sealed class CardRow
     {
         public string Type { get; set; } = "";

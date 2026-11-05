@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using MyApp.Api.Analysis;
 using MyApp.Api.Storage;
 
 namespace MyApp.Api.Cards;
@@ -23,8 +24,17 @@ public static class CardEndpoints
         group.MapGet("/{id:long}/playback", GetCardPlaybackAsync);
         group.MapGet("/{id:long}/preview", GetCardPreviewAsync);
         group.MapGet("/{id:long}/poster", GetCardPosterAsync);
+        group.MapGet("/{id:long}/analysis", GetAnalysisStatusAsync);
 
         return app;
+    }
+
+    private static async Task<IResult> GetAnalysisStatusAsync(
+        long id, AnalysisQueueRepository queue, CancellationToken cancellationToken)
+    {
+        var status = await queue.GetStatusAsync(id, cancellationToken);
+        return status is null ? Results.NotFound(new { error = "Image analysis job not found." }) :
+            Results.Ok(status);
     }
 
     private static async Task<IResult> CreateExistingCollectionAsync(

@@ -76,6 +76,9 @@ builder.Services.AddScoped<CardRepository>();
 builder.Services.AddScoped<DeckRepository>();
 builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CardCatalogRepository>();
+builder.Services.AddSingleton<AnalysisQueueRepository>();
+if (!importingDanbooru && !analyzingCard)
+    builder.Services.AddHostedService<ImageAnalysisWorker>();
 builder.Services.AddSingleton<CardDatabaseInitializer>();
 builder.Services.AddSingleton<CatalogDatabaseInitializer>();
 builder.Services.AddSingleton<DeckDatabaseInitializer>();
