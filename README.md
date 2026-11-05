@@ -110,7 +110,18 @@ docker compose run --rm -e NODECK_DANBOORU_USER_AGENT='nodeck/1.0 (contact: you@
 
 The importer fetches tags before aliases, maps Danbooru categories to general, artist, copyright, character, and meta, and preserves local tags and assignments when names collide. It reports conflicts per page. Each completed page saves its cursor in MySQL, so rerun the same command after an interruption. `--max-pages N` limits a run for an initial trial; a later run resumes. `--refresh` starts a complete pass over an already finished import to pick up changes from Danbooru. Use it once, then resume without `--refresh` if interrupted. The importer limits requests to about one per second and retries temporary server errors. The API and gallery remain usable while the vocabulary is imported, but importing a large dictionary can take time.
 
-Tag proposals have their own database records until accepted. On a card page, pending proposals show confidence and accept/reject controls; accepted tags record `assignmentSource: "confirmed"`, while tags added directly record `"manual"`. Reanalysis updates only pending proposals, and removing a tag records a rejection so the same proposal does not return. The API reads pending proposals at `GET /api/cards/{id}/tag-suggestions` and records decisions at `PUT /api/cards/{id}/tag-suggestions/{tagId}/decision` with `{ "decision": "accepted" }` or `"rejected"`. The automatic model that produces proposals is part of the next media analysis stage, so the proposal controls appear only when proposals exist.
+Tag proposals have their own database records until accepted. On a card page, pending proposals show confidence and accept/reject controls; accepted tags record `assignmentSource: "confirmed"`, while tags added directly record `"manual"`. Reanalysis updates only pending proposals, and removing a tag records a rejection so the same proposal does not return. The API reads pending proposals at `GET /api/cards/{id}/tag-suggestions` and records decisions at `PUT /api/cards/{id}/tag-suggestions/{tagId}/decision` with `{ "decision": "accepted" }` or `"rejected"`.
+
+## Local image tagging (first analysis slice)
+
+Install the pinned [WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) ONNX model and labels into the backend data volume. The script checks both SHA-256 hashes. The model is about 362 MB; it runs locally on CPU. Import Danbooru tags first, since proposals reference entries in that catalog.
+
+```bash
+scripts/install-wd-tagger.sh
+docker compose run --rm backend analyze-card 123
+```
+
+Replace `123` with the ID of an already uploaded static JPEG, PNG, or WebP media card. The command analyzes its preview, matches model tag IDs to imported Danbooru IDs, and submits up to 40 general or character tag proposals for review on the card page. It does not automatically run on upload yet. GIF/video analysis, speech analysis, custom tag similarity, and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/` and must stay out of Git. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
 
 ## Database upgrades and recovery
 
