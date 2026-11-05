@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { Plus, Save, X } from 'lucide-react';
+import { Check, Plus, Save, X } from 'lucide-react';
 
 import {
-  createSource, createTag, deleteCardSource, deleteCardTag,
-  listCardSources, listCardTags, listSources, listTags,
+  createSource, createTag, decideTagSuggestion, deleteCardSource, deleteCardTag,
+  listCardSources, listCardTags, listSources, listTags, listTagSuggestions,
   setCardSource, setCardTag, type CardSource, type CardTag, type Source, type Tag,
+  type TagSuggestion,
 } from '@/api/catalog';
 import { TagChip } from '@/components/tag-chip';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ export function CardCatalogPanel({ cardId, metadata }: {
   metadata: Record<string, unknown>;
 }) {
   const [tags, setTags] = React.useState<CardTag[]>([]);
+  const [suggestions, setSuggestions] = React.useState<TagSuggestion[]>([]);
   const [sources, setSources] = React.useState<CardSource[]>([]);
   const [revision, setRevision] = React.useState(0);
   const [mode, setMode] = React.useState<'tag' | 'source' | null>(null);
@@ -28,11 +30,12 @@ export function CardCatalogPanel({ cardId, metadata }: {
 
   React.useEffect(() => {
     let active = true;
-    Promise.all([listCardTags(cardId), listCardSources(cardId)])
-      .then(([nextTags, nextSources]) => {
+    Promise.all([listCardTags(cardId), listCardSources(cardId), listTagSuggestions(cardId)])
+      .then(([nextTags, nextSources, nextSuggestions]) => {
         if (!active) return;
         setTags(nextTags);
         setSources(nextSources);
+        setSuggestions(nextSuggestions);
         setSourceDrafts(Object.fromEntries(nextSources.map((source) => [source.id, source.originalUrl ?? ''])));
       })
       .catch((cause) => { if (active) setError(message(cause)); });
@@ -93,6 +96,28 @@ export function CardCatalogPanel({ cardId, metadata }: {
           {tags.length === 0 ? <span className="text-muted-foreground text-xs">No tags</span> : null}
         </div>
       </div>
+
+      {suggestions.length > 0 ? <div className="grid gap-2" aria-label="Suggested tags">
+        <h3 className="text-muted-foreground text-xs font-medium">Suggested</h3>
+        <div className="flex flex-wrap gap-2">
+          {suggestions.map((suggestion) => <span key={suggestion.tagId}
+            className="inline-flex items-center gap-1 rounded-full border px-1.5 py-1"
+            title={suggestion.modelKey ? `Suggested by ${suggestion.modelKey}` : undefined}>
+            <TagChip name={suggestion.name} category={suggestion.category} origin={suggestion.origin} />
+            <span className="text-muted-foreground text-xs">{Math.round(suggestion.confidence * 100)}%</span>
+            <Button type="button" size="icon-xs" variant="ghost"
+              aria-label={`Accept ${suggestion.name}`} disabled={busy}
+              onClick={() => run(() => decideTagSuggestion(cardId, suggestion.tagId, 'accepted'))}>
+              <Check className="size-3" />
+            </Button>
+            <Button type="button" size="icon-xs" variant="ghost"
+              aria-label={`Reject ${suggestion.name}`} disabled={busy}
+              onClick={() => run(() => decideTagSuggestion(cardId, suggestion.tagId, 'rejected'))}>
+              <X className="size-3" />
+            </Button>
+          </span>)}
+        </div>
+      </div> : null}
 
       <div className="grid gap-2">
         <div className="flex items-center justify-between gap-2">

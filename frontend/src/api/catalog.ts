@@ -16,7 +16,17 @@ export type Source = {
   referenceCount: number;
 };
 
-export type CardTag = Pick<Tag, 'id' | 'name' | 'category' | 'origin'>;
+export type CardTag = Pick<Tag, 'id' | 'name' | 'category' | 'origin'> & {
+  assignmentSource: 'manual' | 'confirmed';
+};
+export type TagSuggestion = {
+  tagId: number;
+  name: string;
+  category: string;
+  origin: string;
+  confidence: number;
+  modelKey: string | null;
+};
 export type CardSource = Pick<Source, 'id' | 'name'> & { originalUrl: string | null };
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -58,6 +68,10 @@ export const setCardTag = (cardId: number, tagId: number) =>
   request<void>(`/api/cards/${cardId}/tags/${tagId}`, { method: 'PUT' });
 export const deleteCardTag = (cardId: number, tagId: number) =>
   request<void>(`/api/cards/${cardId}/tags/${tagId}`, { method: 'DELETE' });
+export const listTagSuggestions = (cardId: number) =>
+  request<TagSuggestion[]>(`/api/cards/${cardId}/tag-suggestions`);
+export const decideTagSuggestion = (cardId: number, tagId: number, decision: 'accepted' | 'rejected') =>
+  request<void>(`/api/cards/${cardId}/tag-suggestions/${tagId}/decision`, json({ decision }, 'PUT'));
 
 export const listCardSources = (cardId: number) =>
   request<CardSource[]>(`/api/cards/${cardId}/sources`);
