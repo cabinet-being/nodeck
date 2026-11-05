@@ -176,6 +176,88 @@ public sealed class CatalogApiTests
     }
 
     [DatabaseFact]
+    public async Task TagSearchMatchesNameAndAliasPrefixesWithLiteralWildcards()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var repository = new CatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var prefix = $"literal!_%\\{token}";
+        var nameId = 0L;
+        var aliasId = 0L;
+        var infixId = 0L;
+        var wildcardId = 0L;
+        try
+        {
+            nameId = await connection.ExecuteScalarAsync<long>("""
+                INSERT INTO tags (name, canonical_key, category, origin)
+                VALUES (@Name, @Key, 'general', 'danbooru'); SELECT LAST_INSERT_ID();
+                """, new { Name = prefix + "-name", Key = "search-test-name:" + token });
+            aliasId = await connection.ExecuteScalarAsync<long>("""
+                INSERT INTO tags (name, canonical_key, category, origin)
+                VALUES (@Name, @Key, 'character', 'danbooru'); SELECT LAST_INSERT_ID();
+                """, new { Name = "alias-target-" + token, Key = "search-test-alias:" + token });
+            await connection.ExecuteAsync("INSERT INTO tag_aliases (tag_id, alias) VALUES (@TagId, @Alias);",
+                new { TagId = aliasId, Alias = prefix + "-alias" });
+            infixId = await connection.ExecuteScalarAsync<long>("""
+                INSERT INTO tags (name, canonical_key, category, origin)
+                VALUES (@Name, @Key, 'general', 'danbooru'); SELECT LAST_INSERT_ID();
+                """, new { Name = "inside-" + prefix, Key = "search-test-infix:" + token });
+            wildcardId = await connection.ExecuteScalarAsync<long>("""
+                INSERT INTO tags (name, canonical_key, category, origin)
+                VALUES (@Name, @Key, 'general', 'danbooru'); SELECT LAST_INSERT_ID();
+                """, new { Name = $"literal!XQZ{token}-decoy", Key = "search-test-decoy:" + token });
+
+            var matches = await repository.ListTagsAsync(prefix.ToUpperInvariant());
+            Assert.Equal(new[] { aliasId, nameId }, matches.Select(tag => tag.Id).ToArray());
+            Assert.DoesNotContain(matches, tag => tag.Id == infixId || tag.Id == wildcardId);
+            Assert.Equal(aliasId, Assert.Single(await repository.ListTagsAsync(prefix + "-alias")).Id);
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM tags WHERE id IN @Ids;",
+                new { Ids = new[] { nameId, aliasId, infixId, wildcardId }.Where(id => id > 0).ToArray() });
+        }
+    }
+
+    [DatabaseFact]
+    public async Task TagSearchReturnsFirstTwoHundredMatchingNamesInOrder()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var repository = new CatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var prefix = "cap" + token;
+        try
+        {
+            await connection.ExecuteAsync("""
+                INSERT INTO tags (name, canonical_key, category, origin)
+                VALUES (@Name, @Key, 'general', 'danbooru');
+                """, Enumerable.Range(0, 205).Select(index => new
+                {
+                    Name = $"{prefix}{index:000}",
+                    Key = $"search-test-cap:{token}:{index:000}"
+                }));
+
+            var matches = await repository.ListTagsAsync(prefix);
+            Assert.Equal(200, matches.Count);
+            Assert.Equal(Enumerable.Range(0, 200).Select(index => $"{prefix}{index:000}"),
+                matches.Select(tag => tag.Name));
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM tags WHERE canonical_key LIKE @Prefix;",
+                new { Prefix = $"search-test-cap:{token}:%" });
+        }
+    }
+
+    [DatabaseFact]
     public async Task SourceNameIsCatalogDataWhileOriginalUrlBelongsToEachCardLink()
     {
         var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;

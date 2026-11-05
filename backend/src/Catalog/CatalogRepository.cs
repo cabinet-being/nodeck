@@ -18,17 +18,37 @@ public sealed class CatalogRepository
     public async Task<IReadOnlyList<TagEntry>> ListTagsAsync(string? search)
     {
         await using var connection = await OpenAsync();
-        var entries = (await connection.QueryAsync<TagEntry>("""
+        var term = NormalizeSearch(search);
+        var candidates = term is null
+            ? """
+              SELECT id AS tag_id, 1 AS match_priority FROM tags ORDER BY name, id LIMIT 200
+              """
+            : """
+              SELECT tag_id, MIN(match_priority) AS match_priority
+              FROM (
+                  SELECT id AS tag_id, CASE WHEN name = @Search THEN 0 ELSE 1 END AS match_priority
+                  FROM tags WHERE name LIKE @Prefix ESCAPE '!'
+                  UNION ALL
+                  SELECT tag_id, CASE WHEN alias = @Search THEN 0 ELSE 1 END AS match_priority
+                  FROM tag_aliases WHERE alias LIKE @Prefix ESCAPE '!'
+              ) matches
+              GROUP BY tag_id
+              """;
+        var prefix = term is null ? null : term
+            .Replace("!", "!!", StringComparison.Ordinal)
+            .Replace("%", "!%", StringComparison.Ordinal)
+            .Replace("_", "!_", StringComparison.Ordinal)
+            .Replace("\\", "!\\", StringComparison.Ordinal) + "%";
+        var entries = (await connection.QueryAsync<TagEntry>($"""
             SELECT t.id, t.name, t.category, t.origin, t.name_conflict AS NameConflict,
                    ((SELECT COUNT(*) FROM card_tags ct
                      WHERE ct.tag_id = t.id AND ct.legacy_relation_id IS NULL)
                     + (SELECT COUNT(*) FROM card_relations r
                        WHERE r.relation_type = 'tagged_with' AND r.to_card_id = t.legacy_card_id)) AS ReferenceCount
-            FROM tags t
-            WHERE @Search IS NULL OR LOCATE(@Search, t.name) > 0
-                OR EXISTS (SELECT 1 FROM tag_aliases a WHERE a.tag_id = t.id AND LOCATE(@Search, a.alias) > 0)
-            ORDER BY t.name, t.id LIMIT 200;
-            """, new { Search = NormalizeSearch(search) })).ToList();
+            FROM ({candidates}) candidates
+            JOIN tags t ON t.id = candidates.tag_id
+            ORDER BY candidates.match_priority, t.name, t.id LIMIT 200;
+            """, new { Search = term, Prefix = prefix })).ToList();
         await AddAliasesAsync(connection, entries);
         return entries;
     }
