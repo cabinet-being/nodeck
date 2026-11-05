@@ -42,9 +42,22 @@ public sealed class CatalogDatabaseInitializer
                 id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 tag_id BIGINT NOT NULL,
                 alias VARCHAR(255) NOT NULL,
+                origin VARCHAR(32) NOT NULL DEFAULT 'user',
+                danbooru_id BIGINT NULL,
                 UNIQUE KEY uq_tag_alias (alias),
+                UNIQUE KEY uq_tag_alias_danbooru (danbooru_id),
                 KEY idx_tag_alias_tag (tag_id),
                 CONSTRAINT fk_tag_alias_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+            );
+            """);
+        await connection.ExecuteAsync("""
+            CREATE TABLE IF NOT EXISTS danbooru_import_state (
+                kind VARCHAR(16) NOT NULL PRIMARY KEY,
+                cursor_before_id BIGINT NULL,
+                completed BOOLEAN NOT NULL DEFAULT FALSE,
+                processed BIGINT NOT NULL DEFAULT 0,
+                conflicts BIGINT NOT NULL DEFAULT 0,
+                updated_at_utc DATETIME(6) NOT NULL
             );
             """);
         await connection.ExecuteAsync("""
@@ -90,6 +103,41 @@ public sealed class CatalogDatabaseInitializer
             """);
 
         await ReconcileLegacyAsync(connection);
+    }
+
+    public async Task InitializeDanbooruVocabularyAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        async Task<bool> ColumnExistsAsync(string column) => await connection.ExecuteScalarAsync<bool>("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tag_aliases' AND COLUMN_NAME = @Column;
+            """, new { Column = column });
+
+        if (!await ColumnExistsAsync("origin"))
+            await connection.ExecuteAsync("ALTER TABLE tag_aliases ADD COLUMN origin VARCHAR(32) NOT NULL DEFAULT 'user';");
+        if (!await ColumnExistsAsync("danbooru_id"))
+            await connection.ExecuteAsync("ALTER TABLE tag_aliases ADD COLUMN danbooru_id BIGINT NULL;");
+
+        var hasIndex = await connection.ExecuteScalarAsync<bool>("""
+            SELECT COUNT(*) FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tag_aliases'
+              AND INDEX_NAME = 'uq_tag_alias_danbooru';
+            """);
+        if (!hasIndex)
+            await connection.ExecuteAsync("ALTER TABLE tag_aliases ADD UNIQUE KEY uq_tag_alias_danbooru (danbooru_id);");
+
+        await connection.ExecuteAsync("""
+            CREATE TABLE IF NOT EXISTS danbooru_import_state (
+                kind VARCHAR(16) NOT NULL PRIMARY KEY,
+                cursor_before_id BIGINT NULL,
+                completed BOOLEAN NOT NULL DEFAULT FALSE,
+                processed BIGINT NOT NULL DEFAULT 0,
+                conflicts BIGINT NOT NULL DEFAULT 0,
+                updated_at_utc DATETIME(6) NOT NULL
+            );
+            """);
     }
 
     public async Task ReconcileLegacyAsync()

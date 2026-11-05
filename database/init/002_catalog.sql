@@ -17,9 +17,21 @@ CREATE TABLE IF NOT EXISTS tag_aliases (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     tag_id BIGINT NOT NULL,
     alias VARCHAR(255) NOT NULL,
+    origin VARCHAR(32) NOT NULL DEFAULT 'user',
+    danbooru_id BIGINT NULL,
     UNIQUE KEY uq_tag_alias (alias),
+    UNIQUE KEY uq_tag_alias_danbooru (danbooru_id),
     KEY idx_tag_alias_tag (tag_id),
     CONSTRAINT fk_tag_alias_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS danbooru_import_state (
+    kind VARCHAR(16) NOT NULL PRIMARY KEY,
+    cursor_before_id BIGINT NULL,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    processed BIGINT NOT NULL DEFAULT 0,
+    conflicts BIGINT NOT NULL DEFAULT 0,
+    updated_at_utc DATETIME(6) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sources (
