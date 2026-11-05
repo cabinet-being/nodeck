@@ -1,4 +1,5 @@
 using MySqlConnector;
+using MyApp.Api.Analysis;
 using MyApp.Api.Cards;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
@@ -6,11 +7,26 @@ using MyApp.Api.Migrations;
 using MyApp.Api.Storage;
 
 var importingDanbooru = args.Length > 0 && args[0] == "import-danbooru-tags";
+var analyzingCard = args.Length > 0 && args[0] == "analyze-card";
 if (importingDanbooru && args.Contains("--help"))
 {
     Console.WriteLine("Usage: import-danbooru-tags [--page-size 1..1000] [--max-pages N] [--refresh]");
     Console.WriteLine("Set NODECK_DANBOORU_USER_AGENT to a unique contactable User-Agent before running.");
     return;
+}
+if (analyzingCard && args.Contains("--help"))
+{
+    Console.WriteLine("Usage: analyze-card <card-id>");
+    Console.WriteLine("Set NODECK_TAGGER_MODEL_DIR to the directory containing model.onnx and selected_tags.csv.");
+    return;
+}
+
+long? analysisCardId = null;
+if (analyzingCard)
+{
+    if (args.Length != 2 || !long.TryParse(args[1], out var parsedCardId) || parsedCardId <= 0)
+        throw new ArgumentException("Usage: analyze-card <positive-card-id>");
+    analysisCardId = parsedCardId;
 }
 
 DanbooruImportOptions? importOptions = null;
@@ -54,7 +70,7 @@ if (importingDanbooru)
         throw new ArgumentException("Set NODECK_DANBOORU_USER_AGENT before importing Danbooru tags.");
 }
 
-var builder = WebApplication.CreateBuilder(importingDanbooru ? [] : args);
+var builder = WebApplication.CreateBuilder(importingDanbooru || analyzingCard ? [] : args);
 
 builder.Services.AddScoped<CardRepository>();
 builder.Services.AddScoped<DeckRepository>();
@@ -91,6 +107,23 @@ if (importOptions is not null)
     Console.WriteLine($"Danbooru import: {result.Pages} pages, {result.Processed} entries, " +
         $"{result.Conflicts} conflicts; tags complete: {result.TagsCompleted}; " +
         $"aliases complete: {result.AliasesCompleted}.");
+    return;
+}
+if (analysisCardId is long cardId)
+{
+    var appDataRoot = app.Configuration["NODECK_APP_DATA"]
+        ?? Path.Combine(AppContext.BaseDirectory, "data");
+    var modelDirectory = app.Configuration["NODECK_TAGGER_MODEL_DIR"]
+        ?? Path.Combine(appDataRoot, "models", "wd-vit-tagger-v3");
+    using var tagger = new WdViTTagger(
+        Path.Combine(modelDirectory, "model.onnx"),
+        Path.Combine(modelDirectory, "selected_tags.csv"));
+    using var scope = app.Services.CreateScope();
+    var analysis = new CardImageAnalysisService(app.Configuration,
+        scope.ServiceProvider.GetRequiredService<CardCatalogRepository>(), tagger);
+    var result = await analysis.AnalyzeAsync(cardId);
+    Console.WriteLine($"Card {result.CardId}: {result.Predictions} predictions, " +
+        $"{result.MatchedTags} catalog matches, {result.SubmittedSuggestions} suggestions submitted.");
     return;
 }
 

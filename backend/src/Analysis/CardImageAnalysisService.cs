@@ -1,0 +1,143 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using Dapper;
+using MyApp.Api.Catalog;
+using MySqlConnector;
+
+namespace MyApp.Api.Analysis;
+
+public sealed record CardImageAnalysisResult(
+    long CardId, int Predictions, int MatchedTags, int SubmittedSuggestions);
+
+/// <summary>Runs an already-uploaded still image through a local tagger outside the upload transaction.</summary>
+public sealed class CardImageAnalysisService
+{
+    private const int MaxSuggestions = 40;
+    private readonly string _connectionString;
+    private readonly string _dataRoot;
+    private readonly CardCatalogRepository _catalog;
+    private readonly IVisualTagger _tagger;
+
+    public CardImageAnalysisService(
+        IConfiguration configuration, CardCatalogRepository catalog, IVisualTagger tagger)
+    {
+        _connectionString = configuration.GetConnectionString("Default")
+            ?? throw new InvalidOperationException("Missing database connection string.");
+        _dataRoot = configuration["NODECK_APP_DATA"]
+            ?? Environment.GetEnvironmentVariable("NODECK_APP_DATA")
+            ?? Path.Combine(AppContext.BaseDirectory, "data");
+        _catalog = catalog;
+        _tagger = tagger;
+    }
+
+    public async Task<CardImageAnalysisResult> AnalyzeAsync(long cardId, CancellationToken cancellationToken = default)
+    {
+        if (cardId <= 0) throw new ArgumentOutOfRangeException(nameof(cardId));
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        var asset = await ReadAssetAsync(connection, cardId, cancellationToken);
+        var originalPath = ResolveAssetPath(cardId, asset.ContentPath, isPreview: false);
+        var previewPath = ResolveAssetPath(cardId, asset.PreviewPath, isPreview: true);
+        if (!File.Exists(originalPath) || !File.Exists(previewPath))
+            throw new InvalidOperationException("The card's original image or preview is missing.");
+
+        var originalHash = await HashFileAsync(originalPath, cancellationToken);
+        var previewHash = await HashFileAsync(previewPath, cancellationToken);
+        var predictions = _tagger.Predict(previewPath);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (predictions.Any(item => item.DanbooruId <= 0 || item.Confidence is < 0 or > 1))
+            throw new InvalidOperationException("The visual tagger returned an invalid prediction.");
+
+        var candidates = predictions
+            .Where(item => CategoryName(item.Category) is not null)
+            .GroupBy(item => item.DanbooruId)
+            .Select(group => group.OrderByDescending(item => item.Confidence).First())
+            .ToArray();
+        var ids = candidates.Select(item => item.DanbooruId).ToArray();
+        ImportedTag[] imported = ids.Length == 0 ? Array.Empty<ImportedTag>() : (await connection.QueryAsync<ImportedTag>(new CommandDefinition("""
+            SELECT id, danbooru_id AS DanbooruId, category
+            FROM tags WHERE origin = 'danbooru' AND danbooru_id IN @Ids;
+            """, new { Ids = ids }, cancellationToken: cancellationToken))).ToArray();
+        var byExternalId = imported.ToDictionary(item => item.DanbooruId);
+        var matched = candidates
+            .Where(item => byExternalId.TryGetValue(item.DanbooruId, out var tag) &&
+                tag.Category == CategoryName(item.Category))
+            .ToArray();
+        var proposals = matched
+            .OrderByDescending(item => item.Confidence)
+            .ThenBy(item => item.DanbooruId)
+            .Take(MaxSuggestions)
+            .Select(item => new TagSuggestionProposal(
+                byExternalId[item.DanbooruId].Id, item.Confidence, _tagger.ModelKey))
+            .ToArray();
+
+        // A replacement can keep the same relative path, so compare bytes as well as metadata.
+        var latest = await ReadAssetAsync(connection, cardId, cancellationToken);
+        if (latest != asset ||
+            !originalHash.SequenceEqual(await HashFileAsync(originalPath, cancellationToken)) ||
+            !previewHash.SequenceEqual(await HashFileAsync(previewPath, cancellationToken)))
+            throw new InvalidOperationException("The card image changed during analysis. Run analysis again.");
+        cancellationToken.ThrowIfCancellationRequested();
+        await _catalog.UpsertSuggestionsAsync(cardId, proposals);
+        return new CardImageAnalysisResult(cardId, predictions.Count, matched.Length, proposals.Length);
+    }
+
+    private static string? CategoryName(int category) => category switch
+    {
+        0 => "general", 1 => "artist", 3 => "copyright", 4 => "character", 5 => "meta", _ => null
+    };
+
+    private async Task<CardAsset> ReadAssetAsync(MySqlConnection connection, long cardId, CancellationToken ct)
+    {
+        var row = await connection.QuerySingleOrDefaultAsync<CardRow>(new CommandDefinition(
+            "SELECT type, metadata FROM cards WHERE id = @CardId;", new { CardId = cardId }, cancellationToken: ct));
+        if (row is null) throw new CatalogMissingException("Card not found.");
+        if (row.Type != "media")
+            throw new InvalidOperationException("Only media image cards can be analyzed by this command.");
+        using var metadata = JsonDocument.Parse(row.Metadata);
+        var root = metadata.RootElement;
+        if (!root.TryGetProperty("media_type", out var mediaType) || mediaType.GetString() != "image")
+            throw new InvalidOperationException("Only still image cards can be analyzed by this command.");
+        var content = root.TryGetProperty("content_path", out var contentPath) ? contentPath.GetString() : null;
+        var preview = root.TryGetProperty("preview_path", out var previewPath) ? previewPath.GetString() : null;
+        if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(preview))
+            throw new InvalidOperationException("The card image paths are missing.");
+        return new CardAsset(content, preview);
+    }
+
+    private string ResolveAssetPath(long cardId, string relativePath, bool isPreview)
+    {
+        var prefix = $"cards/{cardId}/original.";
+        if (isPreview ? relativePath != $"cache/cards/{cardId}/preview.webp" :
+            !relativePath.StartsWith(prefix, StringComparison.Ordinal) ||
+            !new[] { "jpg", "jpeg", "png", "webp" }.Contains(relativePath[prefix.Length..], StringComparer.Ordinal))
+            throw new InvalidOperationException("The card has an unexpected image path.");
+        var root = Path.GetFullPath(_dataRoot);
+        var path = Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException("The card image path escapes the application data directory.");
+        return path;
+    }
+
+    private static async Task<byte[]> HashFileAsync(string path, CancellationToken ct)
+    {
+        await using var file = File.OpenRead(path);
+        return await SHA256.HashDataAsync(file, ct);
+    }
+
+    private sealed record CardAsset(string ContentPath, string PreviewPath);
+    private sealed class CardRow
+    {
+        public string Type { get; set; } = "";
+        public string Metadata { get; set; } = "{}";
+    }
+
+    private sealed class ImportedTag
+    {
+        public long Id { get; set; }
+        public long DanbooruId { get; set; }
+        public string Category { get; set; } = "";
+    }
+}
