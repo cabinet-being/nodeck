@@ -25,6 +25,7 @@ public static class CardEndpoints
         group.MapGet("/{id:long}/preview", GetCardPreviewAsync);
         group.MapGet("/{id:long}/poster", GetCardPosterAsync);
         group.MapGet("/{id:long}/analysis", GetAnalysisStatusAsync);
+        group.MapGet("/{id:long}/speech-analysis", GetSpeechAnalysisStatusAsync);
 
         return app;
     }
@@ -34,6 +35,14 @@ public static class CardEndpoints
     {
         var status = await queue.GetStatusAsync(id, cancellationToken);
         return status is null ? Results.NotFound(new { error = "Image analysis job not found." }) :
+            Results.Ok(status);
+    }
+
+    private static async Task<IResult> GetSpeechAnalysisStatusAsync(
+        long id, SpeechAnalysisQueueRepository queue, CancellationToken cancellationToken)
+    {
+        var status = await queue.GetStatusAsync(id, cancellationToken);
+        return status is null ? Results.NotFound(new { error = "Speech analysis job not found." }) :
             Results.Ok(status);
     }
 
