@@ -123,13 +123,26 @@ docker compose run --rm backend analyze-card 123
 
 Once the model is installed and the Danbooru tag import is complete, the backend automatically analyzes newly uploaded or replaced JPEG, PNG, WebP, GIF, MP4, MOV, and WebM media cards, including pages added to a comic or set. Static images use their preview; GIF and video use up to 30 baseline frames sampled across ten parts of the original file, plus up to ten frames probed between visibly different parts. The optional scene probes have a 15-second budget and are kept only when distinct from both neighboring baseline frames. Repeated frames reuse one inference, and tags are combined by peak confidence and appearances in different parts. MySQL stores each job so a restart does not discard it. The worker runs one analysis at a time, retries failures up to five times, and discards results when the media was replaced during analysis. Pending proposals can then be reviewed on the card page. `GET /api/cards/{id}/analysis` shows a job's state, attempt count, next attempt time, and last error; a card without an analysis job returns 404.
 
-Replace `123` in the command above with the ID of an older media card to analyze it manually. Existing cards are not queued automatically by the schema upgrade, avoiding a sudden full-library CPU load. The model submits up to 40 general or character tag proposals matched by Danbooru ID. Speech analysis, custom tag similarity, and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/` and must stay out of Git. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
+Replace `123` in the command above with the ID of an older media card to analyze it manually. Existing cards are not queued automatically by the schema upgrade, avoiding a sudden full-library CPU load. The model submits up to 40 general or character tag proposals matched by Danbooru ID. Speech-derived tag suggestions, custom tag similarity, and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/` and must stay out of Git. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
+
+## Local speech recognition
+
+Install the pinned multilingual Whisper base and Silero VAD models, then build the backend with its bundled [whisper.cpp v1.9.5](https://github.com/ggml-org/whisper.cpp/releases/tag/v1.9.5) CLI:
+
+```bash
+scripts/install-whisper-models.sh
+docker compose up -d --build backend
+```
+
+New or replaced videos with an audio stream receive a separate speech job. The worker reads up to ten minutes of the original video's audio, converts it to mono 16 kHz WAV, runs locally on two CPU threads, and renews its database lease during recognition. Jobs retry up to five times. `GET /api/cards/{id}/speech-analysis` returns the job state, detected language, processed duration, truncation flag, and separate speech and English-speech flags; it returns 404 when no job exists. A silent audio stream does not count as English speech: empty or inconclusive recognition leaves the flags and language `null`. The transcript is used only in memory and temporary files, which are removed after processing; it is not stored in MySQL or returned by the API. Mapping spoken phrases to reviewed tag suggestions and measuring accuracy on real media remain open work. Existing videos are not queued by migration 7.
+
+The installer verifies SHA-256 hashes and stores models under `volumes/app_data/models/whisper/`; keep them out of Git. Set `NODECK_WHISPER_MODEL_DIR` for another directory and `NODECK_WHISPER_CLI` for another CLI path. An absent or invalid model leaves jobs pending without consuming their attempts. Recognition has a 20-minute process limit and may be slow on CPUs; videos longer than ten minutes are marked `truncated` because only their first ten minutes are analyzed.
 
 ## Database upgrades and recovery
 
 Schema changes are recorded in `schema_migrations` and run once, in order, while the API holds a migration lock. A populated library will not upgrade until a matching backup is available. The API checks its database name, schema version, row counts, app file count, and both backup checksums before changing the schema. MySQL schema changes cannot be rolled back as one transaction, so a failed upgrade must be restored from backup while the backend is stopped.
 
-Migration 7 creates a separate durable speech-analysis job table for video audio. New or replaced videos with an audio stream receive a pending speech job; replacing one with silent media removes that job. Existing cards are not queued by the migration, and speech recognition is not active yet. A backup for this migration must be created with the updated backup script so its manifest includes the speech-job row count.
+Migration 7 creates a separate durable speech-analysis job table for video audio. New or replaced videos with an audio stream receive a pending speech job; replacing one with silent media removes that job. Existing cards are not queued by the migration. A backup for this migration must be created with the updated backup script so its manifest includes the speech-job row count.
 
 Before upgrading an existing library, keep MySQL running and create a backup from the project root:
 
