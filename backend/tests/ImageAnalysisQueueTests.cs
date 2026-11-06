@@ -94,11 +94,33 @@ public sealed class ImageAnalysisQueueTests
     }
 
     [DatabaseFact]
-    public async Task ReplacingImageWithGifRemovesOutstandingJobAndPendingSuggestions()
+    public async Task GifAndVideoCreationEachQueueAnAnalysisJob()
+    {
+        await using var scope = await QueueScope.CreateAsync();
+
+        foreach (var mediaType in new[] { "gif", "video" })
+        {
+            var cardId = await scope.CreateAsync(mediaType);
+            var status = await scope.Queue.GetStatusAsync(cardId, default);
+            Assert.NotNull(status);
+            Assert.Equal("pending", status.State);
+            Assert.Equal(0, status.Attempts);
+            var lease = await scope.Queue.ClaimAsync(default);
+            Assert.NotNull(lease);
+            Assert.Equal(cardId, lease.CardId);
+            Assert.True(await scope.Queue.FailAsync(lease,
+                new InvalidOperationException("test failure"), default));
+        }
+    }
+
+    [DatabaseFact]
+    public async Task ReplacingImageWithGifInvalidatesLeaseAndQueuesGifWithoutOldSuggestions()
     {
         await using var scope = await QueueScope.CreateAsync();
         var cardId = await scope.CreateAsync("image");
         var tagId = await scope.InsertTagAsync();
+        var oldLease = await scope.Queue.ClaimAsync(default);
+        Assert.NotNull(oldLease);
         await scope.Connection.ExecuteAsync("""
             INSERT INTO card_tag_suggestions (card_id, tag_id, state)
             VALUES (@CardId, @TagId, 'pending');
@@ -107,8 +129,12 @@ public sealed class ImageAnalysisQueueTests
         Assert.NotNull(await scope.Cards.UpdateAsync(cardId,
             new UpdateCardData("animation", null, [], QueueScope.Assets(cardId, "gif"))));
 
-        Assert.Equal(0, await scope.Connection.ExecuteScalarAsync<int>(
-            "SELECT COUNT(*) FROM card_image_analysis_jobs WHERE card_id = @CardId;", new { CardId = cardId }));
+        Assert.False(await scope.Queue.FailAsync(oldLease, new Exception("stale"), default));
+        var replacement = await scope.Queue.ClaimAsync(default);
+        Assert.NotNull(replacement);
+        Assert.Equal(cardId, replacement.CardId);
+        Assert.NotEqual(oldLease.Revision, replacement.Revision);
+        Assert.Equal(1, replacement.Attempts);
         Assert.Equal(0, await scope.Connection.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM card_tag_suggestions WHERE card_id = @CardId AND state = 'pending';",
             new { CardId = cardId }));
@@ -159,9 +185,10 @@ public sealed class ImageAnalysisQueueTests
         }
 
         public static CardFileAssets Assets(long id, string mediaType) => new(
-            $"cards/{id}/original.{(mediaType == "image" ? "png" : "gif")}",
+            $"cards/{id}/original.{mediaType switch { "image" => "png", "video" => "mp4", _ => "gif" }}",
             $"cache/cards/{id}/preview.webp", mediaType,
-            mediaType == "image" ? "image/png" : "image/gif", "fixture", 4, 2, 2);
+            mediaType switch { "image" => "image/png", "video" => "video/mp4", _ => "image/gif" },
+            "fixture", 4, 2, 2);
 
         public async Task<string> MetadataAsync(long cardId) =>
             await Connection.ExecuteScalarAsync<string>(
