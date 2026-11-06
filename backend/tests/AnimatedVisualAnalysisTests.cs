@@ -78,6 +78,53 @@ public sealed class AnimatedVisualAnalysisTests
     }
 
     [DatabaseFact]
+    public async Task CandidateOnlyPredictionBecomesProposalAndSharedFrameIsInferredOnce()
+    {
+        await using var scope = await TestScope.CreateAsync("video", 12);
+        var externalId = Random.Shared.NextInt64(1_000_000_000_000, 9_000_000_000_000);
+        var tagId = await scope.InsertTagAsync(externalId, "general");
+        var sampler = new FakeSampler([
+            new("baseline", 0.5, 0),
+            new("candidate", 6, 5, true),
+            new("candidate", 6.1, 6, true)
+        ]);
+        var tagger = new FakeTagger(new Dictionary<string, IReadOnlyList<VisualTagPrediction>>
+        {
+            ["baseline"] = [],
+            ["candidate"] = [new(externalId, 0.8m, 0)]
+        });
+
+        var result = await scope.Service(tagger, sampler).AnalyzeAsync(scope.CardId);
+
+        Assert.Equal(1, tagger.Calls["candidate"]);
+        Assert.Equal(1, result.SubmittedSuggestions);
+        var proposal = Assert.Single(await new CardCatalogRepository(scope.Configuration)
+            .ListPendingSuggestionsAsync(scope.CardId));
+        Assert.Equal(tagId, proposal.TagId);
+        Assert.Equal(0.815m, proposal.Confidence);
+    }
+
+    [DatabaseFact]
+    public async Task FortyFramesIncludingCandidatesAreAccepted()
+    {
+        await using var scope = await TestScope.CreateAsync("video", 12);
+        var frames = Enumerable.Range(0, 30)
+            .Select(index => new SampledVideoFrame("same", index * 0.3, index / 3))
+            .Concat(Enumerable.Range(0, 10)
+                .Select(index => new SampledVideoFrame("same", 9 + index * 0.3, index, true)))
+            .ToArray();
+        var tagger = new FakeTagger(new Dictionary<string, IReadOnlyList<VisualTagPrediction>>
+        {
+            ["same"] = []
+        });
+
+        var result = await scope.Service(tagger, new FakeSampler(frames)).AnalyzeAsync(scope.CardId);
+
+        Assert.Equal(1, tagger.Calls["same"]);
+        Assert.Equal(0, result.SubmittedSuggestions);
+    }
+
+    [DatabaseFact]
     public async Task ChangedOriginalDuringAnimatedPredictionDoesNotPublishSuggestions()
     {
         await using var scope = await TestScope.CreateAsync("video", 5);

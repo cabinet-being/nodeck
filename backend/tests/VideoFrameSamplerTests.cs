@@ -56,12 +56,43 @@ public sealed class VideoFrameSamplerTests
             try
             {
                 Assert.Equal(10, sampled.Frames.Select(frame => frame.SegmentIndex).Distinct().Count());
-                Assert.True(sampled.Frames.Count <= 30);
+                Assert.InRange(sampled.Frames.Count, 1, 40);
+                Assert.DoesNotContain(sampled.Frames, frame => frame.IsSceneCandidate);
                 Assert.Single(paths);
                 Assert.True(File.Exists(paths[0]));
             }
             finally { await sampled.DisposeAsync(); }
             Assert.False(File.Exists(paths[0]));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task DistinctScenesAddBoundedMidpointCandidatesAfterBaseline()
+    {
+        if (!ToolAvailable("ffmpeg")) return;
+        var root = Path.Combine(Path.GetTempPath(), $"nodeck-scenes-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var video = Path.Combine(root, "scenes.mp4");
+        try
+        {
+            await RunFfmpegAsync("-f", "lavfi", "-i", "color=c=red:s=64x64:r=10:d=5.7",
+                "-f", "lavfi", "-i", "color=c=green:s=64x64:r=10:d=0.6",
+                "-f", "lavfi", "-i", "color=c=blue:s=64x64:r=10:d=5.7",
+                "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]",
+                "-map", "[v]", "-c:v", "mpeg4", "-y", video);
+            await using var sampled = await new FfmpegVideoFrameSampler().SampleAsync(video, 12, default);
+            var baseline = sampled.Frames.Where(frame => !frame.IsSceneCandidate).ToArray();
+            var candidates = sampled.Frames.Where(frame => frame.IsSceneCandidate).ToArray();
+
+            Assert.Equal(30, baseline.Length);
+            Assert.InRange(candidates.Length, 1, 10);
+            Assert.InRange(sampled.Frames.Count, 31, 40);
+            Assert.Equal(10, baseline.Select(frame => frame.SegmentIndex).Distinct().Count());
+            Assert.All(candidates, frame => Assert.InRange(frame.TimestampSeconds, 0, 12));
+            Assert.Contains(candidates, frame => frame.TimestampSeconds is > 5.7 and < 6.3);
+            Assert.Equal(sampled.Frames.Count, sampled.Frames
+                .Select(frame => frame.TimestampSeconds).Distinct().Count());
         }
         finally { Directory.Delete(root, recursive: true); }
     }
