@@ -112,7 +112,7 @@ The importer fetches tags before aliases, maps Danbooru categories to general, a
 
 Tag proposals have their own database records until accepted. On a card page, pending proposals show confidence and accept/reject controls; accepted tags record `assignmentSource: "confirmed"`, while tags added directly record `"manual"`. Reanalysis updates only pending proposals, and removing a tag records a rejection so the same proposal does not return. The API reads pending proposals at `GET /api/cards/{id}/tag-suggestions` and records decisions at `PUT /api/cards/{id}/tag-suggestions/{tagId}/decision` with `{ "decision": "accepted" }` or `"rejected"`.
 
-## Local image tagging (first analysis slice)
+## Local image tagging
 
 Install the pinned [WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) ONNX model and labels into the backend data volume. The script checks both SHA-256 hashes. The model is about 362 MB; it runs locally on CPU. Import Danbooru tags first, since proposals reference entries in that catalog.
 
@@ -121,7 +121,9 @@ scripts/install-wd-tagger.sh
 docker compose run --rm backend analyze-card 123
 ```
 
-Replace `123` with the ID of an already uploaded static JPEG, PNG, or WebP media card. The command analyzes its preview, matches model tag IDs to imported Danbooru IDs, and submits up to 40 general or character tag proposals for review on the card page. It does not automatically run on upload yet. GIF/video analysis, speech analysis, custom tag similarity, and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/` and must stay out of Git. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
+Once the model is installed and the Danbooru tag import is complete, the backend automatically analyzes newly uploaded or replaced static JPEG, PNG, and WebP media cards, including pages added to a comic or set. MySQL stores each job so a restart does not discard it. The worker runs one inference at a time, retries failures up to five times, and discards results when the image was replaced during analysis. Pending proposals can then be reviewed on the card page. `GET /api/cards/{id}/analysis` shows a job's state, attempt count, next attempt time, and last error; a card without an image-analysis job returns 404.
+
+Replace `123` in the command above with the ID of an older still-image card to analyze it manually. Existing cards are not queued automatically by the schema upgrade, avoiding a sudden full-library CPU load. The model analyzes the generated preview and submits up to 40 general or character tag proposals matched by Danbooru ID. GIF/video analysis, speech analysis, custom tag similarity, and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/` and must stay out of Git. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
 
 ## Database upgrades and recovery
 
