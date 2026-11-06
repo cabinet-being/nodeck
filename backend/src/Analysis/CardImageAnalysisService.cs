@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Dapper;
@@ -109,8 +110,9 @@ public sealed class CardImageAnalysisService
     private async Task<IReadOnlyList<VisualTagPrediction>> PredictAnimatedAsync(
         string originalPath, double durationSeconds, CancellationToken cancellationToken)
     {
+        var clock = Stopwatch.StartNew();
         await using var sampled = await _sampler.SampleAsync(originalPath, durationSeconds, cancellationToken);
-        if (sampled.Frames.Count is < 1 or > 30)
+        if (sampled.Frames.Count is < 1 or > 40)
             throw new InvalidOperationException("The video sampler returned an invalid frame count.");
 
         var predictionsByPath = new Dictionary<string, IReadOnlyList<VisualTagPrediction>>(StringComparer.Ordinal);
@@ -118,6 +120,8 @@ public sealed class CardImageAnalysisService
         foreach (var frame in sampled.Frames)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (frame.IsSceneCandidate && clock.Elapsed >= TimeSpan.FromMinutes(3))
+                continue;
             if (!predictionsByPath.TryGetValue(frame.Path, out var predictions))
             {
                 predictions = _tagger.Predict(frame.Path);
