@@ -90,6 +90,32 @@ CREATE TABLE IF NOT EXISTS card_image_analysis_jobs (
     CONSTRAINT fk_card_image_analysis_jobs_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS card_speech_analysis_jobs (
+    card_id BIGINT NOT NULL PRIMARY KEY,
+    revision VARCHAR(36) NOT NULL,
+    state VARCHAR(16) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    available_at_utc DATETIME(6) NOT NULL,
+    lease_token VARCHAR(36) NULL,
+    lease_until_utc DATETIME(6) NULL,
+    last_error VARCHAR(512) NULL,
+    speech_detected BOOLEAN NULL,
+    english_speech_detected BOOLEAN NULL,
+    language VARCHAR(16) NULL,
+    processed_seconds DECIMAL(12,3) NULL,
+    truncated BOOLEAN NOT NULL DEFAULT FALSE,
+    model_key VARCHAR(128) NULL,
+    evidence_json JSON NULL,
+    KEY idx_card_speech_analysis_jobs_state_available (state, available_at_utc),
+    CONSTRAINT chk_card_speech_analysis_jobs_state CHECK (state IN ('pending', 'leased', 'done', 'failed')),
+    CONSTRAINT chk_card_speech_analysis_jobs_attempts CHECK (attempts >= 0),
+    CONSTRAINT chk_card_speech_analysis_jobs_speech CHECK (speech_detected IS NULL OR speech_detected IN (0, 1)),
+    CONSTRAINT chk_card_speech_analysis_jobs_english CHECK (english_speech_detected IS NULL OR english_speech_detected IN (0, 1)),
+    CONSTRAINT chk_card_speech_analysis_jobs_duration CHECK (processed_seconds IS NULL OR processed_seconds >= 0),
+    CONSTRAINT chk_card_speech_analysis_jobs_evidence CHECK (evidence_json IS NULL OR JSON_STORAGE_SIZE(evidence_json) <= 16384),
+    CONSTRAINT fk_card_speech_analysis_jobs_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS card_sources (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     card_id BIGINT NOT NULL,
