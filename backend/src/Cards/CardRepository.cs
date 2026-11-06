@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dapper;
 using MySqlConnector;
+using MyApp.Api.Analysis;
 using MyApp.Api.Storage;
 
 namespace MyApp.Api.Cards;
@@ -49,7 +50,11 @@ public sealed class CardRepository
             await UpdateCardAssetsAsync(connection, transaction, cardId, previewPath, metadata);
             await InsertRelationsAsync(connection, transaction, cardId, data.Relations);
             if (data.Type == "media" && assets is not null)
+            {
                 await RefreshImageAnalysisJobAsync(connection, transaction, cardId, assets.MediaType);
+                await SpeechAnalysisQueueRepository.RefreshAsync(connection, transaction, cardId,
+                    assets.MediaType == "video" && assets.HasAudio);
+            }
             await transaction.CommitAsync();
 
             return BuildCreatedCardDetails(
@@ -101,6 +106,8 @@ public sealed class CardRepository
                 ApplyAssetMetadata(mediaMetadata, assets);
                 await UpdateCardAssetsAsync(connection, transaction, mediaId, assets.PreviewPath, mediaMetadata);
                 await RefreshImageAnalysisJobAsync(connection, transaction, mediaId, assets.MediaType);
+                await SpeechAnalysisQueueRepository.RefreshAsync(connection, transaction, mediaId,
+                    assets.MediaType == "video" && assets.HasAudio);
 
                 parentPreviewPath ??= assets.PreviewPath;
 
@@ -494,6 +501,8 @@ public sealed class CardRepository
             if (data.Assets is not null && card.Type == "media")
             {
                 await RefreshImageAnalysisJobAsync(connection, transaction, id, data.Assets.MediaType);
+                await SpeechAnalysisQueueRepository.RefreshAsync(connection, transaction, id,
+                    data.Assets.MediaType == "video" && data.Assets.HasAudio);
                 await connection.ExecuteAsync(
                     """
                     UPDATE cards parent
