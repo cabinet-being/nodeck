@@ -175,12 +175,14 @@ public sealed class CardCatalogRepository
                 continue;
             await connection.ExecuteAsync(new CommandDefinition("""
                 INSERT INTO card_tag_suggestions
-                    (card_id, tag_id, state, confidence, model_key, created_at_utc, updated_at_utc)
-                VALUES (@CardId, @TagId, 'pending', @Confidence, @ModelKey,
+                    (card_id, tag_id, state, confidence, model_key, suggestion_source,
+                     created_at_utc, updated_at_utc)
+                VALUES (@CardId, @TagId, 'pending', @Confidence, @ModelKey, 'visual',
                     UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                 ON DUPLICATE KEY UPDATE
                     confidence = IF(state = 'pending', VALUES(confidence), confidence),
                     model_key = IF(state = 'pending', VALUES(model_key), model_key),
+                    suggestion_source = IF(state = 'pending', 'visual', suggestion_source),
                     updated_at_utc = IF(state = 'pending', UTC_TIMESTAMP(6), updated_at_utc);
                 """, new { CardId = cardId, item.TagId, item.Confidence, item.ModelKey }, transaction,
                 cancellationToken: cancellationToken));

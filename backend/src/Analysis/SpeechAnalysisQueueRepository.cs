@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Dapper;
+using MyApp.Api.Catalog;
 using MySqlConnector;
 
 namespace MyApp.Api.Analysis;
@@ -15,11 +16,13 @@ public sealed record SpeechAnalysisJobStatus(
 public sealed record PreparedCardSpeechAnalysis(
     string Metadata, bool? SpeechDetected, bool? EnglishSpeechDetected,
     string? Language, decimal? ProcessedSeconds, bool Truncated,
-    string ModelKey, string? EvidenceJson);
+    string ModelKey, string? EvidenceJson,
+    IReadOnlyList<TagSuggestionProposal>? Proposals = null);
 
 /// <summary>Durable speech-analysis leases, independent of visual tagging jobs.</summary>
 public sealed class SpeechAnalysisQueueRepository
 {
+    public const string SpeechProposalModelKey = "speech-exact-phrase-v1";
     private const int MaxAttempts = 5;
     private readonly string _connectionString;
 
@@ -34,6 +37,10 @@ public sealed class SpeechAnalysisQueueRepository
         long cardId, bool analyzeAudio, CancellationToken cancellationToken = default)
     {
         if (cardId <= 0) throw new ArgumentOutOfRangeException(nameof(cardId));
+        await connection.ExecuteAsync(new CommandDefinition("""
+            DELETE FROM card_tag_suggestions
+            WHERE card_id = @CardId AND state = 'pending' AND suggestion_source = 'speech';
+            """, new { CardId = cardId }, transaction, cancellationToken: cancellationToken));
         if (!analyzeAudio)
         {
             await connection.ExecuteAsync(new CommandDefinition(
@@ -153,6 +160,9 @@ public sealed class SpeechAnalysisQueueRepository
             return false;
         }
 
+        await PublishSpeechSuggestionsAsync(connection, transaction, lease.CardId,
+            prepared.Proposals ?? [], cancellationToken);
+
         await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE card_speech_analysis_jobs
             SET state = 'done', lease_token = NULL, lease_until_utc = NULL,
@@ -169,6 +179,46 @@ public sealed class SpeechAnalysisQueueRepository
             cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
         return true;
+    }
+
+    private static async Task PublishSpeechSuggestionsAsync(MySqlConnection connection,
+        MySqlTransaction transaction, long cardId,
+        IReadOnlyList<TagSuggestionProposal> proposals, CancellationToken cancellationToken)
+    {
+        await connection.ExecuteAsync(new CommandDefinition("""
+            DELETE FROM card_tag_suggestions
+            WHERE card_id = @CardId AND state = 'pending' AND suggestion_source = 'speech';
+            """, new { CardId = cardId }, transaction, cancellationToken: cancellationToken));
+        if (proposals.Count == 0) return;
+        var ids = proposals.Select(item => item.TagId).ToArray();
+        var validIds = (await connection.QueryAsync<long>(new CommandDefinition("""
+            SELECT t.id FROM tags t
+            WHERE t.id IN @Ids AND t.legacy_card_id IS NULL AND t.name_conflict = FALSE
+              AND ((t.origin = 'danbooru' AND t.category = 'general') OR
+                   (t.origin = 'user' AND t.category = 'custom' AND EXISTS (
+                       SELECT 1 FROM card_tags ct WHERE ct.tag_id = t.id
+                         AND ct.assignment_source IN ('manual', 'confirmed'))));
+            """, new { Ids = ids }, transaction, cancellationToken: cancellationToken))).ToHashSet();
+        foreach (var proposal in proposals.Where(item => validIds.Contains(item.TagId)))
+        {
+            await connection.ExecuteAsync(new CommandDefinition("""
+                INSERT INTO card_tag_suggestions
+                    (card_id, tag_id, state, confidence, model_key, suggestion_source,
+                     created_at_utc, updated_at_utc)
+                SELECT @CardId, @TagId, 'pending', @Confidence, @ModelKey, 'speech',
+                       UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId)
+                ON DUPLICATE KEY UPDATE
+                    confidence = IF(state = 'pending' AND suggestion_source = 'speech',
+                        VALUES(confidence), confidence),
+                    model_key = IF(state = 'pending' AND suggestion_source = 'speech',
+                        VALUES(model_key), model_key),
+                    updated_at_utc = IF(state = 'pending' AND suggestion_source = 'speech',
+                        UTC_TIMESTAMP(6), updated_at_utc);
+                """, new { CardId = cardId, proposal.TagId, proposal.Confidence,
+                    proposal.ModelKey }, transaction, cancellationToken: cancellationToken));
+        }
     }
 
     public async Task<bool> FailAsync(SpeechAnalysisJobLease lease, Exception error,
@@ -204,6 +254,13 @@ public sealed class SpeechAnalysisQueueRepository
             prepared.ProcessedSeconds is < 0 or > 600 ||
             string.IsNullOrWhiteSpace(prepared.ModelKey) || prepared.ModelKey.Length > 128)
             throw new ArgumentException("Speech analysis result is invalid.", nameof(prepared));
+        var proposals = prepared.Proposals ?? [];
+        if ((proposals.Count > 0 && prepared.EnglishSpeechDetected != true) ||
+            proposals.Count > 10 ||
+            proposals.Any(item => item.TagId <= 0 || item.Confidence is < 0 or > 1 ||
+                item.ModelKey != SpeechProposalModelKey) ||
+            proposals.Select(item => item.TagId).Distinct().Count() != proposals.Count)
+            throw new ArgumentException("Speech tag proposals are invalid.", nameof(prepared));
         if (prepared.EvidenceJson is null) return;
         if (Encoding.UTF8.GetByteCount(prepared.EvidenceJson) > 16_384)
             throw new ArgumentException("Speech evidence exceeds its size limit.", nameof(prepared));
