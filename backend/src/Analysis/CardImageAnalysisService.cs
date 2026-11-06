@@ -11,7 +11,7 @@ public sealed record CardImageAnalysisResult(
 public sealed record PreparedCardImageAnalysis(
     CardImageAnalysisResult Result, IReadOnlyList<TagSuggestionProposal> Proposals, string Metadata);
 
-/// <summary>Runs an already-uploaded still image through a local tagger outside the upload transaction.</summary>
+/// <summary>Runs uploaded media through a local visual tagger outside the upload transaction.</summary>
 public sealed class CardImageAnalysisService
 {
     private const int MaxSuggestions = 40;
@@ -19,9 +19,11 @@ public sealed class CardImageAnalysisService
     private readonly string _dataRoot;
     private readonly CardCatalogRepository _catalog;
     private readonly IVisualTagger _tagger;
+    private readonly IVideoFrameSampler _sampler;
 
     public CardImageAnalysisService(
-        IConfiguration configuration, CardCatalogRepository catalog, IVisualTagger tagger)
+        IConfiguration configuration, CardCatalogRepository catalog, IVisualTagger tagger,
+        IVideoFrameSampler? sampler = null)
     {
         _connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("Missing database connection string.");
@@ -30,6 +32,7 @@ public sealed class CardImageAnalysisService
             ?? Path.Combine(AppContext.BaseDirectory, "data");
         _catalog = catalog;
         _tagger = tagger;
+        _sampler = sampler ?? new FfmpegVideoFrameSampler();
     }
 
     public async Task<CardImageAnalysisResult> AnalyzeAsync(long cardId, CancellationToken cancellationToken = default)
@@ -47,14 +50,17 @@ public sealed class CardImageAnalysisService
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         var asset = await ReadAssetAsync(connection, cardId, cancellationToken);
-        var originalPath = ResolveAssetPath(cardId, asset.ContentPath, isPreview: false);
-        var previewPath = ResolveAssetPath(cardId, asset.PreviewPath, isPreview: true);
+        var originalPath = ResolveAssetPath(cardId, asset.ContentPath, asset.MediaType, isPreview: false);
+        var previewPath = ResolveAssetPath(cardId, asset.PreviewPath, asset.MediaType, isPreview: true);
         if (!File.Exists(originalPath) || !File.Exists(previewPath))
-            throw new InvalidOperationException("The card's original image or preview is missing.");
+            throw new InvalidOperationException("The card's original media or preview is missing.");
 
         var originalHash = await HashFileAsync(originalPath, cancellationToken);
-        var previewHash = await HashFileAsync(previewPath, cancellationToken);
-        var predictions = _tagger.Predict(previewPath);
+        var previewHash = asset.MediaType == "image"
+            ? await HashFileAsync(previewPath, cancellationToken) : null;
+        var predictions = asset.MediaType == "image"
+            ? _tagger.Predict(previewPath)
+            : await PredictAnimatedAsync(originalPath, asset.DurationSeconds!.Value, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (predictions.Any(item => item.DanbooruId <= 0 || item.Confidence is < 0 or > 1))
             throw new InvalidOperationException("The visual tagger returned an invalid prediction.");
@@ -86,8 +92,9 @@ public sealed class CardImageAnalysisService
         var latest = await ReadAssetAsync(connection, cardId, cancellationToken);
         if (latest != asset ||
             !originalHash.SequenceEqual(await HashFileAsync(originalPath, cancellationToken)) ||
-            !previewHash.SequenceEqual(await HashFileAsync(previewPath, cancellationToken)))
-            throw new InvalidOperationException("The card image changed during analysis. Run analysis again.");
+            (previewHash is not null &&
+                !previewHash.SequenceEqual(await HashFileAsync(previewPath, cancellationToken))))
+            throw new InvalidOperationException("The card media changed during analysis. Run analysis again.");
         cancellationToken.ThrowIfCancellationRequested();
         return new PreparedCardImageAnalysis(
             new CardImageAnalysisResult(cardId, predictions.Count, matched.Length, proposals.Length),
@@ -99,36 +106,95 @@ public sealed class CardImageAnalysisService
         0 => "general", 1 => "artist", 3 => "copyright", 4 => "character", 5 => "meta", _ => null
     };
 
+    private async Task<IReadOnlyList<VisualTagPrediction>> PredictAnimatedAsync(
+        string originalPath, double durationSeconds, CancellationToken cancellationToken)
+    {
+        await using var sampled = await _sampler.SampleAsync(originalPath, durationSeconds, cancellationToken);
+        if (sampled.Frames.Count is < 1 or > 30)
+            throw new InvalidOperationException("The video sampler returned an invalid frame count.");
+
+        var predictionsByPath = new Dictionary<string, IReadOnlyList<VisualTagPrediction>>(StringComparer.Ordinal);
+        var framePredictions = new List<(int Segment, VisualTagPrediction Prediction)>();
+        foreach (var frame in sampled.Frames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!predictionsByPath.TryGetValue(frame.Path, out var predictions))
+            {
+                predictions = _tagger.Predict(frame.Path);
+                predictionsByPath.Add(frame.Path, predictions);
+            }
+            framePredictions.AddRange(predictions.Select(prediction => (frame.SegmentIndex, prediction)));
+        }
+
+        if (framePredictions.Any(item => item.Prediction.DanbooruId <= 0 ||
+            item.Prediction.Confidence is < 0 or > 1))
+            throw new InvalidOperationException("The visual tagger returned an invalid prediction.");
+
+        return framePredictions
+            .GroupBy(item => (item.Prediction.DanbooruId, item.Prediction.Category))
+            .Select(group =>
+            {
+                var perSegment = group.GroupBy(item => item.Segment)
+                    .Select(segment => segment.Max(item => item.Prediction.Confidence))
+                    .ToArray();
+                var peak = perSegment.Max();
+                var recurrence = Math.Min(1m, (perSegment.Length - 1) / 2m);
+                var score = peak + (1m - peak) * 0.15m * recurrence;
+                return new VisualTagPrediction(group.Key.DanbooruId, score, group.Key.Category);
+            })
+            .ToArray();
+    }
+
     private async Task<CardAsset> ReadAssetAsync(MySqlConnection connection, long cardId, CancellationToken ct)
     {
         var row = await connection.QuerySingleOrDefaultAsync<CardRow>(new CommandDefinition(
             "SELECT type, metadata FROM cards WHERE id = @CardId;", new { CardId = cardId }, cancellationToken: ct));
         if (row is null) throw new CatalogMissingException("Card not found.");
         if (row.Type != "media")
-            throw new InvalidOperationException("Only media image cards can be analyzed by this command.");
+            throw new InvalidOperationException("Only media cards can be analyzed by this command.");
         using var metadata = JsonDocument.Parse(row.Metadata);
         var root = metadata.RootElement;
-        if (!root.TryGetProperty("media_type", out var mediaType) || mediaType.GetString() != "image")
-            throw new InvalidOperationException("Only still image cards can be analyzed by this command.");
+        var mediaType = root.TryGetProperty("media_type", out var mediaTypeElement)
+            ? mediaTypeElement.GetString() : null;
+        if (mediaType is not ("image" or "gif" or "video"))
+            throw new InvalidOperationException("Only image, GIF, and video cards can be analyzed by this command.");
         var content = root.TryGetProperty("content_path", out var contentPath) ? contentPath.GetString() : null;
         var preview = root.TryGetProperty("preview_path", out var previewPath) ? previewPath.GetString() : null;
         if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(preview))
-            throw new InvalidOperationException("The card image paths are missing.");
-        return new CardAsset(content, preview, row.Metadata);
+            throw new InvalidOperationException("The card media paths are missing.");
+        double? duration = null;
+        if (mediaType != "image")
+        {
+            if (!root.TryGetProperty("duration", out var durationElement) ||
+                durationElement.ValueKind != JsonValueKind.Number ||
+                !durationElement.TryGetDouble(out var seconds) ||
+                !double.IsFinite(seconds) || seconds < 0 ||
+                (mediaType == "video" && seconds == 0))
+                throw new InvalidOperationException("The card media duration is missing or invalid.");
+            duration = seconds;
+        }
+        return new CardAsset(content, preview, mediaType, duration, row.Metadata);
     }
 
-    private string ResolveAssetPath(long cardId, string relativePath, bool isPreview)
+    private string ResolveAssetPath(long cardId, string relativePath, string mediaType, bool isPreview)
     {
         var prefix = $"cards/{cardId}/original.";
-        if (isPreview ? relativePath != $"cache/cards/{cardId}/preview.webp" :
+        var validOriginalExtensions = mediaType switch
+        {
+            "image" => new[] { "jpg", "jpeg", "png", "webp" },
+            "gif" => new[] { "gif" },
+            "video" => new[] { "mp4", "mov", "webm" },
+            _ => Array.Empty<string>()
+        };
+        if (isPreview ? relativePath != $"cache/cards/{cardId}/preview.{(mediaType == "image" ? "webp" : "gif")}" :
             !relativePath.StartsWith(prefix, StringComparison.Ordinal) ||
-            !new[] { "jpg", "jpeg", "png", "webp" }.Contains(relativePath[prefix.Length..], StringComparer.Ordinal))
-            throw new InvalidOperationException("The card has an unexpected image path.");
+            !validOriginalExtensions.Contains(relativePath[prefix.Length..], StringComparer.Ordinal))
+            throw new InvalidOperationException("The card has an unexpected media path.");
         var root = Path.GetFullPath(_dataRoot);
         var path = Path.GetFullPath(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         if (!path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
                 StringComparison.Ordinal))
-            throw new InvalidOperationException("The card image path escapes the application data directory.");
+            throw new InvalidOperationException("The card media path escapes the application data directory.");
         return path;
     }
 
@@ -138,7 +204,8 @@ public sealed class CardImageAnalysisService
         return await SHA256.HashDataAsync(file, ct);
     }
 
-    private sealed record CardAsset(string ContentPath, string PreviewPath, string Metadata);
+    private sealed record CardAsset(string ContentPath, string PreviewPath, string MediaType,
+        double? DurationSeconds, string Metadata);
     private sealed class CardRow
     {
         public string Type { get; set; } = "";

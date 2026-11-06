@@ -48,8 +48,8 @@ public sealed class CardRepository
 
             await UpdateCardAssetsAsync(connection, transaction, cardId, previewPath, metadata);
             await InsertRelationsAsync(connection, transaction, cardId, data.Relations);
-            if (data.Type == "media" && assets?.MediaType == "image")
-                await RefreshImageAnalysisJobAsync(connection, transaction, cardId, "image");
+            if (data.Type == "media" && assets is not null)
+                await RefreshImageAnalysisJobAsync(connection, transaction, cardId, assets.MediaType);
             await transaction.CommitAsync();
 
             return BuildCreatedCardDetails(
@@ -100,8 +100,7 @@ public sealed class CardRepository
                 var assets = await createAssets(mediaId, data.Images[index]);
                 ApplyAssetMetadata(mediaMetadata, assets);
                 await UpdateCardAssetsAsync(connection, transaction, mediaId, assets.PreviewPath, mediaMetadata);
-                if (assets.MediaType == "image")
-                    await RefreshImageAnalysisJobAsync(connection, transaction, mediaId, "image");
+                await RefreshImageAnalysisJobAsync(connection, transaction, mediaId, assets.MediaType);
 
                 parentPreviewPath ??= assets.PreviewPath;
 
@@ -1398,7 +1397,7 @@ public sealed class CardRepository
             WHERE card_id = @CardId AND state = 'pending';
             """, new { CardId = cardId }, transaction);
 
-        if (mediaType != "image")
+        if (mediaType is not ("image" or "gif" or "video"))
         {
             await connection.ExecuteAsync(
                 "DELETE FROM card_image_analysis_jobs WHERE card_id = @CardId;",

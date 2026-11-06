@@ -2,14 +2,16 @@ using MyApp.Api.Catalog;
 
 namespace MyApp.Api.Analysis;
 
-/// <summary>Processes one image at a time while a database advisory lock fences other servers.</summary>
+/// <summary>Processes one media card at a time while a database advisory lock fences other servers.</summary>
 public sealed class ImageAnalysisWorker : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan AnalysisBudget = TimeSpan.FromMinutes(4);
     private readonly IConfiguration _configuration;
     private readonly AnalysisQueueRepository _queue;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ImageAnalysisWorker> _logger;
+    private readonly IVideoFrameSampler _sampler = new FfmpegVideoFrameSampler();
     private IVisualTagger? _tagger;
 
     public ImageAnalysisWorker(IConfiguration configuration, AnalysisQueueRepository queue,
@@ -50,15 +52,17 @@ public sealed class ImageAnalysisWorker : BackgroundService
                         hadLease = true;
                         try
                         {
+                            using var analysisBudget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                            analysisBudget.CancelAfter(AnalysisBudget);
                             using var scope = _scopeFactory.CreateScope();
                             var catalog = scope.ServiceProvider.GetRequiredService<CardCatalogRepository>();
-                            var analysis = new CardImageAnalysisService(_configuration, catalog, _tagger);
-                            var prepared = await analysis.PrepareAsync(lease.CardId, stoppingToken);
+                            var analysis = new CardImageAnalysisService(_configuration, catalog, _tagger, _sampler);
+                            var prepared = await analysis.PrepareAsync(lease.CardId, analysisBudget.Token);
                             if (await _queue.CompleteAsync(lease, prepared, stoppingToken))
-                                _logger.LogInformation("Analyzed image card {CardId} ({Count} suggestions).",
+                                _logger.LogInformation("Analyzed media card {CardId} ({Count} suggestions).",
                                     lease.CardId, prepared.Result.SubmittedSuggestions);
                             else
-                                _logger.LogInformation("Discarded stale image analysis for card {CardId}.", lease.CardId);
+                                _logger.LogInformation("Discarded stale media analysis for card {CardId}.", lease.CardId);
                         }
                         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                         {
@@ -66,7 +70,7 @@ public sealed class ImageAnalysisWorker : BackgroundService
                         }
                         catch (Exception error)
                         {
-                            _logger.LogWarning(error, "Image analysis failed for card {CardId}, attempt {Attempt}.",
+                            _logger.LogWarning(error, "Media analysis failed for card {CardId}, attempt {Attempt}.",
                                 lease.CardId, lease.Attempts);
                             await _queue.FailAsync(lease, error, stoppingToken);
                         }
