@@ -129,7 +129,7 @@ Replace `123` in the command above with the ID of an older media card to analyze
 
 Schema changes are recorded in `schema_migrations` and run once, in order, while the API holds a migration lock. A populated library will not upgrade until a matching backup is available. The API checks its database name, schema version, row counts, app file count, and both backup checksums before changing the schema. MySQL schema changes cannot be rolled back as one transaction, so a failed upgrade must be restored from backup while the backend is stopped.
 
-Migration 7 creates a separate durable speech-analysis job table for video audio. It does not enqueue or analyze existing cards; speech processing is not active yet. A backup for this migration must be created with the updated backup script so its manifest includes the speech-job row count.
+Migration 7 creates a separate durable speech-analysis job table for video audio. New or replaced videos with an audio stream receive a pending speech job; replacing one with silent media removes that job. Existing cards are not queued by the migration, and speech recognition is not active yet. A backup for this migration must be created with the updated backup script so its manifest includes the speech-job row count.
 
 Before upgrading an existing library, keep MySQL running and create a backup from the project root:
 
