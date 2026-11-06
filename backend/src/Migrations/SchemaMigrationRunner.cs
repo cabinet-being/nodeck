@@ -20,6 +20,7 @@ public sealed class SchemaMigrationRunner
         (5, "tag-suggestions-v1"),
         (6, "image-analysis-jobs-v1"),
         (7, "speech-analysis-jobs-v1"),
+        (8, "tag-suggestion-source-v1"),
     ];
 
     private readonly string _connectionString;
@@ -107,6 +108,7 @@ public sealed class SchemaMigrationRunner
                     case 5: await _catalog.InitializeTagSuggestionsAsync(); break;
                     case 6: await _catalog.InitializeImageAnalysisJobsAsync(); break;
                     case 7: await _catalog.InitializeSpeechAnalysisJobsAsync(); break;
+                    case 8: await _catalog.InitializeTagSuggestionSourceAsync(); break;
                 }
 
                 var after = await SnapshotAsync(connection);
@@ -134,6 +136,10 @@ public sealed class SchemaMigrationRunner
                 if (version == 7 && after != previous)
                     throw new InvalidOperationException(
                         "Migration 7 changed existing row or file counts. " +
+                        "Stop the API and restore the pre-migration backup before accepting writes.");
+                if (version == 8 && after != previous)
+                    throw new InvalidOperationException(
+                        "Migration 8 changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");
                 await VerifyReferencesAsync(connection);
                 await VerifyCollectionOwnershipAsync(connection);

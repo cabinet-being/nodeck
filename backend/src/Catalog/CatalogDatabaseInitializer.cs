@@ -151,16 +151,47 @@ public sealed class CatalogDatabaseInitializer
                 state VARCHAR(16) NOT NULL DEFAULT 'pending',
                 confidence DECIMAL(6,5) NULL,
                 model_key VARCHAR(128) NULL,
+                suggestion_source VARCHAR(16) NOT NULL DEFAULT 'visual',
                 created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
                 updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
                 PRIMARY KEY (card_id, tag_id),
                 KEY idx_card_tag_suggestions_card_state (card_id, state),
                 CONSTRAINT chk_card_tag_suggestions_state CHECK (state IN ('pending', 'accepted', 'rejected')),
                 CONSTRAINT chk_card_tag_suggestions_confidence CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
+                CONSTRAINT chk_card_tag_suggestions_source CHECK (suggestion_source IN ('visual', 'speech', 'custom')),
                 CONSTRAINT fk_card_tag_suggestions_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
                 CONSTRAINT fk_card_tag_suggestions_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
             );
             """);
+    }
+
+    public async Task InitializeTagSuggestionSourceAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var hasColumn = await connection.ExecuteScalarAsync<bool>("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'card_tag_suggestions'
+              AND COLUMN_NAME = 'suggestion_source';
+            """);
+        if (!hasColumn)
+            await connection.ExecuteAsync("""
+                ALTER TABLE card_tag_suggestions
+                ADD COLUMN suggestion_source VARCHAR(16) NOT NULL DEFAULT 'visual';
+                """);
+
+        var hasConstraint = await connection.ExecuteScalarAsync<bool>("""
+            SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+            WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'card_tag_suggestions'
+              AND CONSTRAINT_NAME = 'chk_card_tag_suggestions_source';
+            """);
+        if (!hasConstraint)
+            await connection.ExecuteAsync("""
+                ALTER TABLE card_tag_suggestions
+                ADD CONSTRAINT chk_card_tag_suggestions_source
+                CHECK (suggestion_source IN ('visual', 'speech', 'custom'));
+                """);
     }
 
     public async Task InitializeImageAnalysisJobsAsync()
