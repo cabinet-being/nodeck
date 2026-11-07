@@ -3,6 +3,7 @@ using MyApp.Api.Analysis;
 using MyApp.Api.Cards;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
+using MyApp.Api.Interest;
 using MyApp.Api.Migrations;
 using MyApp.Api.Storage;
 
@@ -76,6 +77,7 @@ builder.Services.AddScoped<CardRepository>();
 builder.Services.AddScoped<DeckRepository>();
 builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CardCatalogRepository>();
+builder.Services.AddScoped<InterestRepository>();
 builder.Services.AddSingleton<AnalysisQueueRepository>();
 builder.Services.AddSingleton<SpeechAnalysisQueueRepository>();
 if (!importingDanbooru && !analyzingCard)
@@ -86,6 +88,7 @@ if (!importingDanbooru && !analyzingCard)
 builder.Services.AddSingleton<CardDatabaseInitializer>();
 builder.Services.AddSingleton<CatalogDatabaseInitializer>();
 builder.Services.AddSingleton<DeckDatabaseInitializer>();
+builder.Services.AddSingleton<InterestDatabaseInitializer>();
 builder.Services.AddSingleton<SchemaMigrationRunner>();
 builder.Services.AddSingleton<PreviewService>();
 builder.Services.AddCors(options =>
@@ -157,6 +160,7 @@ app.MapCardEndpoints();
 app.MapCardRelationEndpoints();
 app.MapDeckEndpoints();
 app.MapFavoriteEndpoints();
+app.MapInterestEndpoints();
 app.MapCatalogEndpoints();
 
 app.Run();

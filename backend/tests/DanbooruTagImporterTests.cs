@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using MyApp.Api.Cards;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
+using MyApp.Api.Interest;
 using MyApp.Api.Migrations;
 using MySqlConnector;
 
@@ -263,7 +264,8 @@ public sealed class DanbooruTagImporterTests
                 }).Build();
                 await new SchemaMigrationRunner(configuration, NullLogger<SchemaMigrationRunner>.Instance,
                     new CardDatabaseInitializer(configuration), new DeckDatabaseInitializer(configuration),
-                    new CatalogDatabaseInitializer(configuration, NullLogger<CatalogDatabaseInitializer>.Instance)).InitializeAsync();
+                    new CatalogDatabaseInitializer(configuration, NullLogger<CatalogDatabaseInitializer>.Instance),
+                    new InterestDatabaseInitializer(configuration)).InitializeAsync();
                 return database;
             }
             catch
