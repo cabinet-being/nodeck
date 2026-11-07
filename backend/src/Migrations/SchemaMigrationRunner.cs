@@ -5,6 +5,7 @@ using Dapper;
 using MyApp.Api.Cards;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
+using MyApp.Api.Interest;
 using MySqlConnector;
 
 namespace MyApp.Api.Migrations;
@@ -21,6 +22,7 @@ public sealed class SchemaMigrationRunner
         (6, "image-analysis-jobs-v1"),
         (7, "speech-analysis-jobs-v1"),
         (8, "tag-suggestion-source-v1"),
+        (9, "interest-signals-v1"),
     ];
 
     private readonly string _connectionString;
@@ -30,13 +32,15 @@ public sealed class SchemaMigrationRunner
     private readonly CardDatabaseInitializer _cards;
     private readonly DeckDatabaseInitializer _decks;
     private readonly CatalogDatabaseInitializer _catalog;
+    private readonly InterestDatabaseInitializer _interest;
 
     public SchemaMigrationRunner(
         IConfiguration configuration,
         ILogger<SchemaMigrationRunner> logger,
         CardDatabaseInitializer cards,
         DeckDatabaseInitializer decks,
-        CatalogDatabaseInitializer catalog)
+        CatalogDatabaseInitializer catalog,
+        InterestDatabaseInitializer interest)
     {
         _connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("Missing database connection string.");
@@ -48,6 +52,7 @@ public sealed class SchemaMigrationRunner
         _cards = cards;
         _decks = decks;
         _catalog = catalog;
+        _interest = interest;
     }
 
     public async Task InitializeAsync()
@@ -109,6 +114,7 @@ public sealed class SchemaMigrationRunner
                     case 6: await _catalog.InitializeImageAnalysisJobsAsync(); break;
                     case 7: await _catalog.InitializeSpeechAnalysisJobsAsync(); break;
                     case 8: await _catalog.InitializeTagSuggestionSourceAsync(); break;
+                    case 9: await _interest.InitializeAsync(); break;
                 }
 
                 var after = await SnapshotAsync(connection);
@@ -140,6 +146,10 @@ public sealed class SchemaMigrationRunner
                 if (version == 8 && after != previous)
                     throw new InvalidOperationException(
                         "Migration 8 changed existing row or file counts. " +
+                        "Stop the API and restore the pre-migration backup before accepting writes.");
+                if (version == 9 && after != previous)
+                    throw new InvalidOperationException(
+                        "Migration 9 changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");
                 await VerifyReferencesAsync(connection);
                 await VerifyCollectionOwnershipAsync(connection);
@@ -210,6 +220,8 @@ public sealed class SchemaMigrationRunner
             await Count("card_tag_suggestions"),
             await Count("card_image_analysis_jobs"),
             await Count("card_speech_analysis_jobs"),
+            await Count("card_view_events"),
+            await Count("card_daily_votes"),
             appFiles,
             userDecks);
     }
@@ -246,6 +258,8 @@ public sealed class SchemaMigrationRunner
             Number("count.card_tag_suggestions") != snapshot.CardTagSuggestions ||
             Number("count.card_image_analysis_jobs") != snapshot.CardImageAnalysisJobs ||
             Number("count.card_speech_analysis_jobs") != snapshot.CardSpeechAnalysisJobs ||
+            Number("count.card_view_events") != snapshot.CardViewEvents ||
+            Number("count.card_daily_votes") != snapshot.CardDailyVotes ||
             Number("app_file_count") != snapshot.AppFiles)
             throw new InvalidOperationException("Backup manifest does not match the current database and files. Create a new backup.");
 
@@ -343,11 +357,13 @@ public sealed class SchemaMigrationRunner
         long Cards, long CardRelations, long Decks, long DeckCards,
         long Tags, long Sources, long TagAliases, long CardTags, long CardSources,
         long CardTagSuggestions, long CardImageAnalysisJobs, long CardSpeechAnalysisJobs,
+        long CardViewEvents, long CardDailyVotes,
         long AppFiles, long UserDecks)
     {
         public bool HasUserData => Cards > 0 || CardRelations > 0 || DeckCards > 0 ||
             UserDecks > 0 || Tags > 0 || Sources > 0 || TagAliases > 0 ||
             CardTags > 0 || CardSources > 0 || CardTagSuggestions > 0 ||
-            CardImageAnalysisJobs > 0 || CardSpeechAnalysisJobs > 0 || AppFiles > 0;
+            CardImageAnalysisJobs > 0 || CardSpeechAnalysisJobs > 0 ||
+            CardViewEvents > 0 || CardDailyVotes > 0 || AppFiles > 0;
     }
 }
