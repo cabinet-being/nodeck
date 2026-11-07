@@ -27,6 +27,7 @@ The backend exposes an ASP.NET Core Minimal API powered by .NET 9 and MySQL. The
 - Card gallery for browsing saved objects.
 - Reusable tags and sources that can be assigned to content cards.
 - Comics and sets with ordered child media; decks can reference cards from anywhere in the library.
+- Card pages record a view after two uninterrupted seconds of visible, loaded media or playing video. They also offer a daily Up, Neutral, or Down vote, separate from Favorites.
 - Media uploads recognize JPEG, PNG, WebP, GIF, MP4, MOV, and WebM from file content. The original is retained; video that fails the current browser compatibility check also gets an H.264/AAC MP4 playback copy.
 - GIF and video uploads generate a short animated preview and a still poster. The edit page lets you choose the preview start time or reset it to automatic selection.
 - MySQL-backed storage for cards, tags, decks, and related gallery data.
@@ -99,6 +100,12 @@ Video and GIF processing requires `ffmpeg` and `ffprobe`. The backend Docker ima
 
 For GIF and video, automatic preview selection samples up to ten points across the file and generates an animation of up to about three seconds with a poster. The card API exposes `posterUrl`; the video viewer uses it before playback. On the media edit page, use the Preview start slider or seconds field and **Save preview** to regenerate both files at that point. **Reset to automatic** selects a new start automatically. The API equivalent is `PUT /api/cards/{id}/preview` with `{ "startSeconds": 12.5 }`, or `null` to reset. GIF metadata is read without decoding all frames and frames above 16,777,216 pixels are rejected. Selection quality has not yet been measured on real anime and realistic media.
 
+## Interest signals
+
+On a media, comic, or set page, a view is recorded once per opening after two uninterrupted seconds with loaded content meaningfully visible in the viewport; video must be playing. Switching tabs, scrolling content out of view, or pausing video interrupts the timer. `POST /api/cards/{id}/views` accepts a UUID `eventId` and `durationMs` from 2,000 to 600,000; repeating an event ID does not create another view. The library retains the most recent 500 view events.
+
+The card page also offers **Up** (`+1`), **Neutral** (`0`), and **Down** (`-1`). `GET /api/cards/{id}/vote?timeZone=Europe/Kyiv` reads today's vote; `PUT /api/cards/{id}/vote` accepts `{ "value": 1, "timeZone": "Europe/Kyiv" }` and can replace today's choice. The browser supplies its IANA time zone; the server derives the local date from its own clock. A new date allows a new vote. An unset vote has a `null` value. Favorites remain a separate action and are not changed by votes. These signals apply to one local library, without individual viewer accounts. They are stored for future ranking; calibrated recommendations are not available yet.
+
 ## Danbooru tag vocabulary
 
 After the database upgrade, import the reusable Danbooru tags and aliases with a contactable User-Agent. Keep MySQL running; the import command starts a one-off backend container and does not start the API server:
@@ -147,6 +154,8 @@ Schema changes are recorded in `schema_migrations` and run once, in order, while
 Migration 7 creates a separate durable speech-analysis job table for video audio. New or replaced videos with an audio stream receive a pending speech job; replacing one with silent media removes that job. Existing cards are not queued by the migration. A backup for this migration must be created with the updated backup script so its manifest includes the speech-job row count.
 
 Migration 8 adds `suggestion_source` to tag proposals with `visual` as the default for existing rows. It distinguishes visual and speech proposals while keeping prior decisions intact.
+
+Migration 9 creates separate `card_view_events` and `card_daily_votes` tables. The updated backup script includes both tables' row counts in its manifest, which the API verifies before a populated-library upgrade.
 
 Before upgrading an existing library, keep MySQL running and create a backup from the project root:
 
