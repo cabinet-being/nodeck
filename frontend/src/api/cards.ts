@@ -89,6 +89,13 @@ export type UpdateCardInput = {
   relations?: CreateRelationInput[];
 };
 
+export type DailyVote = {
+  cardId: number;
+  localDate: string;
+  value: -1 | 0 | 1 | null;
+  timeZone: string;
+};
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
 export const cardTypes = ['media', 'comic', 'set'] as const;
@@ -122,6 +129,34 @@ export async function getCard(id: number) {
   const response = await fetch(`${apiBaseUrl}/api/cards/${id}`);
 
   return readJson<Card>(response);
+}
+
+export async function recordCardView(id: number, eventId: string, durationMs: number) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/views`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventId, durationMs }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error ?? 'Could not record view.');
+  }
+}
+
+export async function getDailyVote(id: number, timeZone: string) {
+  const query = new URLSearchParams({ timeZone });
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/vote?${query}`);
+  return readJson<DailyVote>(response);
+}
+
+export async function putDailyVote(id: number, value: -1 | 0 | 1, timeZone: string) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/vote`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value, timeZone }),
+  });
+  return readJson<DailyVote>(response);
 }
 
 export async function getCardRelations(id: number) {

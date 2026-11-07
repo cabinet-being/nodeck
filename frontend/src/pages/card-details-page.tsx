@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { getCard, getCardRelations, resolveApiUrl, type Card, type CardRelations } from '@/api/cards';
 import { FavoriteToggle } from '@/components/favorite-toggle';
+import { DailyVote } from '@/components/daily-vote';
 import { CardCatalogPanel } from '@/components/card-catalog-panel';
 import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +12,7 @@ import {
   VisualCardWall,
 } from '@/components/visual-card-wall';
 import { RelationDashboard } from '@/components/relation-dashboard';
+import { useCardViewTracking } from '@/hooks/use-card-view-tracking';
 
 export function CardDetailsPage({
   cardId,
@@ -24,23 +26,30 @@ export function CardDetailsPage({
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    let active = true;
     setCard(null);
     setRelations(null);
     setError(null);
 
     Promise.all([getCard(cardId), getCardRelations(cardId)])
       .then(([loadedCard, loadedRelations]) => {
-        setCard(loadedCard);
-        setRelations(loadedRelations);
+        if (active) {
+          setCard(loadedCard);
+          setRelations(loadedRelations);
+        }
       })
-      .catch((requestError) => setError(requestError.message));
+      .catch((requestError) => {
+        if (active) setError(requestError.message);
+      });
+
+    return () => { active = false; };
   }, [cardId]);
 
   if (error) {
     return <div className="text-destructive p-6 text-sm">{error}</div>;
   }
 
-  if (!card || !relations) {
+  if (!card || card.id !== cardId || !relations) {
     return <div className="text-muted-foreground p-6 text-sm">Loading</div>;
   }
 
@@ -110,12 +119,13 @@ function MediaDetails({
 }) {
   const isVideo = card.metadata.media_type === 'video';
   const videoUrl = card.playbackUrl || card.contentUrl;
+  const contentRef = useCardViewTracking(card.id, 'media');
 
   return (
     <section className="grid gap-4 p-6">
       <div className="grid gap-4 xl:grid-cols-[1fr_24rem]">
         <div className="grid gap-2">
-          <div className="bg-muted flex min-h-[28rem] items-center justify-center overflow-hidden rounded-lg border">
+          <div ref={contentRef} className="bg-muted flex min-h-[28rem] items-center justify-center overflow-hidden rounded-lg border">
             {videoUrl && isVideo ? (
               <video
                 src={resolveApiUrl(videoUrl)}
@@ -168,11 +178,12 @@ function ComicDetails({
   onFavoriteChange: (isFavorite: boolean) => void;
 }) {
   const containedCards = card.containedCards ?? [];
+  const contentRef = useCardViewTracking(card.id, 'collection');
 
   return (
     <section className="grid gap-4 p-6">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <div className="grid gap-4">
+        <div ref={contentRef} className="grid gap-4">
           {containedCards.map((item) => (
             <a
               key={item.id}
@@ -219,6 +230,7 @@ function SetDetails({
 }) {
   const containedCards = card.containedCards ?? [];
   const [view, setView] = useVisualCardView('nodeck.setView');
+  const contentRef = useCardViewTracking(card.id, 'collection');
 
   return (
     <section className="grid gap-4 p-6">
@@ -227,7 +239,9 @@ function SetDetails({
           <div className="flex justify-end">
             <VisualCardViewToggle view={view} onChange={setView} />
           </div>
-          <VisualCardWall cards={containedCards} view={view} density="compact" />
+          <div ref={contentRef}>
+            <VisualCardWall cards={containedCards} view={view} density="compact" />
+          </div>
         </div>
 
         <CardAside card={card} onFavoriteChange={onFavoriteChange} />
@@ -302,6 +316,12 @@ function CardAside({
             </div>
           </div>
         </CardHeader>
+      </UiCard>
+
+      <UiCard>
+        <CardContent className="pt-4">
+          <DailyVote key={card.id} cardId={card.id} />
+        </CardContent>
       </UiCard>
 
       <CardCatalogPanel cardId={card.id} metadata={card.metadata} />
