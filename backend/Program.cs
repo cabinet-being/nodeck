@@ -5,6 +5,7 @@ using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
 using MyApp.Api.Interest;
 using MyApp.Api.Migrations;
+using MyApp.Api.Recommendations;
 using MyApp.Api.Storage;
 
 var importingDanbooru = args.Length > 0 && args[0] == "import-danbooru-tags";
@@ -78,6 +79,7 @@ builder.Services.AddScoped<DeckRepository>();
 builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CardCatalogRepository>();
 builder.Services.AddScoped<InterestRepository>();
+builder.Services.AddScoped<RecommendationRepository>();
 builder.Services.AddSingleton<AnalysisQueueRepository>();
 builder.Services.AddSingleton<SpeechAnalysisQueueRepository>();
 if (!importingDanbooru && !analyzingCard)
@@ -161,6 +163,7 @@ app.MapCardRelationEndpoints();
 app.MapDeckEndpoints();
 app.MapFavoriteEndpoints();
 app.MapInterestEndpoints();
+app.MapRecommendationEndpoints();
 app.MapCatalogEndpoints();
 
 app.Run();
