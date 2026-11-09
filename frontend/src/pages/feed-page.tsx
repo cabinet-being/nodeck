@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Images, Layers3 } from 'lucide-react';
 
 import {
   getDailyRecommendations,
@@ -60,19 +61,21 @@ export function FeedPage({
   }
 
   return (
-    <section className="grid gap-5 p-6">
+    <section className="grid gap-5 px-4 py-6 sm:px-6 sm:py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">{kind === 'daily' ? "Today's picks" : 'Recommended'}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{kind === 'daily' ? "Today's picks" : 'Recommended'}</h1>
         <div className="flex items-center gap-2">
           {kind === 'recommended' ? (
             <div className="bg-muted flex rounded-lg p-1" role="group" aria-label="Recommendation scope">
-              <Button type="button" size="sm" variant={mode === 'collections' ? 'secondary' : 'ghost'}
+              <Button type="button" size="icon" variant={mode === 'collections' ? 'secondary' : 'ghost'}
+                aria-label="Recommend collections" title="Collections"
                 aria-pressed={mode === 'collections'} onClick={() => selectMode('collections')}>
-                Collections
+                <Layers3 className="size-4" />
               </Button>
-              <Button type="button" size="sm" variant={mode === 'pages' ? 'secondary' : 'ghost'}
+              <Button type="button" size="icon" variant={mode === 'pages' ? 'secondary' : 'ghost'}
+                aria-label="Recommend individual pages" title="Pages"
                 aria-pressed={mode === 'pages'} onClick={() => selectMode('pages')}>
-                Pages
+                <Images className="size-4" />
               </Button>
             </div>
           ) : null}

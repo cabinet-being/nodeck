@@ -47,7 +47,7 @@ export function AppSidebar({ currentPath, onNavigate }: AppSidebarProps) {
         </nav>
       </details>
 
-      <nav className="hidden flex-1 flex-col gap-6 px-3 py-4 md:flex" aria-label="Primary navigation">
+      <nav className="hidden flex-1 flex-col gap-5 px-3 py-5 md:flex" aria-label="Primary navigation">
         <NavGroup
           label="Core"
           routes={routes.filter((route) => route.group === 'core')}
@@ -83,8 +83,8 @@ function NavGroup({
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="text-muted-foreground px-2 py-1 text-xs font-medium uppercase tracking-normal">
+    <div className={cn('flex flex-col gap-1', label === 'Service' && 'border-sidebar-border border-t pt-4')}>
+      <div className="sr-only">
         {label}
       </div>
       {groupRoutes.map((route) => {

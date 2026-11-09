@@ -36,12 +36,14 @@ export function VisualCardViewToggle({
   onChange: (view: VisualCardView) => void;
 }) {
   return (
-    <div className="bg-muted flex rounded-lg p-1">
+    <div className="bg-muted flex rounded-lg p-1" role="group" aria-label="Gallery layout">
       <Button
         type="button"
         variant={view === 'grid' ? 'secondary' : 'ghost'}
         size="icon"
         aria-label="Grid view"
+        title="Grid view"
+        aria-pressed={view === 'grid'}
         onClick={() => onChange('grid')}
       >
         <Grid3X3 className="size-4" />
@@ -51,6 +53,8 @@ export function VisualCardViewToggle({
         variant={view === 'brick' ? 'secondary' : 'ghost'}
         size="icon"
         aria-label="Brick view"
+        title="Brick view"
+        aria-pressed={view === 'brick'}
         onClick={() => onChange('brick')}
       >
         <LayoutGrid className="size-4" />
@@ -80,13 +84,13 @@ export function VisualCardWall({
         'w-full max-w-full min-w-0',
         view === 'grid'
           ? cn(
-              'grid grid-cols-2 gap-3',
+              'grid grid-cols-2 gap-2 sm:gap-3',
               density === 'compact'
                 ? 'grid-cols-2 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2'
                 : 'sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6'
             )
           : cn(
-              'columns-2 gap-3',
+              'columns-2 gap-2 sm:gap-3',
               density === 'compact'
                 ? 'columns-2 sm:columns-2 md:columns-2 lg:columns-2 xl:columns-2'
                 : 'sm:columns-3 md:columns-4 xl:columns-6'
@@ -97,7 +101,7 @@ export function VisualCardWall({
         <div
           key={renderCaption ? `${card.id}-${index}` : card.id}
           className={cn(
-            'bg-muted relative w-full max-w-full min-w-0 overflow-hidden rounded-lg border',
+            'bg-muted group relative w-full max-w-full min-w-0 overflow-hidden rounded-xl border',
             view === 'grid'
               ? !renderCaption && 'block aspect-square'
               : 'mb-3 block break-inside-avoid'
@@ -118,6 +122,9 @@ export function VisualCardWall({
               imageClassName={cn('w-full object-cover', view === 'grid' ? 'size-full' : 'h-auto')}
               fallbackClassName="aspect-square" />
           </a>
+          {!renderCaption ? <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-3 pb-2 pt-7 text-sm text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            {card.title || card.type}
+          </div> : null}
           {card.isFavorite !== undefined ? (
             <FavoriteToggle
               cardId={card.id}

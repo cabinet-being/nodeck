@@ -7,7 +7,6 @@ import { CardCatalogPanel } from '@/components/card-catalog-panel';
 import { ComicReader } from '@/components/comic-reader';
 import { DeckMembershipControl } from '@/components/deck-membership-control';
 import { RecommendationRail } from '@/components/recommendation-rail';
-import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   useVisualCardView,
@@ -125,10 +124,10 @@ function MediaDetails({
   const contentRef = useCardViewTracking(card.id, 'media');
 
   return (
-    <section className="grid gap-4 p-6">
+    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div className="grid gap-4 xl:grid-cols-[1fr_24rem]">
         <div className="grid gap-2">
-          <div ref={contentRef} className="bg-muted flex min-h-[28rem] items-center justify-center overflow-hidden rounded-lg border">
+          <div ref={contentRef} className="bg-muted flex min-h-[20rem] items-center justify-center overflow-hidden rounded-xl sm:min-h-[28rem]">
             {videoUrl && isVideo ? (
               <video
                 src={resolveApiUrl(videoUrl)}
@@ -185,7 +184,7 @@ function ComicDetails({
   const contentRef = useCardViewTracking(card.id, 'collection');
 
   return (
-    <section className="grid gap-4 p-6">
+    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <ComicReader key={card.id} pages={containedCards} contentRef={contentRef} onNavigate={onNavigate} />
 
@@ -221,7 +220,7 @@ function SetDetails({
   const contentRef = useCardViewTracking(card.id, 'collection');
 
   return (
-    <section className="grid gap-4 p-6">
+    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="grid min-w-0 gap-4">
           <div className="flex justify-end">
@@ -260,21 +259,24 @@ function TextCardDetails({
   onFavoriteChange: (isFavorite: boolean) => void;
 }) {
   return (
-    <section className="mx-auto grid w-full max-w-6xl gap-4 p-6">
+    <section className="mx-auto grid w-full max-w-6xl gap-4 px-4 py-6 sm:px-6 sm:py-8">
       <UiCard>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <CardTitle>{card.title}</CardTitle>
             <div className="flex items-center gap-2">
               <FavoriteToggle cardId={card.id} isFavorite={card.isFavorite} onChange={onFavoriteChange} />
-              <Badge variant="outline">{card.type}</Badge>
-              <div className="text-muted-foreground shrink-0 text-sm">#{card.id}</div>
             </div>
           </div>
         </CardHeader>
       </UiCard>
-      <JsonPanel title="Properties" value={card.properties} />
-      <JsonPanel title="Metadata" value={card.metadata} />
+      <details className="rounded-lg border">
+        <summary className="cursor-pointer px-4 py-3 text-sm">Technical details</summary>
+        <div className="grid gap-3 border-t p-3">
+          <JsonPanel title="Properties" value={card.properties} />
+          <JsonPanel title="Metadata" value={card.metadata} />
+        </div>
+      </details>
       <RelationDashboard
         card={card}
         relations={relations}
@@ -294,14 +296,12 @@ function CardAside({
 }) {
   return (
     <aside className="grid content-start gap-4">
-      <UiCard>
+      <UiCard className="rounded-xl">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
-            <CardTitle>{card.title}</CardTitle>
+            <CardTitle className="line-clamp-2">{card.title || card.type}</CardTitle>
             <div className="flex items-center gap-2">
               <FavoriteToggle cardId={card.id} isFavorite={card.isFavorite} onChange={onFavoriteChange} />
-              <Badge variant="outline">{card.type}</Badge>
-              <div className="text-muted-foreground shrink-0 text-sm">#{card.id}</div>
             </div>
           </div>
         </CardHeader>

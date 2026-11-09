@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { X } from 'lucide-react';
+import { RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react';
 
 import { listCards, type Card } from '@/api/cards';
 import { getSource, getTag, listSources, listTags, type Source, type Tag } from '@/api/catalog';
@@ -109,13 +109,22 @@ export function GalleryPage({
     new URLSearchParams(currentSearch).has('source');
 
   return (
-    <section className="flex flex-col gap-4 p-6">
+    <section className="flex flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Gallery</h1>
+        <VisualCardViewToggle view={view} onChange={setView} />
+      </div>
       <form className="flex max-w-2xl gap-2" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
-        <Input type="search" aria-label="Search cards" placeholder="Search cards by title or ID"
+        <Input type="search" aria-label="Search cards" placeholder="Search gallery"
           value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} />
-        <Button type="submit" variant="outline">Search</Button>
+        <Button type="submit" size="icon" variant="outline" aria-label="Search gallery" title="Search"><Search className="size-4" /></Button>
       </form>
-      <div className="grid gap-3 xl:grid-cols-[1fr_auto]">
+      <details className="max-w-2xl rounded-xl border px-4 py-3">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium">
+          <SlidersHorizontal className="size-4" /> Filters
+          {selectedTags.length + (selectedSource ? 1 : 0) > 0 ? <span className="bg-muted rounded-full px-2 py-0.5 text-xs">{selectedTags.length + (selectedSource ? 1 : 0)}</span> : null}
+        </summary>
+      <div className="grid gap-3 pt-4">
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
           <div className="relative grid content-start gap-2">
             <div className="flex flex-wrap gap-1">
@@ -154,10 +163,10 @@ export function GalleryPage({
             </div> : null}
           </div>
           <Button type="button" variant="outline" onClick={applyFilters}>Apply</Button>
-          <Button type="button" variant="ghost" onClick={clearFilters}>Clear</Button>
+          <Button type="button" variant="ghost" onClick={clearFilters} aria-label="Clear filters" title="Clear filters"><RotateCcw className="size-4" /><span className="sr-only">Clear filters</span></Button>
         </div>
-        <VisualCardViewToggle view={view} onChange={setView} />
       </div>
+      </details>
       {hasLegacyFilters ? <p className="text-muted-foreground text-xs">Legacy filters are active. Apply a new selection to replace them.</p> : null}
       {error ? <p className="text-destructive text-sm">{error}</p> : null}
       {loading ? <p className="text-muted-foreground text-sm">Loading gallery…</p> : null}

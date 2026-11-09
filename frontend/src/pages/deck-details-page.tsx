@@ -1,7 +1,7 @@
 import * as React from 'react';
+import { LoaderCircle, Pencil, X } from 'lucide-react';
 
 import { getDeck, removeCardFromDeck, type DeckCard, type DeckDetails } from '@/api/decks';
-import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -86,20 +86,19 @@ export function DeckDetailsPage({
   }
 
   return (
-    <section className="grid gap-4 p-6 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div className="grid min-w-0 gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold">{deck.title}</h1>
-            <div className="text-muted-foreground text-sm">Deck #{deck.id}</div>
-          </div>
+          <h1 className="text-2xl font-semibold tracking-tight">{deck.title}</h1>
           {deck.systemKey === 'favorites' ? null : (
             <a
               href={`/decks/${deck.id}/edit`}
               onClick={onNavigate}
-              className={buttonVariants({ variant: 'outline' })}
+              className={buttonVariants({ variant: 'outline', size: 'icon' })}
+              aria-label={`Edit ${deck.title}`}
+              title="Edit deck"
             >
-              Edit deck
+              <Pencil className="size-4" />
             </a>
           )}
         </div>
@@ -157,20 +156,15 @@ function DeckCardCaption({
   isSaving: boolean;
 }) {
   return (
-    <div className="min-w-0 space-y-2 bg-background/95 p-3">
-      <a href={`/cards/${card.id}`} onClick={onNavigate} className="block min-w-0 hover:underline">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground text-xs">{card.position + 1}.</span>
-          <Badge variant="outline">{card.type}</Badge>
-          <span className="text-muted-foreground text-xs">#{card.id}</span>
-        </div>
-        <div className="mt-1 truncate text-sm font-medium" title={card.title ?? card.type}>
+    <div className="bg-background/95 flex min-w-0 items-center gap-2 p-2">
+      <a href={`/cards/${card.id}`} onClick={onNavigate} className="block min-w-0 flex-1 hover:underline" aria-label={`Open ${card.title ?? card.type}`}>
+        <div className="truncate text-sm font-medium" title={card.title ?? card.type}>
           {card.title ?? card.type}
         </div>
       </a>
       {card.membershipProperties && Object.keys(card.membershipProperties).length > 0 ? (
         <details className="text-muted-foreground text-xs">
-          <summary className="cursor-pointer">Membership properties</summary>
+          <summary className="cursor-pointer" aria-label={`Membership properties for item ${card.position + 1}`}>Details</summary>
           <dl className="mt-2 space-y-1 break-words">
             {Object.entries(card.membershipProperties).map(([key, value]) => (
               <div key={key}>
@@ -184,13 +178,14 @@ function DeckCardCaption({
       {onRemove ? (
         <Button
           type="button"
-          variant="outline"
-          size="xs"
+          variant="ghost"
+          size="icon-xs"
           disabled={isSaving}
           aria-label={`Remove ${card.title ?? card.type} from deck`}
+          title="Remove from deck"
           onClick={() => onRemove(card.id)}
         >
-          {isRemoving ? 'Removing...' : 'Remove from deck'}
+          {isRemoving ? <LoaderCircle className="size-4 animate-spin" /> : <X className="size-4" />}
         </Button>
       ) : null}
     </div>

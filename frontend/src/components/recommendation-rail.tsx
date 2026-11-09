@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowUpRight, ChevronLeft, ChevronRight, Images, Layers3 } from 'lucide-react';
 
 import { type Card } from '@/api/cards';
 import { getRecommendations, type Recommendation, type RecommendationMode } from '@/api/recommendations';
@@ -39,13 +39,15 @@ export function RecommendationRail({
       viewAllHref={`/feed/recommended?mode=${mode}${contextCardId ? `&contextCardId=${contextCardId}` : ''}`}
       controls={
         <div className="bg-muted flex rounded-lg p-1" role="group" aria-label="Recommendation scope">
-            <Button type="button" size="sm" variant={mode === 'collections' ? 'secondary' : 'ghost'}
+            <Button type="button" size="icon" variant={mode === 'collections' ? 'secondary' : 'ghost'}
+              aria-label="Recommend collections" title="Collections"
               aria-pressed={mode === 'collections'} onClick={() => setMode('collections')}>
-              Collections
+              <Layers3 className="size-4" />
             </Button>
-            <Button type="button" size="sm" variant={mode === 'pages' ? 'secondary' : 'ghost'}
+            <Button type="button" size="icon" variant={mode === 'pages' ? 'secondary' : 'ghost'}
+              aria-label="Recommend individual pages" title="Pages"
               aria-pressed={mode === 'pages'} onClick={() => setMode('pages')}>
-              Pages
+              <Images className="size-4" />
             </Button>
         </div>
       }
@@ -85,16 +87,17 @@ export function CardRail({
   return (
     <section className="min-w-0 space-y-3" aria-label={title}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <div className="flex items-center gap-2">
+        <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+        <div className="flex items-center gap-1 sm:gap-2">
           {viewAllHref ? <a href={viewAllHref} onClick={onNavigate}
-            className="text-muted-foreground hover:text-foreground whitespace-nowrap text-sm">View all</a> : null}
+            aria-label={`View all ${title}`} title={`View all ${title}`}
+            className="text-muted-foreground hover:text-foreground inline-flex size-9 items-center justify-center rounded-md transition-colors hover:bg-muted"><ArrowUpRight className="size-4" /></a> : null}
           {controls}
-          <Button type="button" size="icon" variant="outline" aria-label={`Scroll ${title} left`}
+          <Button type="button" size="icon" variant="ghost" aria-label={`Scroll ${title} left`} title="Scroll left"
             disabled={cards.length === 0} onClick={() => scroll(-1)}>
             <ChevronLeft className="size-4" />
           </Button>
-          <Button type="button" size="icon" variant="outline" aria-label={`Scroll ${title} right`}
+          <Button type="button" size="icon" variant="ghost" aria-label={`Scroll ${title} right`} title="Scroll right"
             disabled={cards.length === 0} onClick={() => scroll(1)}>
             <ChevronRight className="size-4" />
           </Button>
@@ -112,6 +115,7 @@ export function CardRail({
       ) : null}
       {cards.length > 0 ? (
         <div ref={railRef} className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2" tabIndex={0}
+          aria-label={`${title} cards`}
           onKeyDown={(event) => {
             if (event.altKey || event.ctrlKey || event.metaKey) return;
             if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -121,14 +125,16 @@ export function CardRail({
           }}>
           {cards.map((card) => (
             <a key={card.id} href={`/cards/${card.id}`} onClick={onNavigate}
-              className="bg-muted group w-40 shrink-0 snap-start overflow-hidden rounded-lg border sm:w-44">
+              aria-label={`Open ${card.title || card.type}`}
+              title={card.title || card.type}
+              className="bg-muted group relative w-40 shrink-0 snap-start overflow-hidden rounded-xl border sm:w-44">
               <div className="aspect-square overflow-hidden">
                 <CardPreview url={card.previewUrl} title={card.title} type={card.type}
                   imageClassName="size-full object-cover transition-transform group-hover:scale-105"
                   fallbackClassName="size-full text-xs" />
               </div>
-              <div className="truncate px-2 py-2 text-sm" title={card.title ?? `Card #${card.id}`}>
-                {card.title || `Card #${card.id}`}
+              <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-3 pb-2 pt-7 text-sm text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                {card.title || card.type}
               </div>
             </a>
           ))}
