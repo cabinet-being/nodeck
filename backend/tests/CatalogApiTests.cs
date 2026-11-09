@@ -534,6 +534,195 @@ public sealed class CatalogApiTests
         }
     }
 
+    private sealed record DecisionRow(long? SuggestedTagId, long? ChosenTagId, string Decision,
+        string? SuggestionSource, string? ModelKey, decimal? Confidence);
+
+    private static async Task<List<DecisionRow>> DecisionsAsync(MySqlConnection connection, long cardId) =>
+        (await connection.QueryAsync<DecisionRow>("""
+            SELECT suggested_tag_id AS SuggestedTagId, chosen_tag_id AS ChosenTagId, decision AS Decision,
+                   suggestion_source AS SuggestionSource, model_key AS ModelKey, confidence AS Confidence
+            FROM card_tag_decisions WHERE card_id = @CardId ORDER BY id;
+            """, new { CardId = cardId })).ToList();
+
+    [DatabaseFact]
+    public async Task DecisionLogRecordsActualDecisionsOnlyOnce()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var catalog = new CatalogRepository(configuration);
+        var assignments = new CardCatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var cardId = await InsertCardAsync(connection, "media", $"decision-log-{token}");
+        var tagIds = new List<long>();
+        try
+        {
+            for (var index = 0; index < 5; index++)
+                tagIds.Add((await catalog.CreateTagAsync(new TagRequest($"log-{index}-{token}", null))).Id);
+            await assignments.UpsertSuggestionsAsync(cardId, tagIds.Select(id =>
+                new TagSuggestionProposal(id, 0.8m, "test-model:v1")).ToArray());
+            var source = await connection.ExecuteScalarAsync<string?>("""
+                SELECT suggestion_source FROM card_tag_suggestions WHERE card_id = @CardId LIMIT 1;
+                """, new { CardId = cardId });
+            Assert.Empty(await DecisionsAsync(connection, cardId));
+
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, tagIds[0], "accepted"));
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, tagIds[0], "accepted"));
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, tagIds[1], "rejected"));
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, tagIds[1], "rejected"));
+            var rows = await DecisionsAsync(connection, cardId);
+            Assert.Equal(2, rows.Count);
+            var accepted = rows[0];
+            Assert.Equal("accepted", accepted.Decision);
+            Assert.Equal(tagIds[0], accepted.SuggestedTagId);
+            Assert.Equal(tagIds[0], accepted.ChosenTagId);
+            Assert.Equal("test-model:v1", accepted.ModelKey);
+            Assert.Equal(0.8m, accepted.Confidence);
+            Assert.Equal(source, accepted.SuggestionSource);
+            Assert.Equal("rejected", rows[1].Decision);
+            Assert.Equal(tagIds[1], rows[1].SuggestedTagId);
+            Assert.Null(rows[1].ChosenTagId);
+
+            // Batch: one new row per actually changed suggestion; repeats are not logged.
+            Assert.Equal(2, await assignments.DecideSuggestionsAsync(cardId, [tagIds[2], tagIds[3]], "accepted"));
+            Assert.Equal(0, await assignments.DecideSuggestionsAsync(cardId, [tagIds[2], tagIds[3]], "accepted"));
+            Assert.Equal(1, await assignments.DecideSuggestionsAsync(cardId, null, "rejected"));
+            rows = await DecisionsAsync(connection, cardId);
+            Assert.Equal(5, rows.Count);
+            Assert.Equal(new[] { tagIds[2], tagIds[3] }.Order(),
+                rows.Skip(2).Take(2).Select(row => row.SuggestedTagId!.Value).Order());
+            Assert.All(rows.Skip(2).Take(2), row => Assert.Equal("accepted", row.Decision));
+            Assert.Equal("rejected", rows[4].Decision);
+            Assert.Equal(tagIds[4], rows[4].SuggestedTagId);
+
+            // A failed batch (conflict) must not leave partial log rows.
+            await Assert.ThrowsAsync<CatalogConflictException>(() =>
+                assignments.DecideSuggestionsAsync(cardId, tagIds, "rejected"));
+            Assert.Equal(5, (await DecisionsAsync(connection, cardId)).Count);
+
+            // Removing an assigned tag is logged as a rejection.
+            Assert.True(await assignments.DeleteTagAsync(cardId, tagIds[0]));
+            Assert.False(await assignments.DeleteTagAsync(cardId, tagIds[0]));
+            rows = await DecisionsAsync(connection, cardId);
+            Assert.Equal(6, rows.Count);
+            Assert.Equal("rejected", rows[5].Decision);
+            Assert.Equal(tagIds[0], rows[5].SuggestedTagId);
+
+            // Cascade: card deletion removes the log; tag deletion keeps rows with NULL ids.
+            await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = tagIds[1] });
+            Assert.Null((await DecisionsAsync(connection, cardId))[1].SuggestedTagId);
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
+            Assert.Empty(await DecisionsAsync(connection, cardId));
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
+            foreach (var tagId in tagIds)
+                await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = tagId });
+        }
+    }
+
+    [DatabaseFact]
+    public async Task CorrectionRejectsSuggestionAssignsReplacementAndLogsOnce()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var catalog = new CatalogRepository(configuration);
+        var assignments = new CardCatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var cardId = await InsertCardAsync(connection, "media", $"correction-{token}");
+        var tagIds = new List<long>();
+        try
+        {
+            for (var index = 0; index < 5; index++)
+                tagIds.Add((await catalog.CreateTagAsync(new TagRequest($"corr-{index}-{token}", null))).Id);
+            var (suggested, replacement, confirmedReplacement, accepted, other) =
+                (tagIds[0], tagIds[1], tagIds[2], tagIds[3], tagIds[4]);
+            await assignments.UpsertSuggestionsAsync(cardId,
+            [
+                new TagSuggestionProposal(suggested, 0.66m, "test-model:v1"),
+                new TagSuggestionProposal(confirmedReplacement, 0.7m, "test-model:v1"),
+                new TagSuggestionProposal(accepted, 0.9m, "test-model:v1"),
+                new TagSuggestionProposal(other, 0.5m, "test-model:v1")
+            ]);
+            var source = await connection.ExecuteScalarAsync<string?>("""
+                SELECT suggestion_source FROM card_tag_suggestions WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = suggested });
+
+            // Validation and lookup failures log nothing.
+            await Assert.ThrowsAsync<CatalogValidationException>(() =>
+                assignments.CorrectSuggestionAsync(cardId, suggested, 0));
+            await Assert.ThrowsAsync<CatalogValidationException>(() =>
+                assignments.CorrectSuggestionAsync(cardId, suggested, -3));
+            await Assert.ThrowsAsync<CatalogValidationException>(() =>
+                assignments.CorrectSuggestionAsync(cardId, suggested, suggested));
+            await Assert.ThrowsAsync<CatalogMissingException>(() =>
+                assignments.CorrectSuggestionAsync(cardId, suggested, long.MaxValue));
+            await Assert.ThrowsAsync<CatalogMissingException>(() =>
+                assignments.CorrectSuggestionAsync(cardId, replacement, suggested));
+            Assert.Empty(await DecisionsAsync(connection, cardId));
+
+            // Pending suggestion corrected with a fresh replacement.
+            await assignments.CorrectSuggestionAsync(cardId, suggested, replacement);
+            Assert.Equal("rejected", await connection.ExecuteScalarAsync<string>("""
+                SELECT state FROM card_tag_suggestions WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = suggested }));
+            var tags = await assignments.ListTagsAsync(cardId);
+            Assert.DoesNotContain(tags, tag => tag.Id == suggested);
+            Assert.Equal("manual", tags.Single(tag => tag.Id == replacement).AssignmentSource);
+            var row = Assert.Single(await DecisionsAsync(connection, cardId));
+            Assert.Equal("corrected", row.Decision);
+            Assert.Equal(suggested, row.SuggestedTagId);
+            Assert.Equal(replacement, row.ChosenTagId);
+            Assert.Equal(source, row.SuggestionSource);
+            Assert.Equal("test-model:v1", row.ModelKey);
+            Assert.Equal(0.66m, row.Confidence);
+
+            // Repeating on the now-rejected suggestion with the replacement assigned is a no-op.
+            await assignments.CorrectSuggestionAsync(cardId, suggested, replacement);
+            Assert.Single(await DecisionsAsync(connection, cardId));
+
+            // Re-analysis must not resurrect or alter the corrected decision.
+            await assignments.UpsertSuggestionsAsync(cardId,
+                [new TagSuggestionProposal(suggested, 0.99m, "test-model:v2")]);
+            Assert.Equal("rejected", await connection.ExecuteScalarAsync<string>("""
+                SELECT state FROM card_tag_suggestions WHERE card_id = @CardId AND tag_id = @TagId;
+                """, new { CardId = cardId, TagId = suggested }));
+            Assert.DoesNotContain(await assignments.ListTagsAsync(cardId), tag => tag.Id == suggested);
+            Assert.Single(await DecisionsAsync(connection, cardId));
+
+            // A replacement already confirmed stays confirmed.
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, confirmedReplacement, "accepted"));
+            var before = (await DecisionsAsync(connection, cardId)).Count;
+            await assignments.CorrectSuggestionAsync(cardId, other, confirmedReplacement);
+            Assert.Equal("confirmed", (await assignments.ListTagsAsync(cardId))
+                .Single(tag => tag.Id == confirmedReplacement).AssignmentSource);
+            Assert.Equal(before + 1, (await DecisionsAsync(connection, cardId)).Count);
+
+            // Accepted suggestions cannot be corrected.
+            Assert.True(await assignments.DecideSuggestionAsync(cardId, accepted, "accepted"));
+            var count = (await DecisionsAsync(connection, cardId)).Count;
+            await Assert.ThrowsAsync<CatalogConflictException>(() =>
+                assignments.CorrectSuggestionAsync(cardId, accepted, replacement));
+            Assert.Equal(count, (await DecisionsAsync(connection, cardId)).Count);
+            Assert.Contains(await assignments.ListTagsAsync(cardId), tag => tag.Id == accepted);
+
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
+            Assert.Empty(await DecisionsAsync(connection, cardId));
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
+            foreach (var tagId in tagIds)
+                await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = tagId });
+        }
+    }
+
     private static IConfiguration Configuration(string connectionString) => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?> { ["ConnectionStrings:Default"] = connectionString })
         .Build();
