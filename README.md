@@ -94,7 +94,7 @@ Typical frontend workflow:
 npm run dev
 ```
 
-The frontend uses `http://localhost:5080` for the API by default, matching `.env.example`. If you choose another `BACKEND_HTTP_PORT`, start Vite with `VITE_API_BASE_URL=http://localhost:YOUR_PORT npm run dev`. A fresh copy may include `.gitkeep` files under `volumes/app_data`; these are empty directory placeholders and do not require a migration backup.
+In development, Vite proxies `/api` to `http://localhost:5080`, matching `.env.example`. If you choose another `BACKEND_HTTP_PORT`, start Vite with `VITE_API_PROXY_TARGET=http://localhost:YOUR_PORT npm run dev`. For a separately hosted production frontend, set `VITE_API_BASE_URL` when building or route `/api` to the backend. A fresh copy may include `.gitkeep` files under `volumes/app_data`; these are empty directory placeholders and do not require a migration backup.
 
 Open the Vite URL in a browser. Create media, comic, or set cards; add reusable tags and sources from a card page; organize cards in decks.
 
