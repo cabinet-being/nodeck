@@ -114,7 +114,7 @@ export function CardRail({
         <div className="text-muted-foreground text-sm">Nothing to show yet.</div>
       ) : null}
       {cards.length > 0 ? (
-        <div ref={railRef} className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2" tabIndex={0}
+        <div ref={railRef} className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" tabIndex={0}
           aria-label={`${title} cards`}
           onKeyDown={(event) => {
             if (event.altKey || event.ctrlKey || event.metaKey) return;
