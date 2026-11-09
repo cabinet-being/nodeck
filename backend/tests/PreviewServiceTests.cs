@@ -5,6 +5,8 @@ using MyApp.Api.Cards;
 using MyApp.Api.Storage;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Gif;
+using SixLabors.ImageSharp.Formats.Webp;
+using System.Text.Json.Nodes;
 using SixLabors.ImageSharp.PixelFormats;
 
 namespace MyApp.Api.Tests;
@@ -204,6 +206,8 @@ public sealed class PreviewServiceTests
             Assert.Equal(24, assets.Height);
             Assert.True(assets.Duration > 0);
             Assert.True(assets.HasAudio);
+            Assert.NotNull(assets.FrameRate);
+            Assert.Equal(4.0, assets.FrameRate!.Value, 2);
             Assert.True(File.Exists(Path.Combine(root, assets.PreviewPath)));
             if (needsPlayback)
             {
@@ -401,9 +405,15 @@ public sealed class PreviewServiceTests
             var upload = Upload(await File.ReadAllBytesAsync(source), "scenes.mp4", "video/mp4");
 
             var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(22, upload);
+            var lenient = await CreateService(root, new() { ["Media:PreviewQualityThreshold"] = "0.05" })
+                .SaveMediaAndCreatePreviewAsync(22, Upload(await File.ReadAllBytesAsync(source), "scenes.mp4", "video/mp4"));
+            Assert.Equal("auto", lenient.PreviewSelection);
 
             Assert.Equal("video", assets.MediaType);
             Assert.True(assets.PreviewStartSeconds > 0, "Preview should skip the dark introduction.");
+            // Pure red scene scores about 0.097: below the default 0.25 threshold, above 0.05.
+            Assert.Equal("fallback", assets.PreviewSelection);
+            Assert.InRange(assets.PreviewScore!.Value, 0.05, 0.25);
             Assert.Equal("cache/cards/22/poster.webp", assets.PosterPath);
             await AssertRedPosterAsync(root, assets.PosterPath);
             Assert.True(File.Exists(Path.Combine(root, assets.PreviewPath)));
@@ -425,6 +435,9 @@ public sealed class PreviewServiceTests
             var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(23, upload);
 
             Assert.Equal(0, assets.PreviewStartSeconds);
+            Assert.Equal("fallback", assets.PreviewSelection);
+            Assert.NotNull(assets.PreviewScore);
+            Assert.True(assets.PreviewScore < 0.25);
             Assert.Equal("cache/cards/23/poster.webp", assets.PosterPath);
             await AssertRedPosterAsync(root, assets.PosterPath);
         }
@@ -474,11 +487,18 @@ public sealed class PreviewServiceTests
             var service = CreateService(root);
             var upload = Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif");
             var assets = await service.SaveMediaAndCreatePreviewAsync(25, upload);
+            var lenientAuto = await CreateService(root, new() { ["Media:PreviewQualityThreshold"] = "0.05" })
+                .PreparePreviewOverrideAsync(25, assets.ContentPath, assets.Duration!.Value, null);
+            Assert.Equal("auto", lenientAuto.PreviewSelection);
+            lenientAuto.Rollback();
             Assert.True(assets.PreviewStartSeconds > 0);
             await AssertRedPosterAsync(root, assets.PosterPath);
 
             var manual = await service.PreparePreviewOverrideAsync(25, assets.ContentPath, assets.Duration!.Value, 0);
             Assert.Equal(0, manual.PreviewStartSeconds);
+            Assert.Equal("manual", manual.PreviewSelection);
+            Assert.Equal("preview.gif", manual.PreviewFileName);
+            Assert.Null(manual.PreviewScore);
             await manual.PromoteAsync();
             await AssertBlackPosterAsync(root, assets.PosterPath);
             Assert.True(new FileInfo(Path.Combine(root, assets.PreviewPath)).Length > 0);
@@ -486,6 +506,8 @@ public sealed class PreviewServiceTests
 
             var automatic = await service.PreparePreviewOverrideAsync(25, assets.ContentPath, assets.Duration.Value, null);
             Assert.True(automatic.PreviewStartSeconds > 0);
+            Assert.Equal("fallback", automatic.PreviewSelection); // flat red scene scores below the default 0.25
+            Assert.NotNull(automatic.PreviewScore);
             await automatic.PromoteAsync();
             await AssertRedPosterAsync(root, assets.PosterPath);
             Assert.True(new FileInfo(Path.Combine(root, assets.PreviewPath)).Length > 0);
@@ -606,16 +628,352 @@ public sealed class PreviewServiceTests
         Assert.False(File.Exists(Path.Combine(finalCardDirectory, "original.mp4")));
     }
 
-    private static PreviewService CreateService(string root)
+    private static PreviewService CreateService(string root, Dictionary<string, string?>? extra = null)
     {
+        var settings = new Dictionary<string, string?> { ["NODECK_APP_DATA"] = root };
+        if (extra is not null)
+            foreach (var pair in extra) settings[pair.Key] = pair.Value;
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["NODECK_APP_DATA"] = root,
-            })
+            .AddInMemoryCollection(settings)
             .Build();
 
         return new PreviewService(configuration);
+    }
+
+    private static async Task<byte[]> GeneratePngAsync(int width, int height)
+    {
+        using var image = new Image<Rgba32>(width, height, Color.Red);
+        await using var bytes = new MemoryStream();
+        await image.SaveAsPngAsync(bytes);
+        return bytes.ToArray();
+    }
+
+    private static async Task<byte[]> GenerateAnimatedWebpAsync()
+    {
+        using var image = new Image<Rgba32>(16, 12, Color.Red);
+        image.Frames.RootFrame.Metadata.GetWebpMetadata().FrameDelay = 100;
+        foreach (var (color, delay) in new[] { (Color.Blue, 200u), (Color.Green, 300u) })
+        {
+            using var frame = new Image<Rgba32>(16, 12, color);
+            frame.Frames.RootFrame.Metadata.GetWebpMetadata().FrameDelay = delay;
+            image.Frames.AddFrame(frame.Frames.RootFrame);
+        }
+        await using var bytes = new MemoryStream();
+        await image.SaveAsWebpAsync(bytes);
+        return bytes.ToArray();
+    }
+
+    private static void AssertNoCardFiles(string root, long cardId)
+    {
+        foreach (var dir in new[] { Path.Combine(root, "cards", cardId.ToString()), Path.Combine(root, "cache", "cards", cardId.ToString()) })
+            Assert.False(Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any(), $"{dir} should be empty or absent.");
+    }
+
+    [Fact]
+    public async Task AllAnimatedRendersFailingKeepsPosterOnlyUpload()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root);
+            service.AnimatedRenderOverride = (_, _, _) => throw new InvalidOperationException("forced");
+            var upload = Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif");
+
+            var assets = await service.SaveMediaAndCreatePreviewAsync(40, upload);
+
+            Assert.Equal("poster_only", assets.PreviewSelection);
+            Assert.Equal("cache/cards/40/poster.webp", assets.PreviewPath);
+            Assert.Equal(assets.PosterPath, assets.PreviewPath);
+            Assert.True(File.Exists(Path.Combine(root, assets.PosterPath!)));
+            Assert.False(File.Exists(Path.Combine(root, "cache", "cards", "40", "preview.gif")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PosterOnlyOverrideReportsPosterFileAndSelection()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root);
+            var assets = await service.SaveMediaAndCreatePreviewAsync(41, Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif"));
+            service.AnimatedRenderOverride = (_, _, _) => throw new InvalidOperationException("forced");
+
+            var pending = await service.PreparePreviewOverrideAsync(41, assets.ContentPath, assets.Duration!.Value, null);
+
+            Assert.Equal("poster_only", pending.PreviewSelection);
+            Assert.Equal("poster.webp", pending.PreviewFileName);
+            Assert.NotNull(pending.PreviewScore);
+            pending.Rollback();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ManualPreviewRenderFailureKeepsOldPreview()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root);
+            var assets = await service.SaveMediaAndCreatePreviewAsync(42, Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif"));
+            var previewPath = Path.Combine(root, assets.PreviewPath);
+            var before = await File.ReadAllBytesAsync(previewPath);
+            service.AnimatedRenderOverride = (_, _, _) => throw new InvalidOperationException("forced");
+
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                service.PreparePreviewOverrideAsync(42, assets.ContentPath, assets.Duration!.Value, 0));
+
+            Assert.Equal(before, await File.ReadAllBytesAsync(previewPath));
+            AssertNoTemporaryPreviewFiles(root);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PosterFailureAfterAnimationFailureReturnsErrorAndLeavesNoFiles()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root);
+            var upload = Upload(await GenerateTwoSceneGifAsync(), "scenes.gif", "image/gif");
+            // Make the poster render fail by deleting the original once the animated override runs.
+            service.AnimatedRenderOverride = (originalPath, _, _) =>
+            {
+                File.Delete(originalPath);
+                throw new InvalidOperationException("forced");
+            };
+
+            await Assert.ThrowsAnyAsync<InvalidOperationException>(() => service.SaveMediaAndCreatePreviewAsync(43, upload));
+
+            AssertNoCardFiles(root, 43);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ImageAbovePixelLimitIsRejectedWithoutLeavingFiles()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root, new() { ["Media:MaxImagePixels"] = "100" });
+            var upload = Upload(await GeneratePngAsync(20, 10), "big.png", "image/png");
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.SaveMediaAndCreatePreviewAsync(44, upload));
+
+            Assert.Contains("Image is too large: 20x10 exceeds 100 pixels.", exception.Message);
+            AssertNoCardFiles(root, 44);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ImageAtPixelLimitIsAccepted()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root, new() { ["Media:MaxImagePixels"] = "200" });
+            var assets = await service.SaveMediaAndCreatePreviewAsync(45, Upload(await GeneratePngAsync(20, 10), "ok.png", "image/png"));
+
+            Assert.Equal("image", assets.MediaType);
+            Assert.Null(assets.PreviewSelection);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ImageReplacementAbovePixelLimitIsRejectedAndLeavesNoFiles()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root, new() { ["Media:MaxImagePixels"] = "100" });
+            var upload = Upload(await GeneratePngAsync(20, 10), "big.png", "image/png");
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.PrepareMediaReplacementAsync(46, upload));
+
+            Assert.Contains("Image is too large: 20x10 exceeds 100 pixels.", exception.Message);
+            AssertNoCardFiles(root, 46);
+            Assert.False(Directory.Exists(Path.Combine(root, "tmp", "replacements")) &&
+                Directory.EnumerateFileSystemEntries(Path.Combine(root, "tmp", "replacements")).Any());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AnimatedWebpStaysImageWithFrameCountDurationAndFirstFramePreview()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var webp = await GenerateAnimatedWebpAsync();
+            using (var fixture = Image.Load(webp)) Assert.Equal(3, fixture.Frames.Count);
+            var upload = Upload(webp, "anim.webp", "image/webp");
+
+            var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(47, upload);
+
+            Assert.Equal("image", assets.MediaType);
+            Assert.Equal("image/webp", assets.MimeType);
+            Assert.True(assets.Animated);
+            Assert.Equal(3, assets.FrameCount);
+            Assert.Equal(0.6, assets.Duration!.Value, 2);
+            Assert.Equal("first_frame", assets.PreviewSelection);
+            Assert.True(File.Exists(Path.Combine(root, assets.PreviewPath)));
+            using var preview = await Image.LoadAsync(Path.Combine(root, assets.PreviewPath));
+            Assert.Single(preview.Frames);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StaticImageHasNoAnimationMetadata()
+    {
+        var root = NewTempRoot();
+        try
+        {
+            var assets = await CreateService(root).SaveMediaAndCreatePreviewAsync(48, Upload(await GeneratePngAsync(8, 8), "s.png", "image/png"));
+
+            Assert.Null(assets.Animated);
+            Assert.Null(assets.FrameCount);
+            Assert.Null(assets.PreviewSelection);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MediaProcessingGateBlocksSecondAcquisitionUntilRelease()
+    {
+        var gate = new MediaProcessingGate(1);
+        var first = await gate.AcquireAsync();
+        var second = gate.AcquireAsync();
+
+        await Task.Delay(200);
+        Assert.False(second.IsCompleted);
+
+        first.Dispose();
+        first.Dispose(); // double dispose must not release twice
+        var slot = await second.WaitAsync(TimeSpan.FromSeconds(5));
+        var third = gate.AcquireAsync();
+        await Task.Delay(200);
+        Assert.False(third.IsCompleted);
+        slot.Dispose();
+        (await third.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+    }
+
+    [Fact]
+    public async Task MediaProcessingGateAllowsConfiguredConcurrency()
+    {
+        var gate = new MediaProcessingGate(2);
+        var a = await gate.AcquireAsync();
+        var b = await gate.AcquireAsync();
+        var c = gate.AcquireAsync();
+        await Task.Delay(100);
+        Assert.False(c.IsCompleted);
+        a.Dispose();
+        (await c.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+        b.Dispose();
+    }
+
+    [Fact]
+    public async Task PreviewServiceSerializesProcessingWhenLimitIsOne()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var service = CreateService(root, new() { ["Media:MaxConcurrentProcessing"] = "1" });
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var calls = 0;
+            service.AnimatedRenderOverride = async (_, _, _) =>
+            {
+                Interlocked.Increment(ref calls);
+                entered.TrySetResult();
+                await release.Task;
+                throw new InvalidOperationException("forced");
+            };
+            var gif = await GenerateTwoSceneGifAsync();
+
+            var firstTask = service.SaveMediaAndCreatePreviewAsync(50, Upload(gif, "a.gif", "image/gif"));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            var secondTask = service.SaveMediaAndCreatePreviewAsync(51, Upload(gif, "b.gif", "image/gif"));
+            await Task.Delay(500);
+
+            Assert.Equal(1, Volatile.Read(ref calls));
+            Assert.False(secondTask.IsCompleted);
+
+            release.SetResult();
+            await firstTask.WaitAsync(TimeSpan.FromSeconds(60));
+            await secondTask.WaitAsync(TimeSpan.FromSeconds(60));
+            Assert.True(calls >= 2);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ApplyAssetMetadataWritesPreviewKeysAndRemovesThemWhenNull()
+    {
+        var metadata = new JsonObject
+        {
+            ["preview_selection"] = "auto",
+            ["preview_score"] = 0.5,
+            ["frame_rate"] = 30.0,
+            ["animated"] = true,
+        };
+        var empty = new CardFileAssets("c", "p", "image", "image/png", "f.png", 1, 1, 1);
+
+        CardMetadata.ApplyAssetMetadata(metadata, empty);
+
+        foreach (var key in new[] { "preview_selection", "preview_score", "frame_rate", "animated" })
+            Assert.False(metadata.ContainsKey(key), key);
+
+        var full = empty with { PreviewSelection = "fallback", PreviewScore = 0.1, FrameRate = 24.5, Animated = true };
+        CardMetadata.ApplyAssetMetadata(metadata, full);
+
+        Assert.Equal("fallback", (string?)metadata["preview_selection"]);
+        Assert.Equal(0.1, (double?)metadata["preview_score"]);
+        Assert.Equal(24.5, (double?)metadata["frame_rate"]);
+        Assert.True((bool?)metadata["animated"]);
     }
 
     private static string NewTempRoot()
