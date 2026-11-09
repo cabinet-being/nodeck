@@ -59,6 +59,13 @@ public static class CatalogEndpoints
             await RunAsync(async () =>
                 await repository.DecideSuggestionAsync(cardId, tagId, request.Decision ?? "")
                     ? Results.NoContent() : Results.NotFound()));
+        suggestions.MapPut("/{tagId:long}/correction", async (
+            long cardId, long tagId, TagSuggestionCorrectionRequest request, CardCatalogRepository repository) =>
+            await RunAsync(async () =>
+            {
+                await repository.CorrectSuggestionAsync(cardId, tagId, request.ReplacementTagId);
+                return Results.NoContent();
+            }));
         suggestions.MapPut("/decision", async (
             long cardId, TagSuggestionBatchDecisionRequest request, CardCatalogRepository repository) =>
             await RunAsync(async () => Results.Ok(new

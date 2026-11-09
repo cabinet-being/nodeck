@@ -194,6 +194,33 @@ public sealed class CatalogDatabaseInitializer
                 """);
     }
 
+    public async Task InitializeTagDecisionLogAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await connection.ExecuteAsync("""
+            CREATE TABLE IF NOT EXISTS card_tag_decisions (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                card_id BIGINT NOT NULL,
+                suggested_tag_id BIGINT NULL,
+                chosen_tag_id BIGINT NULL,
+                decision VARCHAR(16) NOT NULL,
+                suggestion_source VARCHAR(16) NULL,
+                model_key VARCHAR(128) NULL,
+                confidence DECIMAL(6,5) NULL,
+                decided_at_utc DATETIME(6) NOT NULL,
+                KEY idx_card_tag_decisions_card (card_id),
+                KEY idx_card_tag_decisions_suggested (suggested_tag_id, decision),
+                CONSTRAINT chk_card_tag_decisions_decision CHECK (decision IN ('accepted', 'rejected', 'corrected')),
+                CONSTRAINT chk_card_tag_decisions_source CHECK (suggestion_source IS NULL OR suggestion_source IN ('visual', 'speech', 'custom')),
+                CONSTRAINT chk_card_tag_decisions_confidence CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
+                CONSTRAINT fk_card_tag_decisions_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+                CONSTRAINT fk_card_tag_decisions_suggested FOREIGN KEY (suggested_tag_id) REFERENCES tags(id) ON DELETE SET NULL,
+                CONSTRAINT fk_card_tag_decisions_chosen FOREIGN KEY (chosen_tag_id) REFERENCES tags(id) ON DELETE SET NULL
+            );
+            """);
+    }
+
     public async Task InitializeImageAnalysisJobsAsync()
     {
         await using var connection = new MySqlConnection(_connectionString);

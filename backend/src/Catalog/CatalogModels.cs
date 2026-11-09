@@ -32,6 +32,7 @@ public sealed record TagSuggestionProposal(long TagId, decimal Confidence, strin
 public sealed record TagSuggestionEntry(long TagId, string Name, string Category, string Origin,
     decimal Confidence, string ModelKey);
 public sealed record TagSuggestionDecisionRequest(string? Decision);
+public sealed record TagSuggestionCorrectionRequest(long ReplacementTagId);
 public sealed record TagSuggestionBatchDecisionRequest(string? Decision, long[]? TagIds);
 public sealed record CardSourceEntry(long Id, string Name, string? OriginalUrl);
 public sealed record CardSourceRequest(string? OriginalUrl);

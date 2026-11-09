@@ -24,6 +24,7 @@ public sealed class SchemaMigrationRunner
         (8, "tag-suggestion-source-v1"),
         (9, "interest-signals-v1"),
         (10, "card-creation-requests-v1"),
+        (11, "tag-decision-log-v1"),
     ];
 
     private readonly string _connectionString;
@@ -117,6 +118,7 @@ public sealed class SchemaMigrationRunner
                     case 8: await _catalog.InitializeTagSuggestionSourceAsync(); break;
                     case 9: await _interest.InitializeAsync(); break;
                     case 10: await _cards.InitializeCreationRequestsAsync(); break;
+                    case 11: await _catalog.InitializeTagDecisionLogAsync(); break;
                 }
 
                 var after = await SnapshotAsync(connection);
@@ -156,6 +158,10 @@ public sealed class SchemaMigrationRunner
                 if (version == 10 && after != previous)
                     throw new InvalidOperationException(
                         "Migration 10 changed existing row or file counts. " +
+                        "Stop the API and restore the pre-migration backup before accepting writes.");
+                if (version == 11 && after != previous)
+                    throw new InvalidOperationException(
+                        "Migration 11 changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");
                 await VerifyReferencesAsync(connection);
                 await VerifyCollectionOwnershipAsync(connection);
@@ -238,6 +244,7 @@ public sealed class SchemaMigrationRunner
             await Count("card_view_events"),
             await Count("card_daily_votes"),
             await Count("card_creation_requests"),
+            await Count("card_tag_decisions"),
             appFiles,
             userAppFiles,
             userDecks);
@@ -263,6 +270,9 @@ public sealed class SchemaMigrationRunner
         long CreationRequestsCount() => currentVersion < 10 &&
             !entries.ContainsKey("count.card_creation_requests") ? 0 : Number("count.card_creation_requests");
 
+        long TagDecisionsCount() => currentVersion < 11 &&
+            !entries.ContainsKey("count.card_tag_decisions") ? 0 : Number("count.card_tag_decisions");
+
         if (Require("format") != "1" || Require("database") != database ||
             Number("startingVersion") != currentVersion ||
             Number("count.cards") != snapshot.Cards ||
@@ -280,6 +290,7 @@ public sealed class SchemaMigrationRunner
             Number("count.card_view_events") != snapshot.CardViewEvents ||
             Number("count.card_daily_votes") != snapshot.CardDailyVotes ||
             CreationRequestsCount() != snapshot.CardCreationRequests ||
+            TagDecisionsCount() != snapshot.CardTagDecisions ||
             Number("app_file_count") != snapshot.AppFiles)
             throw new InvalidOperationException("Backup manifest does not match the current database and files. Create a new backup.");
 
@@ -377,13 +388,14 @@ public sealed class SchemaMigrationRunner
         long Cards, long CardRelations, long Decks, long DeckCards,
         long Tags, long Sources, long TagAliases, long CardTags, long CardSources,
         long CardTagSuggestions, long CardImageAnalysisJobs, long CardSpeechAnalysisJobs,
-        long CardViewEvents, long CardDailyVotes, long CardCreationRequests,
+        long CardViewEvents, long CardDailyVotes, long CardCreationRequests, long CardTagDecisions,
         long AppFiles, long UserAppFiles, long UserDecks)
     {
         public bool HasUserData => Cards > 0 || CardRelations > 0 || DeckCards > 0 ||
             UserDecks > 0 || Tags > 0 || Sources > 0 || TagAliases > 0 ||
             CardTags > 0 || CardSources > 0 || CardTagSuggestions > 0 ||
             CardImageAnalysisJobs > 0 || CardSpeechAnalysisJobs > 0 ||
-            CardViewEvents > 0 || CardDailyVotes > 0 || CardCreationRequests > 0 || UserAppFiles > 0;
+            CardViewEvents > 0 || CardDailyVotes > 0 || CardCreationRequests > 0 ||
+            CardTagDecisions > 0 || UserAppFiles > 0;
     }
 }

@@ -72,6 +72,9 @@ export const listTagSuggestions = (cardId: number) =>
   request<TagSuggestion[]>(`/api/cards/${cardId}/tag-suggestions`);
 export const decideTagSuggestion = (cardId: number, tagId: number, decision: 'accepted' | 'rejected') =>
   request<void>(`/api/cards/${cardId}/tag-suggestions/${tagId}/decision`, json({ decision }, 'PUT'));
+export const correctTagSuggestion = (cardId: number, tagId: number, replacementTagId: number) =>
+  request<void>(`/api/cards/${cardId}/tag-suggestions/${tagId}/correction`,
+    json({ replacementTagId }, 'PUT'));
 export const decideTagSuggestions = (cardId: number, decision: 'accepted' | 'rejected', tagIds?: number[]) =>
   request<{ count: number }>(`/api/cards/${cardId}/tag-suggestions/decision`,
     json({ decision, tagIds: tagIds ?? null }, 'PUT'));

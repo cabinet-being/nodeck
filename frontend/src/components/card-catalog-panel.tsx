@@ -1,8 +1,8 @@
 import * as React from 'react';
-import { Check, ChevronDown, Plus, Save, X } from 'lucide-react';
+import { Check, ChevronDown, Pencil, Plus, Save, X } from 'lucide-react';
 
 import {
-  createSource, createTag, decideTagSuggestion, decideTagSuggestions, deleteCardSource, deleteCardTag,
+  correctTagSuggestion, createSource, createTag, decideTagSuggestion, decideTagSuggestions, deleteCardSource, deleteCardTag,
   listCardSources, listCardTags, listSources, listTags, listTagSuggestions,
   setCardSource, setCardTag, type CardSource, type CardTag, type Source, type Tag,
   type TagSuggestion,
@@ -30,6 +30,7 @@ export function CardCatalogPanel({ cardId, metadata }: {
   const [suggestionsOpen, setSuggestionsOpen] = React.useState(false);
   const [showAllSuggestions, setShowAllSuggestions] = React.useState(false);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = React.useState<number[]>([]);
+  const [correcting, setCorrecting] = React.useState<TagSuggestion | null>(null);
   const suggestionsId = React.useId();
 
   React.useEffect(() => {
@@ -68,7 +69,7 @@ export function CardCatalogPanel({ cardId, metadata }: {
     try {
       await action();
       setRevision((value) => value + 1);
-      if (close) { setMode(null); setSearch(''); setSourceUrl(''); }
+      if (close) { setMode(null); setCorrecting(null); setSearch(''); setSourceUrl(''); }
       return true;
     } catch (cause) {
       setError(message(cause));
@@ -167,6 +168,11 @@ export function CardCatalogPanel({ cardId, metadata }: {
               onClick={() => run(() => decideTagSuggestion(cardId, suggestion.tagId, 'rejected'))}>
               <X className="size-3" />
             </Button>
+            <Button type="button" size="icon-xs" variant="ghost"
+              aria-label={`Correct ${suggestion.name}`} title="Replace with another tag" disabled={busy}
+              onClick={() => { setCorrecting(suggestion); setMode('tag'); setSearch(''); setChoices([]); setError(null); }}>
+              <Pencil className="size-3" />
+            </Button>
             </span>)}
             </div>
             {!showAllSuggestions && suggestions.length > 8 ? <Button type="button" variant="ghost" size="sm"
@@ -203,8 +209,8 @@ export function CardCatalogPanel({ cardId, metadata }: {
       </div>
       {error && !mode ? <p className="text-destructive text-xs">{error}</p> : null}
 
-      <Dialog open={mode !== null} title={mode === 'tag' ? 'Add tag' : 'Add source'}
-        onOpenChange={(open) => { if (!open) { setMode(null); setError(null); } }}>
+      <Dialog open={mode !== null} title={correcting ? `Correct ${correcting.name}` : mode === 'tag' ? 'Add tag' : 'Add source'}
+        onOpenChange={(open) => { if (!open) { setMode(null); setCorrecting(null); setError(null); } }}>
         <div className="grid gap-3">
           <Input autoFocus type="search" aria-label="Search catalog" placeholder="Search by name"
             value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -212,16 +218,20 @@ export function CardCatalogPanel({ cardId, metadata }: {
             value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} /> : null}
           {error ? <p className="text-destructive text-xs">{error}</p> : null}
           <div className="grid max-h-64 gap-1 overflow-auto">
-            {choices.filter((choice) => mode === 'tag' ? !tags.some((tag) => tag.id === choice.id)
+            {choices.filter((choice) => mode === 'tag'
+              ? correcting ? choice.id !== correcting.tagId : !tags.some((tag) => tag.id === choice.id)
               : !sources.some((source) => source.id === choice.id))
               .map((choice) => <Button key={choice.id} type="button" variant="ghost"
                 className="justify-start" disabled={busy}
-                onClick={() => run(() => mode === 'tag' ? setCardTag(cardId, choice.id)
+                onClick={() => run(() => correcting ? correctTagSuggestion(cardId, correcting.tagId, choice.id)
+                  : mode === 'tag' ? setCardTag(cardId, choice.id)
                   : setCardSource(cardId, choice.id, sourceUrl), true)}>
                 {choice.name}
               </Button>)}
           </div>
-          {search.trim() && !choices.some((choice) => choice.name.toLocaleLowerCase() === search.trim().toLocaleLowerCase())
+          {correcting ? <Button type="button" variant="outline"
+            onClick={() => { setMode(null); setCorrecting(null); setError(null); }}>Cancel</Button> : null}
+          {!correcting && search.trim() && !choices.some((choice) => choice.name.toLocaleLowerCase() === search.trim().toLocaleLowerCase())
             ? <Button type="button" variant="outline" disabled={busy}
               onClick={() => run(async () => {
                 if (mode === 'tag') {

@@ -69,6 +69,13 @@ public sealed class CardCatalogRepository
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         await RequireContentCardAsync(connection, transaction, cardId);
+        await SetTagCoreAsync(connection, transaction, cardId, tagId);
+        await transaction.CommitAsync();
+    }
+
+    private static async Task SetTagCoreAsync(MySqlConnection connection, MySqlTransaction transaction,
+        long cardId, long tagId)
+    {
         var legacyCardId = await connection.ExecuteScalarAsync<long?>(
             "SELECT legacy_card_id FROM tags WHERE id = @TagId;", new { TagId = tagId }, transaction);
         if (legacyCardId is null)
@@ -115,6 +122,41 @@ public sealed class CardCatalogRepository
         await connection.ExecuteAsync("""
             DELETE FROM card_tag_suggestions WHERE card_id = @CardId AND tag_id = @TagId;
             """, new { CardId = cardId, TagId = tagId }, transaction);
+    }
+
+    public async Task CorrectSuggestionAsync(long cardId, long tagId, long replacementTagId)
+    {
+        if (replacementTagId <= 0 || replacementTagId == tagId)
+            throw new CatalogValidationException("Choose a replacement tag different from the suggested tag.");
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await RequireContentCardAsync(connection, transaction, cardId);
+        if (await connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM tags WHERE id = @TagId;",
+            new { TagId = replacementTagId }, transaction) == 0)
+            throw new CatalogMissingException("Tag not found.");
+        var suggestion = await connection.QuerySingleOrDefaultAsync<SuggestionState>("""
+            SELECT tag_id AS TagId, state, confidence, suggestion_source AS SuggestionSource,
+                   model_key AS ModelKey
+            FROM card_tag_suggestions
+            WHERE card_id = @CardId AND tag_id = @TagId FOR UPDATE;
+            """, new { CardId = cardId, TagId = tagId }, transaction)
+            ?? throw new CatalogMissingException("Tag suggestion not found.");
+        if (suggestion.State == "accepted")
+            throw new CatalogConflictException("This suggestion was already accepted.");
+        var assignmentSource = await connection.ExecuteScalarAsync<string?>("""
+            SELECT assignment_source FROM card_tags
+            WHERE card_id = @CardId AND tag_id = @TagId LIMIT 1 FOR UPDATE;
+            """, new { CardId = cardId, TagId = replacementTagId }, transaction);
+        if (suggestion.State == "rejected" && assignmentSource is not null)
+        {
+            await transaction.CommitAsync();
+            return;
+        }
+        if (suggestion.State == "pending")
+            await ApplyDecisionAsync(connection, transaction, cardId, suggestion, "rejected", log: false);
+        if (assignmentSource is null or "auto")
+            await SetTagCoreAsync(connection, transaction, cardId, replacementTagId);
+        await LogDecisionAsync(connection, transaction, cardId, tagId, replacementTagId, "corrected", suggestion);
         await transaction.CommitAsync();
     }
 
@@ -143,6 +185,14 @@ public sealed class CardCatalogRepository
                 """, new { CardId = cardId, LegacyCardId = legacyCardId }, transaction);
         }
         if (affected > 0)
+        {
+            var previous = await connection.QuerySingleOrDefaultAsync<SuggestionState>("""
+                SELECT tag_id AS TagId, state, confidence, suggestion_source AS SuggestionSource,
+                       model_key AS ModelKey
+                FROM card_tag_suggestions
+                WHERE card_id = @CardId AND tag_id = @TagId FOR UPDATE;
+                """, new { CardId = cardId, TagId = tagId }, transaction);
+            await LogDecisionAsync(connection, transaction, cardId, tagId, null, "rejected", previous);
             await connection.ExecuteAsync("""
                 INSERT INTO card_tag_suggestions
                     (card_id, tag_id, state, confidence, model_key, created_at_utc, updated_at_utc)
@@ -150,6 +200,7 @@ public sealed class CardCatalogRepository
                 ON DUPLICATE KEY UPDATE state = 'rejected', confidence = NULL,
                     model_key = NULL, updated_at_utc = UTC_TIMESTAMP(6);
                 """, new { CardId = cardId, TagId = tagId }, transaction);
+        }
         await transaction.CommitAsync();
         return affected > 0;
     }
@@ -234,7 +285,9 @@ public sealed class CardCatalogRepository
         await using var transaction = await connection.BeginTransactionAsync();
         await RequireContentCardAsync(connection, transaction, cardId);
         var suggestion = await connection.QuerySingleOrDefaultAsync<SuggestionState>("""
-            SELECT tag_id AS TagId, state, confidence FROM card_tag_suggestions
+            SELECT tag_id AS TagId, state, confidence, suggestion_source AS SuggestionSource,
+                   model_key AS ModelKey
+            FROM card_tag_suggestions
             WHERE card_id = @CardId AND tag_id = @TagId FOR UPDATE;
             """, new { CardId = cardId, TagId = tagId }, transaction);
         if (suggestion is null) return false;
@@ -258,11 +311,15 @@ public sealed class CardCatalogRepository
         await RequireContentCardAsync(connection, transaction, cardId);
         var rows = (ids is null
             ? await connection.QueryAsync<SuggestionState>("""
-                SELECT tag_id AS TagId, state, confidence FROM card_tag_suggestions
+                SELECT tag_id AS TagId, state, confidence, suggestion_source AS SuggestionSource,
+                       model_key AS ModelKey
+                FROM card_tag_suggestions
                 WHERE card_id = @CardId AND state = 'pending' FOR UPDATE;
                 """, new { CardId = cardId }, transaction)
             : await connection.QueryAsync<SuggestionState>("""
-                SELECT tag_id AS TagId, state, confidence FROM card_tag_suggestions
+                SELECT tag_id AS TagId, state, confidence, suggestion_source AS SuggestionSource,
+                       model_key AS ModelKey
+                FROM card_tag_suggestions
                 WHERE card_id = @CardId AND tag_id IN @Ids FOR UPDATE;
                 """, new { CardId = cardId, Ids = ids }, transaction)).ToArray();
         if (ids is not null && rows.Length != ids.Length)
@@ -283,7 +340,7 @@ public sealed class CardCatalogRepository
     }
 
     private static async Task ApplyDecisionAsync(MySqlConnection connection, MySqlTransaction transaction,
-        long cardId, SuggestionState suggestion, string decision)
+        long cardId, SuggestionState suggestion, string decision, bool log = true)
     {
         if (decision == "accepted")
         {
@@ -311,7 +368,24 @@ public sealed class CardCatalogRepository
             UPDATE card_tag_suggestions SET state = @Decision, updated_at_utc = UTC_TIMESTAMP(6)
             WHERE card_id = @CardId AND tag_id = @TagId;
             """, new { CardId = cardId, suggestion.TagId, Decision = decision }, transaction);
+        if (log)
+            await LogDecisionAsync(connection, transaction, cardId, suggestion.TagId,
+                decision == "accepted" ? suggestion.TagId : null, decision, suggestion);
     }
+
+    private static Task LogDecisionAsync(MySqlConnection connection, MySqlTransaction transaction,
+        long cardId, long suggestedTagId, long? chosenTagId, string decision, SuggestionState? suggestion) =>
+        connection.ExecuteAsync("""
+            INSERT INTO card_tag_decisions
+                (card_id, suggested_tag_id, chosen_tag_id, decision, suggestion_source, model_key,
+                 confidence, decided_at_utc)
+            VALUES (@CardId, @SuggestedTagId, @ChosenTagId, @Decision, @Source, @ModelKey,
+                @Confidence, UTC_TIMESTAMP(6));
+            """, new
+        {
+            CardId = cardId, SuggestedTagId = suggestedTagId, ChosenTagId = chosenTagId, Decision = decision,
+            Source = suggestion?.SuggestionSource, suggestion?.ModelKey, suggestion?.Confidence
+        }, transaction);
 
     public async Task<IReadOnlyList<CardSourceEntry>> ListSourcesAsync(long cardId)
     {
@@ -466,5 +540,7 @@ public sealed class CardCatalogRepository
         public long TagId { get; set; }
         public string State { get; set; } = "";
         public decimal? Confidence { get; set; }
+        public string? SuggestionSource { get; set; }
+        public string? ModelKey { get; set; }
     }
 }
