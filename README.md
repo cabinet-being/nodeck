@@ -29,7 +29,7 @@ The backend exposes an ASP.NET Core Minimal API powered by .NET 9 and MySQL. The
 - Comics and sets with ordered child media; decks can reference cards from anywhere in the library.
 - Card pages record a view after two uninterrupted seconds of visible, loaded media or playing video. They also offer a daily Up, Neutral, or Down vote, separate from Favorites.
 - Media uploads recognize JPEG, PNG, WebP, GIF, MP4, MOV, and WebM from file content. The original is retained; video that fails the current browser compatibility check also gets an H.264/AAC MP4 playback copy.
-- GIF and video uploads generate a short animated preview and a still poster. The edit page lets you choose the preview start time or reset it to automatic selection.
+- GIF and video uploads generate a short animated preview and a still poster. The edit page lets you choose the preview start time or reset it to automatic selection. Animated WebP files stay images and get a static first-frame preview.
 - MySQL-backed storage for cards, tags, decks, and related gallery data.
 - Minimal API backend with a compact, predictable HTTP surface.
 - Docker Compose setup with the backend and database running in separate containers.
@@ -118,6 +118,20 @@ Video and GIF processing requires `ffmpeg` and `ffprobe`. The backend Docker ima
 
 For GIF and video, automatic preview selection samples up to ten points across the file and generates an animation of up to about three seconds with a poster. The card API exposes `posterUrl`; the video viewer uses it before playback. On the media edit page, use the Preview start slider or seconds field and **Save preview** to regenerate both files at that point. **Reset to automatic** selects a new start automatically. The API equivalent is `PUT /api/cards/{id}/preview` with `{ "startSeconds": 12.5 }`, or `null` to reset. GIF metadata is read without decoding all frames and frames above 16,777,216 pixels are rejected. Selection quality has not yet been measured on real anime and realistic media.
 
+Each processed file records how its preview was chosen in card metadata as `preview_selection`: `auto` (an automatic candidate scored at or above `Media:PreviewQualityThreshold`), `fallback` (the best candidate scored below it, shown on the edit page as **Auto (low quality)**), `poster_only`, `manual` (a start time chosen with the Preview start control), or `first_frame` (animated WebP). `preview_score` holds the automatic candidate's score and is absent for `manual`. If every animated render fails but the poster renders, the upload still succeeds and the preview is `poster.webp` (the edit page shows **Poster only**); if the poster also fails, the upload fails as before. Videos also store `frame_rate`, taken from ffprobe `avg_frame_rate` and, if that is unusable, `r_frame_rate`. GIFs with more than one frame and animated WebP files store `animated: true`.
+
+An animated WebP keeps `media_type` `image`. Its frame count and duration are read from the RIFF `ANMF` chunks, the preview is a static image of the first frame, and ffmpeg is not involved. Images are checked with a header-only identify before full decoding: one whose width times height exceeds `Media:MaxImagePixels` is rejected for that file with `Image is too large: WxH exceeds N pixels.`
+
+Uploads, replacements, and preview overrides each take one processing slot per file. The number of concurrent slots is `Media:MaxConcurrentProcessing`; further files wait for a slot without a timeout. Configure the media settings through `appsettings.json` or environment variables (for example `Media__MaxConcurrentProcessing`):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `Media:MaxConcurrentProcessing` | `2` | Files processed at the same time. Values below 1 or non-numeric values fall back to the default. |
+| `Media:PreviewQualityThreshold` | `0.25` | Minimum automatic preview score for `auto`; lower scores are marked `fallback`. This default has not been calibrated on real files. |
+| `Media:MaxImagePixels` | `50000000` | Largest accepted still or WebP image, in pixels. |
+
+The frame sampler that feeds image analysis runs ffmpeg outside this slot limit.
+
 ## Interest signals
 
 On a media, comic, or set page, a view is recorded once per opening after two uninterrupted seconds with loaded content meaningfully visible in the viewport; video must be playing. Switching tabs, scrolling content out of view, or pausing video interrupts the timer. `POST /api/cards/{id}/views` accepts a UUID `eventId` and `durationMs` from 2,000 to 600,000; repeating an event ID does not create another view. The library retains the most recent 500 view events.
@@ -143,6 +157,10 @@ The importer fetches tags before aliases, maps Danbooru categories to general, a
 
 Inferred tags appear on the card immediately with `assignmentSource: "auto"` and remain reviewable. Approving one changes it to `"confirmed"`; rejecting one removes its assignment and remembers the rejection. Tags added directly remain `"manual"`. The card page supports individual decisions, all pending tags, or a selected subset. Existing pending proposals are activated when the API next starts. The API reads pending proposals at `GET /api/cards/{id}/tag-suggestions`, records one decision at `PUT /api/cards/{id}/tag-suggestions/{tagId}/decision`, and records a batch at `PUT /api/cards/{id}/tag-suggestions/decision` with `{ "decision": "accepted", "tagIds": [1, 2] }` (omit `tagIds` to decide all pending tags).
 
+To replace a wrong suggestion, use **Correct** in the card catalog panel and pick another tag with the tag search. The API call is `PUT /api/cards/{cardId}/tag-suggestions/{tagId}/correction` with `{ "replacementTagId": 7 }` and returns `204`. It returns `400` when the replacement is the same tag or an invalid ID, `404` when the replacement tag or the suggestion does not exist, and `409` when the suggestion was already accepted. The suggestion becomes rejected and the replacement is assigned as `"manual"`, unless it is already assigned as confirmed or manual. Repeating a correction of an already rejected suggestion whose replacement is assigned changes nothing.
+
+Every actual accept, reject, correction, and removal of an assigned tag is appended to the `card_tag_decisions` table, with the suggested and chosen tag, decision, suggestion source, model key, and confidence, as examples for future suggestions. Idempotent repeats are not logged. Decisions made before migration 11 are not backfilled. Nothing reads the log yet to change suggestions.
+
 ## Local image tagging
 
 Install the pinned [WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) ONNX model and labels into the backend data volume, then seed its general and character Danbooru tags from `selected_tags.csv`. The script checks both SHA-256 hashes. The model is about 362 MB; it runs locally on CPU. After the normal `docker compose up --build` setup, run:
@@ -156,7 +174,7 @@ The seed is safe to rerun: it preserves existing tags, reports name or ID confli
 
 Once the model is installed and either the WD seed or the full Danbooru tag import is complete, the backend automatically analyzes newly uploaded or replaced JPEG, PNG, WebP, GIF, MP4, MOV, and WebM media cards, including pages added to a comic or set. Static images use their preview; GIF and video use up to 30 baseline frames sampled across ten parts of the original file, plus up to ten frames probed between visibly different parts. The optional scene probes have a 15-second budget and are kept only when distinct from both neighboring baseline frames. Repeated frames reuse one inference, and tags are combined by peak confidence and appearances in different parts. MySQL stores each job so a restart does not discard it. The worker runs one analysis at a time, retries failures up to five times, and discards results when the media was replaced during analysis. Automatic tags can then be reviewed on the card page. `GET /api/cards/{id}/analysis` shows a job's state, attempt count, next attempt time, and last error; a card without an analysis job returns 404.
 
-To analyze an older media card, run `docker compose run --rm backend analyze-card 123`, replacing `123` with its ID. Existing cards are not queued automatically by the schema upgrade, avoiding a sudden full-library CPU load. The model submits up to 40 general or character tag proposals matched by Danbooru ID. Custom tag similarity and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/`. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
+To analyze an older media card, run `docker compose run --rm backend analyze-card 123`, replacing `123` with its ID. Existing cards are not queued automatically by the schema upgrade, avoiding a sudden full-library CPU load. The model submits up to 40 general or character tag proposals matched by Danbooru ID. No visual-similarity model is implemented yet; custom tag similarity and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/`. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
 
 ## Local speech recognition
 
@@ -184,6 +202,8 @@ Migration 8 adds `suggestion_source` to tag proposals with `visual` as the defau
 Migration 9 creates separate `card_view_events` and `card_daily_votes` tables. The updated backup script includes both tables' row counts in its manifest, which the API verifies before a populated-library upgrade.
 
 Migration 10 adds `card_creation_requests` to retain keyed creation results and deleted-card tombstones. The backup script records `count.card_creation_requests` in its manifest; the migration check accepts a missing count only for backups made before version 10, when the table did not exist. Create a current backup before upgrading a populated library.
+
+Migration 11 (`tag-decision-log-v1`) creates the append-only `card_tag_decisions` table. The backup script records `count.card_tag_decisions` in its manifest, and the migration verifies that count. A manifest without that key, made before version 11, is accepted only while the database is below version 11. Existing rows and files must be unchanged by the migration.
 
 Before upgrading an existing library, keep MySQL running and create a backup from the project root:
 
