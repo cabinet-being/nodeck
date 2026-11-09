@@ -111,7 +111,7 @@ export class CardHttpError extends Error {
   }
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5080';
 
 export const cardTypes = ['media', 'comic', 'set'] as const;
 export const relationTypes = [

@@ -29,7 +29,7 @@ export type TagSuggestion = {
 };
 export type CardSource = Pick<Source, 'id' | 'name'> & { originalUrl: string | null };
 
-const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5080';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, options);

@@ -18,7 +18,7 @@ export type DailyRecommendationResponse = {
   timeZone: string;
 };
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5080';
 
 export async function getRecommendations({
   mode = 'collections',
