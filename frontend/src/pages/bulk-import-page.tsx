@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ArrowDown, ArrowUp, CircleHelp, Pause, Plus, RotateCw, Trash2, Upload } from 'lucide-react';
 
 import { CardHttpError, createCard, createCollectionFromCards, getCard, getCardAnalysis, getCardCreationRequest, updateCollectionChildren, type CardAnalysis, type Card } from '@/api/cards';
 import { setCardSource, setCardTag } from '@/api/catalog';
@@ -864,19 +865,23 @@ export function BulkImportPage() {
     });
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-      <div>
+    <section className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <h1 className="text-2xl font-semibold">Bulk import</h1>
-        <p className="text-muted-foreground text-sm">Upload media one at a time, then make comics or sets from uploaded cards. This browser saves queue details locally; reselect missing files after a reload. A sampled fingerprint checks only the first and last 64 KiB, not the entire file.</p>
+        <details className="text-muted-foreground text-sm">
+          <summary className="flex cursor-pointer items-center gap-1"><CircleHelp className="size-4" /> How it works</summary>
+          <p className="mt-2 max-w-md">Files upload individually. Add comics or sets after upload. Queue details are saved in this browser; after a reload, reselect any missing files. Matching checks the name, size, modified time, type and a sample of the first and last 64 KiB, not the whole file.</p>
+        </details>
       </div>
 
       <div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setIsDragging(false); }}
         onDrop={(event) => { event.preventDefault(); setIsDragging(false); void addFiles(event.dataTransfer.files); }}
         className={`rounded-xl border-2 border-dashed p-6 text-center ${isDragging ? 'border-primary bg-accent' : 'border-border'}`}>
-        <p className="mb-3 text-sm">Drop JPEG, PNG, WebP, GIF, MP4, MOV, or WebM files here</p>
-        <label className="inline-flex cursor-pointer items-center rounded-lg border px-4 py-2 text-sm font-medium hover:bg-accent">
-          Choose files
+        <Upload className="text-muted-foreground mx-auto mb-2 size-6" aria-hidden="true" />
+        <p className="mb-3 text-sm font-medium">Drop files here</p>
+        <label className="focus-within:ring-ring inline-flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-accent focus-within:ring-2">
+          <Plus className="size-4" aria-hidden="true" /> Browse files
           <input className="sr-only" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
             disabled={isRunning || isPreparingFiles} onChange={(event) => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }} />
         </label>
@@ -885,13 +890,13 @@ export function BulkImportPage() {
       <BulkImportCatalogPicker selection={catalogSelection} onChange={(selection) => { draftEnabled.current = true; setCatalogSelection(selection); }} locked={selectionLocked} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="outline" disabled={isRunning} onClick={addGroup}>Add comic or set group</Button>
-        <Button type="button" disabled={isRunning || isPreparingFiles || !!reconciling || !hasWork} onClick={runImport}>{isRunning ? 'Importing...' : isPreparingFiles ? 'Checking files...' : 'Upload / retry'}</Button>
-        <Button type="button" variant="ghost" disabled={isRunning || isPreparingFiles} onClick={clearLocalDraft}>Clear local draft</Button>
+        <Button type="button" variant="outline" disabled={isRunning} onClick={addGroup}><Plus className="size-4" /> Add group</Button>
+        <Button type="button" disabled={isRunning || isPreparingFiles || !!reconciling || !hasWork} onClick={runImport}><Upload className="size-4" />{isRunning ? 'Importing...' : isPreparingFiles ? 'Checking files...' : 'Upload / retry'}</Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="Clear local draft" title="Clear local draft" disabled={isRunning || isPreparingFiles} onClick={clearLocalDraft}><Trash2 className="size-4" /></Button>
         {isRunning && <Button type="button" variant="outline" disabled={pauseRequested} onClick={requestPause}>
-          {pauseRequested ? 'Pausing after current request...' : 'Pause after current request'}
+          <Pause className="size-4" />{pauseRequested ? 'Pausing...' : 'Pause'}
         </Button>}
-        <span className="text-muted-foreground text-sm">Total {items.length} · uploaded {completedFiles} · upload errors {failedFiles} · needs review {reviewFiles} · pending upload {pendingFiles}</span>
+        <span className="text-muted-foreground text-sm" aria-label={`${items.length} total, ${completedFiles} uploaded, ${failedFiles} errors, ${reviewFiles} need review, ${pendingFiles} pending`}>{completedFiles}/{items.length} uploaded{failedFiles > 0 && ` · ${failedFiles} errors`}{reviewFiles > 0 && ` · ${reviewFiles} review`}</span>
       </div>
       {isRunning && <p role="status" className="text-muted-foreground text-sm">Current: {currentStep ?? 'Preparing next step'}{pauseRequested ? ' · pause requested' : ''}</p>}
       {notice && <p role="status" className="text-sm">{notice}</p>}
@@ -928,10 +933,10 @@ export function BulkImportPage() {
           </div>}
           {group.cardId && hasCatalogAssignment && <p className="text-muted-foreground text-xs">Tags/source: {group.metadataStatus ?? 'pending'}</p>}
           {group.metadataError && <p role="alert" className="text-destructive text-sm">Could not assign tags/source: {group.metadataError}</p>}
-          {!group.cardId && !group.creationKey && !isRunning && <Button type="button" variant="ghost" size="sm" onClick={() => {
+          {!group.cardId && !group.creationKey && !isRunning && <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${group.type} group ${group.title || group.id}`} title="Remove group" onClick={() => {
             setItems((current) => current.map((item) => item.groupId === group.id ? { ...item, groupId: null } : item));
             setGroups((current) => current.filter((candidate) => candidate.id !== group.id));
-          }}>Remove group</Button>}
+          }}><Trash2 className="size-4" /></Button>}
         </div>)}
       </div>}
 
@@ -956,11 +961,9 @@ export function BulkImportPage() {
                 onChange={(event) => updateItem(item.id, { title: event.target.value })} />
               <p className="text-muted-foreground text-xs">{(item.descriptor.size / 1024 / 1024).toFixed(1)} MB · {item.status}</p>
               {!item.file && !item.cardId && <div className="mt-2 text-sm">
-                <p role="status">File missing after reload. Reselect it here. {item.fingerprint
-                  ? 'The name, size, modified time, type, and sampled fingerprint must match.'
-                  : 'This draft has no saved fingerprint, so automatic attachment is disabled. Select the intended file for this row and review it before upload.'}</p>
-                <label className="mt-1 inline-flex cursor-pointer rounded-lg border px-3 py-1">
-                  Attach file to this row
+                <p role="status">File missing after reload. Reselect it here. {!item.fingerprint && 'Check that this is the intended file before upload.'}</p>
+                <label className="focus-within:ring-ring mt-1 inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1 focus-within:ring-2">
+                  <Upload className="size-4" /> Attach file
                   <input className="sr-only" type="file" disabled={isRunning || isPreparingFiles} aria-label={`Attach file for ${item.descriptor.name}`}
                     onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachFile(item, file); event.target.value = ''; }} />
                 </label>
@@ -985,14 +988,12 @@ export function BulkImportPage() {
                 <a className="text-primary text-sm underline" href={`/cards/${item.cardId}`}>Open media #{item.cardId}</a>
                 {hasCatalogAssignment && <p className="text-muted-foreground text-xs">Tags/source: {item.metadataStatus ?? 'pending'}</p>}
                 {item.metadataError && <p role="alert" className="text-destructive text-sm">Could not assign tags/source: {item.metadataError}</p>}
-                <p className="text-muted-foreground text-xs">
-                  Image analysis: {item.analysis === null ? 'no job' : item.analysis?.state ?? 'checking'}
-                  {item.analysis && ` · ${item.analysis.attempts} attempt(s)`}
-                  {item.analysis?.availableAtUtc && item.analysis.state === 'pending' && ` · next attempt ${new Date(item.analysis.availableAtUtc).toLocaleString()}`}
-                </p>
+                <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">Analysis: {item.analysis === null ? 'not queued' : item.analysis?.state ?? 'checking'}</summary>
+                  {item.analysis && <p>{item.analysis.attempts} attempt(s){item.analysis.availableAtUtc && item.analysis.state === 'pending' && ` · next attempt ${new Date(item.analysis.availableAtUtc).toLocaleString()}`}</p>}
+                </details>
                 {item.analysis?.lastError && <p className="text-destructive text-xs">Analysis error: {item.analysis.lastError}</p>}
                 {item.analysisError && <p role="alert" className="text-destructive text-xs">Could not check analysis: {item.analysisError}</p>}
-                <Button type="button" size="sm" variant="ghost" onClick={() => void checkAnalysis(item)}>Refresh analysis</Button>
+                <Button type="button" size="icon-sm" variant="ghost" aria-label={`Refresh analysis for ${item.descriptor.name}`} title="Refresh analysis" onClick={() => void checkAnalysis(item)}><RotateCw className="size-4" /></Button>
               </>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1004,10 +1005,10 @@ export function BulkImportPage() {
                   <option key={candidate.id} value={candidate.id}>{candidate.title || `${candidate.type} group ${candidate.id}`}</option>)}
               </select>
               {item.groupId != null && <>
-                <Button type="button" size="sm" variant="outline" aria-label={`Move ${item.descriptor.name} up`} disabled={isRunning || !!group?.creationKey && !group.cardId || position === 0} onClick={() => moveItem(item.id, -1)}>↑</Button>
-                <Button type="button" size="sm" variant="outline" aria-label={`Move ${item.descriptor.name} down`} disabled={isRunning || !!group?.creationKey && !group.cardId || position === groupItems.length - 1} onClick={() => moveItem(item.id, 1)}>↓</Button>
+                <Button type="button" size="icon-sm" variant="outline" aria-label={`Move ${item.descriptor.name} up`} title="Move up" disabled={isRunning || !!group?.creationKey && !group.cardId || position === 0} onClick={() => moveItem(item.id, -1)}><ArrowUp className="size-4" /></Button>
+                <Button type="button" size="icon-sm" variant="outline" aria-label={`Move ${item.descriptor.name} down`} title="Move down" disabled={isRunning || !!group?.creationKey && !group.cardId || position === groupItems.length - 1} onClick={() => moveItem(item.id, 1)}><ArrowDown className="size-4" /></Button>
               </>}
-              {!item.cardId && <Button type="button" size="sm" variant="ghost" disabled={isRunning || !!item.creationKey || !!group?.creationKey && !group.cardId} onClick={() => removeItem(item)}>Remove</Button>}
+              {!item.cardId && <Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove ${item.descriptor.name}`} title="Remove file" disabled={isRunning || !!item.creationKey || !!group?.creationKey && !group.cardId} onClick={() => removeItem(item)}><Trash2 className="size-4" /></Button>}
             </div>
           </article>;
         })}

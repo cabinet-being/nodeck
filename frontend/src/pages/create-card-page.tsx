@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Layers3, Plus, Upload } from 'lucide-react';
 
 import { createCard, createCollectionFromCards, listCards, type Card } from '@/api/cards';
 import {
@@ -93,14 +94,14 @@ export function CreateCardPage({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
+    <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 sm:p-6">
       <div>
-        <h1 className="text-2xl font-semibold">Create Card</h1>
+        <h1 className="text-2xl font-semibold">Create card</h1>
       </div>
 
       <div className="flex gap-2" role="group" aria-label="Collection creation method">
-        <Button type="button" variant={useExisting ? 'outline' : 'secondary'} onClick={() => { setUseExisting(false); setError(null); }}>Upload new files</Button>
-        <Button type="button" variant={useExisting ? 'secondary' : 'outline'} onClick={() => { setUseExisting(true); setError(null); }}>Group existing media</Button>
+        <Button type="button" variant={useExisting ? 'outline' : 'secondary'} aria-pressed={!useExisting} onClick={() => { setUseExisting(false); setError(null); }}><Upload className="size-4" /> Upload</Button>
+        <Button type="button" variant={useExisting ? 'secondary' : 'outline'} aria-pressed={useExisting} onClick={() => { setUseExisting(true); setError(null); }}><Layers3 className="size-4" /> Group existing</Button>
       </div>
 
       {useExisting ? (
@@ -115,7 +116,7 @@ export function CreateCardPage({
           </label>
           <ExistingMediaPicker selected={selectedMedia} onChange={setSelectedMedia} disabled={isSubmitting} />
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
-          <Button type="submit" disabled={isSubmitting || selectedMedia.length < 2}>{isSubmitting ? 'Creating...' : 'Create collection'}</Button>
+          <Button type="submit" disabled={isSubmitting || selectedMedia.length < 2}><Plus className="size-4" />{isSubmitting ? 'Creating...' : 'Create collection'}</Button>
         </form>
       ) : (
 

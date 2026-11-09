@@ -64,9 +64,6 @@ export function CardForm({
   return (
     <form onSubmit={onSubmit} className="grid gap-4">
       <UiCard>
-        <CardHeader>
-          <CardTitle>Card</CardTitle>
-        </CardHeader>
         <CardContent className="grid gap-4">
           <label className="grid gap-2 text-sm font-medium">
             Type
@@ -112,9 +109,6 @@ export function CardForm({
                   onValueChange({ ...value, image: event.target.files?.[0] })
                 }
               />
-              {value.image ? (
-                <span className="text-muted-foreground text-xs">{value.image.name}</span>
-              ) : null}
             </label>
           ) : null}
 
@@ -182,7 +176,7 @@ export function CardForm({
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{image.file.name}</div>
                         {index === 0 ? (
-                          <div className="text-muted-foreground text-xs">Parent preview</div>
+                          <div className="text-muted-foreground text-xs">Cover</div>
                         ) : null}
                       </div>
                       <div className="flex items-center justify-end gap-1">
@@ -190,6 +184,8 @@ export function CardForm({
                           type="button"
                           variant="ghost"
                           size="icon"
+                          aria-label={`Move ${image.file.name} up`}
+                          title="Move up"
                           disabled={index === 0}
                           onClick={() => moveImage(index, index - 1)}
                         >
@@ -199,6 +195,8 @@ export function CardForm({
                           type="button"
                           variant="ghost"
                           size="icon"
+                          aria-label={`Move ${image.file.name} down`}
+                          title="Move down"
                           disabled={index === value.images.length - 1}
                           onClick={() => moveImage(index, index + 1)}
                         >
@@ -208,6 +206,8 @@ export function CardForm({
                           type="button"
                           variant="ghost"
                           size="icon"
+                          aria-label={`Remove ${image.file.name}`}
+                          title="Remove image"
                           onClick={() => removeImage(index)}
                         >
                           <Trash2 className="size-4" />
@@ -223,11 +223,15 @@ export function CardForm({
         </CardContent>
       </UiCard>
 
-      <KeyValueEditor
-        title="Properties"
-        rows={value.properties}
-        onRowsChange={(properties) => onValueChange({ ...value, properties })}
-      />
+      <details className="rounded-xl border p-4" open={value.properties.length > 0 ? true : undefined}>
+        <summary className="cursor-pointer text-sm font-medium">Properties {value.properties.length > 0 && `(${value.properties.length})`}</summary>
+        <div className="mt-4">
+          <KeyValueEditor
+            rows={value.properties}
+            onRowsChange={(properties) => onValueChange({ ...value, properties })}
+          />
+        </div>
+      </details>
 
       <UiCard>
         <CardHeader>
@@ -296,6 +300,8 @@ export function CardForm({
                   type="button"
                   variant="ghost"
                   size="icon"
+                  aria-label={`Remove relation ${index + 1}`}
+                  title="Remove relation"
                   onClick={() =>
                     onValueChange({
                       ...value,
@@ -439,33 +445,24 @@ function updateRelation(
 }
 
 function KeyValueEditor({
-  title,
   rows,
   onRowsChange,
 }: {
-  title: string;
   rows: KeyValueRow[];
   onRowsChange: (rows: KeyValueRow[]) => void;
 }) {
   return (
-    <UiCard>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle>{title}</CardTitle>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onRowsChange([...rows, { key: '', value: '' }])}
-          >
-            <Plus className="size-4" />
-            Add property
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <KeyValueRows rows={rows} onRowsChange={onRowsChange} />
-      </CardContent>
-    </UiCard>
+    <div className="grid gap-3">
+      <KeyValueRows rows={rows} onRowsChange={onRowsChange} />
+      <Button
+        type="button"
+        variant="outline"
+        className="justify-self-start"
+        onClick={() => onRowsChange([...rows, { key: '', value: '' }])}
+      >
+        <Plus className="size-4" /> Add property
+      </Button>
+    </div>
   );
 }
 
@@ -502,6 +499,8 @@ function KeyValueRows({
             type="button"
             variant="ghost"
             size="icon"
+            aria-label={`Remove property ${index + 1}`}
+            title="Remove property"
             onClick={() => onRowsChange(rows.filter((_, itemIndex) => itemIndex !== index))}
           >
             <Trash2 className="size-4" />

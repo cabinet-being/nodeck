@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ChevronDown, Tags, X } from 'lucide-react';
 
 import { listSources, listTags, type Source, type Tag } from '@/api/catalog';
 import { Button } from '@/components/ui/button';
@@ -39,18 +40,15 @@ export function BulkImportCatalogPicker({ selection, onChange, locked }: {
   }, [open, locked, sourceSearch]);
 
   return <section className="rounded-xl border p-4">
-    <Button type="button" variant="ghost" size="sm" aria-expanded={open}
+    <Button type="button" variant="ghost" size="sm" aria-expanded={open} aria-controls="import-catalog-options"
       onClick={() => setOpen((current) => !current)}>
-      {open ? 'Hide' : 'Choose'} tags and source for imported cards
+      <Tags className="size-4" /> Tags & source <ChevronDown className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`} />
     </Button>
     <p className="text-muted-foreground mt-1 text-xs">
-      Applied to every created media card and comic or set group card.
-      {locked && ' Selection is locked after import starts.'}
+      {selection.tags.length} tags{selection.source ? ` · ${selection.source.name}` : ''}{locked && ' · locked for this import'}
     </p>
-    <p className="mt-2 text-sm">
-      {selection.tags.length} tag(s) · {selection.source?.name ?? 'No source'}
-    </p>
-    {open && <div className="mt-3 grid gap-3 sm:grid-cols-2">
+    {open && <div id="import-catalog-options" className="mt-3 grid gap-3 sm:grid-cols-2">
+      <p className="text-muted-foreground text-xs sm:col-span-2">Applied to every imported card and group.</p>
       <div className="grid content-start gap-2">
         <Input type="search" aria-label="Find import tag" placeholder="Search existing tags by name"
           value={tagSearch} disabled={locked} onChange={(event) => { setTagSearch(event.target.value); setTagChoices([]); }} />
@@ -58,7 +56,7 @@ export function BulkImportCatalogPicker({ selection, onChange, locked }: {
           {selection.tags.map((tag) => <Button key={tag.id} type="button" variant="outline" size="sm"
             disabled={locked} aria-label={`Remove import tag ${tag.name}`}
             onClick={() => onChange({ ...selection, tags: selection.tags.filter((candidate) => candidate.id !== tag.id) })}>
-            {tag.name} ×
+            {tag.name} <X className="size-3" />
           </Button>)}
         </div>
         {tagSearch.trim() && <div className="grid max-h-36 gap-1 overflow-auto">
@@ -76,7 +74,7 @@ export function BulkImportCatalogPicker({ selection, onChange, locked }: {
         {selection.source && <Button type="button" variant="outline" size="sm" disabled={locked}
           className="justify-start" aria-label={`Remove import source ${selection.source.name}`}
           onClick={() => onChange({ ...selection, source: null, originalUrl: '' })}>
-          {selection.source.name} ×
+          {selection.source.name} <X className="size-3" />
         </Button>}
         {sourceSearch.trim() && <div className="grid max-h-36 gap-1 overflow-auto">
           {sourceChoices.map((source) => <Button key={source.id} type="button" variant="ghost" size="sm"
