@@ -55,13 +55,16 @@ public sealed class CardImageAnalysisTests
             pending.Select(item => item.TagId).Order());
         Assert.Equal(0.85m, pending.Single(item => item.TagId == proposed).Confidence);
         Assert.All(pending, item => Assert.Equal("fake-visual:v1", item.ModelKey));
-        Assert.Equal("manual", (await assignments.ListTagsAsync(scope.CardId)).Single().AssignmentSource);
+        var assignmentsAfterAnalysis = await assignments.ListTagsAsync(scope.CardId);
+        Assert.Equal("manual", assignmentsAfterAnalysis.Single(item => item.Id == manual).AssignmentSource);
+        Assert.All(assignmentsAfterAnalysis.Where(item => item.Id != manual),
+            item => Assert.Equal("auto", item.AssignmentSource));
         Assert.Equal("rejected", await scope.SuggestionStateAsync(rejected));
         Assert.Null(await scope.SuggestionStateAsync(manual));
         Assert.Null(await scope.SuggestionStateAsync(userOwned));
         Assert.Null(await scope.SuggestionStateAsync(rating));
         Assert.Null(await scope.SuggestionStateAsync(wrongCategory));
-        Assert.Equal(1, await scope.Connection.ExecuteScalarAsync<long>(
+        Assert.Equal(5, await scope.Connection.ExecuteScalarAsync<long>(
             "SELECT COUNT(*) FROM card_tags WHERE card_id = @CardId;", new { scope.CardId }));
         Assert.Equal(tagCountBefore, await scope.Connection.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM tags;"));
     }
@@ -160,7 +163,7 @@ public sealed class CardImageAnalysisTests
         var pending = await new CardCatalogRepository(scope.Configuration).ListPendingSuggestionsAsync(scope.CardId);
         Assert.Equal(40, pending.Count);
         Assert.Equal(tagIds.Skip(5).Order(), pending.Select(item => item.TagId).Order());
-        Assert.Equal(0, await scope.AssignmentCountAsync());
+        Assert.Equal(40, await scope.AssignmentCountAsync());
     }
 
     private sealed class FakeTagger(

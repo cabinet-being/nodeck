@@ -117,6 +117,8 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     await scope.ServiceProvider.GetRequiredService<SchemaMigrationRunner>().InitializeAsync();
+    var activated = await scope.ServiceProvider.GetRequiredService<CardCatalogRepository>().ActivatePendingSuggestionsAsync();
+    if (activated > 0) app.Logger.LogInformation("Activated {Count} pending automatic tags.", activated);
 }
 
 if (importOptions is not null)

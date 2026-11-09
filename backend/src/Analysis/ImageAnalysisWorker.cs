@@ -50,6 +50,8 @@ public sealed class ImageAnalysisWorker : BackgroundService
                     if (lease is not null)
                     {
                         hadLease = true;
+                        _logger.LogInformation("Analyzing media card {CardId}, attempt {Attempt}.",
+                            lease.CardId, lease.Attempts);
                         try
                         {
                             using var analysisBudget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);

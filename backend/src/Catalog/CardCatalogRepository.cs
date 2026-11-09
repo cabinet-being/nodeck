@@ -13,6 +13,34 @@ public sealed class CardCatalogRepository
             ?? throw new InvalidOperationException("Missing database connection string.");
     }
 
+    /// <summary>Activates proposals made before automatic tag assignment was enabled.</summary>
+    public async Task<int> ActivatePendingSuggestionsAsync()
+    {
+        await using var connection = await OpenAsync();
+        const string lockName = "nodeck:auto-tag-activation";
+        if (await connection.ExecuteScalarAsync<int?>("SELECT GET_LOCK(@LockName, 30);",
+            new { LockName = lockName }) != 1)
+            throw new InvalidOperationException("Could not acquire the automatic tag activation lock.");
+        try
+        {
+            await using var transaction = await connection.BeginTransactionAsync();
+            var inserted = await connection.ExecuteAsync("""
+                INSERT INTO card_tags (card_id, tag_id, assignment_source, confidence)
+                SELECT s.card_id, s.tag_id, 'auto', s.confidence
+                FROM card_tag_suggestions s
+                WHERE s.state = 'pending'
+                  AND NOT EXISTS (SELECT 1 FROM card_tags ct
+                      WHERE ct.card_id = s.card_id AND ct.tag_id = s.tag_id);
+                """, transaction: transaction);
+            await transaction.CommitAsync();
+            return inserted;
+        }
+        finally
+        {
+            await connection.ExecuteAsync("SELECT RELEASE_LOCK(@LockName);", new { LockName = lockName });
+        }
+    }
+
     public async Task<IReadOnlyList<CardTagEntry>> ListTagsAsync(long cardId)
     {
         await using var connection = await OpenAsync();
@@ -137,7 +165,8 @@ public sealed class CardCatalogRepository
             WHERE s.card_id = @CardId AND s.state = 'pending'
               AND NOT EXISTS (
                   SELECT 1 FROM card_tags ct
-                  WHERE ct.card_id = s.card_id AND ct.tag_id = s.tag_id)
+                  WHERE ct.card_id = s.card_id AND ct.tag_id = s.tag_id
+                    AND ct.assignment_source <> 'auto')
             ORDER BY s.confidence DESC, t.name, t.id LIMIT 200;
             """, new { CardId = cardId })).ToList();
     }
@@ -170,7 +199,8 @@ public sealed class CardCatalogRepository
             if (tag.LegacyCardId is not null)
                 throw new CatalogValidationException("Legacy tag cards cannot be proposed by the tagger.");
             if (await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
-                SELECT COUNT(*) FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId;
+                SELECT COUNT(*) FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId
+                  AND assignment_source <> 'auto';
                 """, new { CardId = cardId, item.TagId }, transaction, cancellationToken: cancellationToken)) != 0)
                 continue;
             await connection.ExecuteAsync(new CommandDefinition("""
@@ -187,41 +217,100 @@ public sealed class CardCatalogRepository
                 """, new { CardId = cardId, item.TagId, item.Confidence, item.ModelKey }, transaction,
                 cancellationToken: cancellationToken));
         }
+        await connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO card_tags (card_id, tag_id, assignment_source, confidence)
+            SELECT s.card_id, s.tag_id, 'auto', s.confidence
+            FROM card_tag_suggestions s
+            WHERE s.card_id = @CardId AND s.state = 'pending'
+              AND NOT EXISTS (SELECT 1 FROM card_tags ct
+                  WHERE ct.card_id = s.card_id AND ct.tag_id = s.tag_id);
+            """, new { CardId = cardId }, transaction, cancellationToken: cancellationToken));
     }
 
     public async Task<bool> DecideSuggestionAsync(long cardId, long tagId, string decision)
     {
-        if (decision is not ("accepted" or "rejected"))
-            throw new CatalogValidationException("Decision must be accepted or rejected.");
+        ValidateDecision(decision);
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         await RequireContentCardAsync(connection, transaction, cardId);
         var suggestion = await connection.QuerySingleOrDefaultAsync<SuggestionState>("""
-            SELECT state, confidence FROM card_tag_suggestions
+            SELECT tag_id AS TagId, state, confidence FROM card_tag_suggestions
             WHERE card_id = @CardId AND tag_id = @TagId FOR UPDATE;
             """, new { CardId = cardId, TagId = tagId }, transaction);
         if (suggestion is null) return false;
         if (suggestion.State == decision) return true;
         if (suggestion.State != "pending")
             throw new CatalogConflictException("This suggestion already has a different decision.");
+        await ApplyDecisionAsync(connection, transaction, cardId, suggestion, decision);
+        await transaction.CommitAsync();
+        return true;
+    }
 
+    public async Task<int> DecideSuggestionsAsync(long cardId, IReadOnlyCollection<long>? tagIds, string decision)
+    {
+        ValidateDecision(decision);
+        var ids = tagIds?.ToArray();
+        if (ids is { Length: 0 or > 200 } || ids is not null &&
+            (ids.Any(id => id <= 0) || ids.Distinct().Count() != ids.Length))
+            throw new CatalogValidationException("Choose one to 200 distinct tag IDs, or omit tagIds to review all pending tags.");
+        await using var connection = await OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await RequireContentCardAsync(connection, transaction, cardId);
+        var rows = (ids is null
+            ? await connection.QueryAsync<SuggestionState>("""
+                SELECT tag_id AS TagId, state, confidence FROM card_tag_suggestions
+                WHERE card_id = @CardId AND state = 'pending' FOR UPDATE;
+                """, new { CardId = cardId }, transaction)
+            : await connection.QueryAsync<SuggestionState>("""
+                SELECT tag_id AS TagId, state, confidence FROM card_tag_suggestions
+                WHERE card_id = @CardId AND tag_id IN @Ids FOR UPDATE;
+                """, new { CardId = cardId, Ids = ids }, transaction)).ToArray();
+        if (ids is not null && rows.Length != ids.Length)
+            throw new CatalogMissingException("One or more tag suggestions were not found.");
+        if (rows.Any(row => row.State != "pending" && row.State != decision))
+            throw new CatalogConflictException("One or more suggestions already have a different decision.");
+        var pending = rows.Where(row => row.State == "pending").ToArray();
+        foreach (var row in pending)
+            await ApplyDecisionAsync(connection, transaction, cardId, row, decision);
+        await transaction.CommitAsync();
+        return pending.Length;
+    }
+
+    private static void ValidateDecision(string decision)
+    {
+        if (decision is not ("accepted" or "rejected"))
+            throw new CatalogValidationException("Decision must be accepted or rejected.");
+    }
+
+    private static async Task ApplyDecisionAsync(MySqlConnection connection, MySqlTransaction transaction,
+        long cardId, SuggestionState suggestion, string decision)
+    {
         if (decision == "accepted")
         {
-            var assigned = await connection.ExecuteScalarAsync<long>("""
-                SELECT COUNT(*) FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId;
-                """, new { CardId = cardId, TagId = tagId }, transaction);
-            if (assigned == 0)
+            var assignmentSource = await connection.ExecuteScalarAsync<string?>("""
+                SELECT assignment_source FROM card_tags
+                WHERE card_id = @CardId AND tag_id = @TagId LIMIT 1 FOR UPDATE;
+                """, new { CardId = cardId, suggestion.TagId }, transaction);
+            if (assignmentSource is null)
                 await connection.ExecuteAsync("""
                     INSERT INTO card_tags (card_id, tag_id, assignment_source, confidence)
                     VALUES (@CardId, @TagId, 'confirmed', @Confidence);
-                    """, new { CardId = cardId, TagId = tagId, suggestion.Confidence }, transaction);
+                    """, new { CardId = cardId, suggestion.TagId, suggestion.Confidence }, transaction);
+            else if (assignmentSource == "auto")
+                await connection.ExecuteAsync("""
+                    UPDATE card_tags SET assignment_source = 'confirmed', confidence = @Confidence
+                    WHERE card_id = @CardId AND tag_id = @TagId AND assignment_source = 'auto';
+                    """, new { CardId = cardId, suggestion.TagId, suggestion.Confidence }, transaction);
         }
+        else
+            await connection.ExecuteAsync("""
+                DELETE FROM card_tags WHERE card_id = @CardId AND tag_id = @TagId
+                  AND assignment_source = 'auto';
+                """, new { CardId = cardId, suggestion.TagId }, transaction);
         await connection.ExecuteAsync("""
             UPDATE card_tag_suggestions SET state = @Decision, updated_at_utc = UTC_TIMESTAMP(6)
             WHERE card_id = @CardId AND tag_id = @TagId;
-            """, new { CardId = cardId, TagId = tagId, Decision = decision }, transaction);
-        await transaction.CommitAsync();
-        return true;
+            """, new { CardId = cardId, suggestion.TagId, Decision = decision }, transaction);
     }
 
     public async Task<IReadOnlyList<CardSourceEntry>> ListSourcesAsync(long cardId)
@@ -374,6 +463,7 @@ public sealed class CardCatalogRepository
 
     private sealed class SuggestionState
     {
+        public long TagId { get; set; }
         public string State { get; set; } = "";
         public decimal? Confidence { get; set; }
     }

@@ -37,6 +37,7 @@ public sealed class SpeechAnalysisQueueRepository
         long cardId, bool analyzeAudio, CancellationToken cancellationToken = default)
     {
         if (cardId <= 0) throw new ArgumentOutOfRangeException(nameof(cardId));
+        await RemovePendingSpeechAssignmentsAsync(connection, transaction, cardId, cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition("""
             DELETE FROM card_tag_suggestions
             WHERE card_id = @CardId AND state = 'pending' AND suggestion_source = 'speech';
@@ -185,6 +186,7 @@ public sealed class SpeechAnalysisQueueRepository
         MySqlTransaction transaction, long cardId,
         IReadOnlyList<TagSuggestionProposal> proposals, CancellationToken cancellationToken)
     {
+        await RemovePendingSpeechAssignmentsAsync(connection, transaction, cardId, cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition("""
             DELETE FROM card_tag_suggestions
             WHERE card_id = @CardId AND state = 'pending' AND suggestion_source = 'speech';
@@ -219,6 +221,25 @@ public sealed class SpeechAnalysisQueueRepository
                 """, new { CardId = cardId, proposal.TagId, proposal.Confidence,
                     proposal.ModelKey }, transaction, cancellationToken: cancellationToken));
         }
+        await connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO card_tags (card_id, tag_id, assignment_source, confidence)
+            SELECT s.card_id, s.tag_id, 'auto', s.confidence
+            FROM card_tag_suggestions s
+            WHERE s.card_id = @CardId AND s.state = 'pending' AND s.suggestion_source = 'speech'
+              AND NOT EXISTS (SELECT 1 FROM card_tags ct
+                  WHERE ct.card_id = s.card_id AND ct.tag_id = s.tag_id);
+            """, new { CardId = cardId }, transaction, cancellationToken: cancellationToken));
+    }
+
+    private static async Task RemovePendingSpeechAssignmentsAsync(MySqlConnection connection,
+        MySqlTransaction transaction, long cardId, CancellationToken cancellationToken)
+    {
+        await connection.ExecuteAsync(new CommandDefinition("""
+            DELETE ct FROM card_tags ct
+            JOIN card_tag_suggestions s ON s.card_id = ct.card_id AND s.tag_id = ct.tag_id
+            WHERE s.card_id = @CardId AND s.state = 'pending'
+              AND s.suggestion_source = 'speech' AND ct.assignment_source = 'auto';
+            """, new { CardId = cardId }, transaction, cancellationToken: cancellationToken));
     }
 
     public async Task<bool> FailAsync(SpeechAnalysisJobLease lease, Exception error,
