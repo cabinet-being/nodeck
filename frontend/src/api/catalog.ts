@@ -17,7 +17,7 @@ export type Source = {
 };
 
 export type CardTag = Pick<Tag, 'id' | 'name' | 'category' | 'origin'> & {
-  assignmentSource: 'manual' | 'confirmed';
+  assignmentSource: 'manual' | 'auto' | 'confirmed';
 };
 export type TagSuggestion = {
   tagId: number;
@@ -72,6 +72,9 @@ export const listTagSuggestions = (cardId: number) =>
   request<TagSuggestion[]>(`/api/cards/${cardId}/tag-suggestions`);
 export const decideTagSuggestion = (cardId: number, tagId: number, decision: 'accepted' | 'rejected') =>
   request<void>(`/api/cards/${cardId}/tag-suggestions/${tagId}/decision`, json({ decision }, 'PUT'));
+export const decideTagSuggestions = (cardId: number, decision: 'accepted' | 'rejected', tagIds?: number[]) =>
+  request<{ count: number }>(`/api/cards/${cardId}/tag-suggestions/decision`,
+    json({ decision, tagIds: tagIds ?? null }, 'PUT'));
 
 export const listCardSources = (cardId: number) =>
   request<CardSource[]>(`/api/cards/${cardId}/sources`);

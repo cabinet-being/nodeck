@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Check, ChevronDown, Plus, Save, X } from 'lucide-react';
 
 import {
-  createSource, createTag, decideTagSuggestion, deleteCardSource, deleteCardTag,
+  createSource, createTag, decideTagSuggestion, decideTagSuggestions, deleteCardSource, deleteCardTag,
   listCardSources, listCardTags, listSources, listTags, listTagSuggestions,
   setCardSource, setCardTag, type CardSource, type CardTag, type Source, type Tag,
   type TagSuggestion,
@@ -29,11 +29,13 @@ export function CardCatalogPanel({ cardId, metadata }: {
   const [busy, setBusy] = React.useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = React.useState(false);
   const [showAllSuggestions, setShowAllSuggestions] = React.useState(false);
+  const [selectedSuggestionIds, setSelectedSuggestionIds] = React.useState<number[]>([]);
   const suggestionsId = React.useId();
 
   React.useEffect(() => {
     setSuggestionsOpen(false);
     setShowAllSuggestions(false);
+    setSelectedSuggestionIds([]);
   }, [cardId]);
 
   React.useEffect(() => {
@@ -44,6 +46,7 @@ export function CardCatalogPanel({ cardId, metadata }: {
         setTags(nextTags);
         setSources(nextSources);
         setSuggestions(nextSuggestions);
+        setSelectedSuggestionIds((current) => current.filter((id) => nextSuggestions.some((item) => item.tagId === id)));
         setSourceDrafts(Object.fromEntries(nextSources.map((source) => [source.id, source.originalUrl ?? ''])));
       })
       .catch((cause) => { if (active) setError(message(cause)); });
@@ -59,18 +62,25 @@ export function CardCatalogPanel({ cardId, metadata }: {
     return () => { active = false; };
   }, [mode, search]);
 
-  async function run(action: () => Promise<unknown>, close = false) {
+  async function run(action: () => Promise<unknown>, close = false): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
       await action();
       setRevision((value) => value + 1);
       if (close) { setMode(null); setSearch(''); setSourceUrl(''); }
+      return true;
     } catch (cause) {
       setError(message(cause));
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  async function reviewMany(decision: 'accepted' | 'rejected', tagIds?: number[]) {
+    if (await run(() => decideTagSuggestions(cardId, decision, tagIds)))
+      setSelectedSuggestionIds([]);
   }
 
   const technical = [
@@ -79,6 +89,8 @@ export function CardCatalogPanel({ cardId, metadata }: {
     typeof metadata.width === 'number' && typeof metadata.height === 'number'
       ? `${metadata.width} × ${metadata.height}` : null,
   ].filter((value): value is string => typeof value === 'string');
+  const reviewedTags = tags.filter((tag) => tag.assignmentSource !== 'auto');
+  const automaticTags = tags.filter((tag) => tag.assignmentSource === 'auto');
 
   return (
     <section className="grid gap-4 rounded-lg border p-4">
@@ -96,11 +108,18 @@ export function CardCatalogPanel({ cardId, metadata }: {
             onClick={() => { setMode('tag'); setSearch(''); setChoices([]); setError(null); }}><Plus className="size-4" /></Button>
         </div>
         <div className="flex flex-wrap gap-2">
-          {tags.map((tag) => <span key={tag.id} className="inline-flex items-center gap-1">
+          {reviewedTags.map((tag) => <span key={tag.id} className="inline-flex items-center gap-1">
             <TagChip name={tag.name} category={tag.category} origin={tag.origin} />
-            <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove ${tag.name}`}
+            <Button type="button" size="icon-xs" variant="ghost"
+              aria-label={`Remove ${tag.name}`} title="Remove tag"
               disabled={busy} onClick={() => run(() => deleteCardTag(cardId, tag.id))}><X className="size-3" /></Button>
           </span>)}
+          {automaticTags.slice(0, 6).map((tag) => <span key={tag.id}
+            title="Added automatically; awaiting review"><TagChip name={tag.name} category={tag.category} origin={tag.origin} /></span>)}
+          {automaticTags.length > 6 ? <Button type="button" variant="ghost" size="xs"
+            onClick={() => { setSuggestionsOpen(true); setShowAllSuggestions(true); }}>
+            +{automaticTags.length - 6} automatic
+          </Button> : null}
           {tags.length === 0 ? <span className="text-muted-foreground text-xs">No tags</span> : null}
         </div>
       </div>
@@ -110,16 +129,32 @@ export function CardCatalogPanel({ cardId, metadata }: {
           <Button type="button" variant="ghost" size="sm" className="w-full justify-between px-2"
             aria-expanded={suggestionsOpen} aria-controls={suggestionsId}
             onClick={() => setSuggestionsOpen((open) => !open)}>
-            <span>Suggested tags <span className="text-muted-foreground">({suggestions.length} to review)</span></span>
+            <span>Automatic tags <span className="text-muted-foreground">({suggestions.length} to review)</span></span>
             <ChevronDown className={`size-4 transition-transform ${suggestionsOpen ? 'rotate-180' : ''}`} />
           </Button>
         </h3>
         <div id={suggestionsId} className={suggestionsOpen ? 'grid gap-2' : ''}>
           {suggestionsOpen ? <>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={busy}
+                onClick={() => void reviewMany('accepted')}>Approve all</Button>
+              <Button type="button" variant="outline" size="sm" disabled={busy}
+                onClick={() => void reviewMany('rejected')}>Reject all</Button>
+              {selectedSuggestionIds.length > 0 ? <>
+                <Button type="button" variant="secondary" size="sm" disabled={busy}
+                  onClick={() => void reviewMany('accepted', selectedSuggestionIds)}>Approve selected ({selectedSuggestionIds.length})</Button>
+                <Button type="button" variant="secondary" size="sm" disabled={busy}
+                  onClick={() => void reviewMany('rejected', selectedSuggestionIds)}>Reject selected ({selectedSuggestionIds.length})</Button>
+              </> : null}
+            </div>
             <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto">
             {(showAllSuggestions ? suggestions : suggestions.slice(0, 8)).map((suggestion) => <span key={suggestion.tagId}
             className="inline-flex items-center gap-1 rounded-full border px-1.5 py-1"
             title={suggestion.modelKey ? `Suggested by ${suggestion.modelKey}` : undefined}>
+            <input type="checkbox" className="ml-1" aria-label={`Select ${suggestion.name}`}
+              checked={selectedSuggestionIds.includes(suggestion.tagId)} disabled={busy}
+              onChange={(event) => setSelectedSuggestionIds((current) => event.target.checked
+                ? [...current, suggestion.tagId] : current.filter((id) => id !== suggestion.tagId))} />
             <TagChip name={suggestion.name} category={suggestion.category} origin={suggestion.origin} />
             <span className="text-muted-foreground text-xs">{Math.round(suggestion.confidence * 100)}%</span>
             <Button type="button" size="icon-xs" variant="ghost"
