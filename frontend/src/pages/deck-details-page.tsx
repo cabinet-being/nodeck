@@ -1,10 +1,14 @@
 import * as React from 'react';
 
-import { resolveApiUrl } from '@/api/cards';
-import { getDeck, type DeckCard, type DeckDetails } from '@/api/decks';
+import { getDeck, removeCardFromDeck, type DeckCard, type DeckDetails } from '@/api/decks';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  useVisualCardView,
+  VisualCardViewToggle,
+  VisualCardWall,
+} from '@/components/visual-card-wall';
 
 export function DeckDetailsPage({
   deckId,
@@ -13,24 +17,72 @@ export function DeckDetailsPage({
   deckId: number;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
-  const [deck, setDeck] = React.useState<DeckDetails | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<{
+    deckId: number;
+    deck: DeckDetails | null;
+    error: string | null;
+  } | null>(null);
+  const [view, setView] = useVisualCardView('nodeck.deckView');
+  const [removingId, setRemovingId] = React.useState<number | null>(null);
+  const [removeError, setRemoveError] = React.useState<string | null>(null);
+  const currentDeckId = React.useRef(deckId);
+  const requestGeneration = React.useRef(0);
+  currentDeckId.current = deckId;
 
   React.useEffect(() => {
-    setDeck(null);
-    setError(null);
+    let active = true;
+    requestGeneration.current += 1;
+    setResult(null);
+    setRemovingId(null);
+    setRemoveError(null);
 
     getDeck(deckId)
-      .then(setDeck)
-      .catch((requestError) => setError(requestError.message));
+      .then((deck) => {
+        if (active) setResult({ deckId, deck, error: null });
+      })
+      .catch((requestError) => {
+        if (active) setResult({
+          deckId,
+          deck: null,
+          error: requestError instanceof Error ? requestError.message : 'Unable to load deck.',
+        });
+      });
+
+    return () => {
+      active = false;
+      requestGeneration.current += 1;
+    };
   }, [deckId]);
 
-  if (error) {
-    return <div className="text-destructive p-6 text-sm">{error}</div>;
+  if (result?.deckId === deckId && result.error) {
+    return <div className="text-destructive p-6 text-sm">{result.error}</div>;
   }
 
-  if (!deck) {
+  if (result?.deckId !== deckId || !result.deck) {
     return <div className="text-muted-foreground p-6 text-sm">Loading...</div>;
+  }
+
+  const deck = result.deck;
+  const cards = [...deck.cards].sort((left, right) => left.position - right.position);
+
+  async function removeCard(cardId: number) {
+    if (removingId !== null) return;
+    const generation = requestGeneration.current;
+    setRemovingId(cardId);
+    setRemoveError(null);
+
+    try {
+      const updated = await removeCardFromDeck(deckId, cardId);
+      if (currentDeckId.current === deckId && requestGeneration.current === generation) {
+        setResult({ deckId, deck: updated, error: null });
+      }
+    } catch (error) {
+      if (currentDeckId.current === deckId && requestGeneration.current === generation) {
+        setRemoveError(error instanceof Error ? error.message : 'Unable to remove card.');
+      }
+    } finally {
+      if (currentDeckId.current === deckId && requestGeneration.current === generation) setRemovingId(null);
+    }
   }
 
   return (
@@ -52,65 +104,96 @@ export function DeckDetailsPage({
           )}
         </div>
 
-        <div className="grid gap-3">
-          {deck.cards.map((card) => (
-            <DeckCardItem key={card.id} card={card} onNavigate={onNavigate} />
-          ))}
-          {deck.cards.length === 0 ? (
-            <div className="text-muted-foreground rounded-lg border p-6 text-center text-sm">
-              No cards
-            </div>
-          ) : null}
+        <div className="flex justify-end">
+          <VisualCardViewToggle view={view} onChange={setView} />
         </div>
+        {removeError ? <p className="text-destructive text-sm" role="alert">{removeError}</p> : null}
+        {cards.length > 0 ? (
+          <VisualCardWall
+            cards={cards}
+            view={view}
+            onNavigate={onNavigate}
+            renderCaption={(index) => (
+              <DeckCardCaption
+                card={cards[index]}
+                onNavigate={onNavigate}
+                onRemove={deck.systemKey === 'favorites' ? undefined : removeCard}
+                isRemoving={removingId === cards[index].id}
+                isSaving={removingId !== null}
+              />
+            )}
+          />
+        ) : (
+          <div className="text-muted-foreground rounded-lg border p-6 text-center text-sm">
+            No cards
+          </div>
+        )}
       </div>
 
       <aside className="grid content-start gap-4">
-        <JsonPanel title="Properties" value={deck.properties} />
-        <JsonPanel title="Metadata" value={deck.metadata} />
+        <details className="rounded-lg border">
+          <summary className="cursor-pointer px-4 py-3 text-sm">Technical details</summary>
+          <div className="grid gap-3 border-t p-3">
+            <JsonPanel title="Properties" value={deck.properties} />
+            <JsonPanel title="Metadata" value={deck.metadata} />
+          </div>
+        </details>
       </aside>
     </section>
   );
 }
 
-function DeckCardItem({
+function DeckCardCaption({
   card,
   onNavigate,
+  onRemove,
+  isRemoving,
+  isSaving,
 }: {
   card: DeckCard;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onRemove?: (cardId: number) => void;
+  isRemoving: boolean;
+  isSaving: boolean;
 }) {
   return (
-    <a
-      href={`/cards/${card.id}`}
-      onClick={onNavigate}
-      className="grid gap-3 rounded-lg border p-3 hover:bg-muted/50 md:grid-cols-[auto_5rem_1fr]"
-    >
-      <div className="text-muted-foreground w-7 text-sm">{card.position + 1}</div>
-      {card.previewUrl ? (
-        <img
-          src={resolveApiUrl(card.previewUrl)}
-          alt=""
-          className="bg-muted size-20 rounded border object-cover"
-          loading="lazy"
-        />
-      ) : (
-        <div className="bg-muted text-muted-foreground grid size-20 place-items-center rounded border text-xs uppercase">
-          {card.type}
-        </div>
-      )}
-      <div className="min-w-0">
-        <div className="mb-1 flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground text-sm">#{card.id}</span>
+    <div className="min-w-0 space-y-2 bg-background/95 p-3">
+      <a href={`/cards/${card.id}`} onClick={onNavigate} className="block min-w-0 hover:underline">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground text-xs">{card.position + 1}.</span>
           <Badge variant="outline">{card.type}</Badge>
+          <span className="text-muted-foreground text-xs">#{card.id}</span>
         </div>
-        <div className="truncate font-medium">{card.title ?? card.type}</div>
-        {card.membershipProperties ? (
-          <pre className="bg-muted/50 mt-2 max-h-28 overflow-auto rounded p-2 text-xs">
-            {JSON.stringify(card.membershipProperties, null, 2)}
-          </pre>
-        ) : null}
-      </div>
-    </a>
+        <div className="mt-1 truncate text-sm font-medium" title={card.title ?? card.type}>
+          {card.title ?? card.type}
+        </div>
+      </a>
+      {card.membershipProperties && Object.keys(card.membershipProperties).length > 0 ? (
+        <details className="text-muted-foreground text-xs">
+          <summary className="cursor-pointer">Membership properties</summary>
+          <dl className="mt-2 space-y-1 break-words">
+            {Object.entries(card.membershipProperties).map(([key, value]) => (
+              <div key={key}>
+                <dt className="inline font-medium">{key}: </dt>
+                <dd className="inline">{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
+      {onRemove ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          disabled={isSaving}
+          aria-label={`Remove ${card.title ?? card.type} from deck`}
+          onClick={() => onRemove(card.id)}
+        >
+          {isRemoving ? 'Removing...' : 'Remove from deck'}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

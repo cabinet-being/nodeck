@@ -4,6 +4,9 @@ import { getCard, getCardRelations, resolveApiUrl, type Card, type CardRelations
 import { FavoriteToggle } from '@/components/favorite-toggle';
 import { DailyVote } from '@/components/daily-vote';
 import { CardCatalogPanel } from '@/components/card-catalog-panel';
+import { ComicReader } from '@/components/comic-reader';
+import { DeckMembershipControl } from '@/components/deck-membership-control';
+import { RecommendationRail } from '@/components/recommendation-rail';
 import { Badge } from '@/components/ui/badge';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -160,6 +163,7 @@ function MediaDetails({
         onRelationsChange={onRelationsChange}
         onNavigate={onNavigate}
       />
+      <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
     </section>
   );
 }
@@ -183,24 +187,7 @@ function ComicDetails({
   return (
     <section className="grid gap-4 p-6">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <div ref={contentRef} className="grid gap-4">
-          {containedCards.map((item) => (
-            <a
-              key={item.id}
-              href={`/cards/${item.id}`}
-              className="bg-muted block overflow-hidden rounded-lg border"
-            >
-              {item.contentUrl ? (
-                <img
-                  src={resolveApiUrl(item.contentUrl)}
-                  alt={item.title ?? ''}
-                  className="mx-auto max-h-none w-full max-w-5xl object-contain"
-                  loading="lazy"
-                />
-              ) : null}
-            </a>
-          ))}
-        </div>
+        <ComicReader key={card.id} pages={containedCards} contentRef={contentRef} onNavigate={onNavigate} />
 
         <CardAside card={card} onFavoriteChange={onFavoriteChange} />
       </div>
@@ -211,6 +198,7 @@ function ComicDetails({
         onRelationsChange={onRelationsChange}
         onNavigate={onNavigate}
       />
+      <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
     </section>
   );
 }
@@ -253,6 +241,7 @@ function SetDetails({
         onRelationsChange={onRelationsChange}
         onNavigate={onNavigate}
       />
+      <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
     </section>
   );
 }
@@ -316,17 +305,20 @@ function CardAside({
             </div>
           </div>
         </CardHeader>
-      </UiCard>
-
-      <UiCard>
-        <CardContent className="pt-4">
+        <CardContent>
           <DailyVote key={card.id} cardId={card.id} />
         </CardContent>
       </UiCard>
 
       <CardCatalogPanel cardId={card.id} metadata={card.metadata} />
-      <JsonPanel title="Properties" value={card.properties} />
-      <JsonPanel title="Metadata" value={card.metadata} />
+      <DeckMembershipControl key={card.id} cardId={card.id} />
+      <details className="rounded-lg border">
+        <summary className="cursor-pointer px-4 py-3 text-sm">Technical details</summary>
+        <div className="grid gap-3 border-t p-3">
+          <JsonPanel title="Properties" value={card.properties} />
+          <JsonPanel title="Metadata" value={card.metadata} />
+        </div>
+      </details>
     </aside>
   );
 }

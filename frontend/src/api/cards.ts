@@ -80,6 +80,7 @@ export type CreateCardInput = {
   images?: File[];
   properties?: Record<string, string>;
   relations?: CreateRelationInput[];
+  idempotencyKey?: string;
 };
 
 export type UpdateCardInput = {
@@ -95,6 +96,20 @@ export type DailyVote = {
   value: -1 | 0 | 1 | null;
   timeZone: string;
 };
+
+export type CardAnalysis = {
+  state: 'pending' | 'leased' | 'done' | 'failed';
+  attempts: number;
+  availableAtUtc: string | null;
+  lastError: string | null;
+};
+
+export class CardHttpError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'CardHttpError';
+  }
+}
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
@@ -129,6 +144,12 @@ export async function getCard(id: number) {
   const response = await fetch(`${apiBaseUrl}/api/cards/${id}`);
 
   return readJson<Card>(response);
+}
+
+export async function getCardAnalysis(id: number): Promise<CardAnalysis | null> {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${id}/analysis`);
+  if (response.status === 404) return null;
+  return readJson<CardAnalysis>(response);
 }
 
 export async function recordCardView(id: number, eventId: string, durationMs: number) {
@@ -228,6 +249,7 @@ export async function createCard(input: CreateCardInput) {
 
   const response = await fetch(`${apiBaseUrl}/api/cards`, {
     method: 'POST',
+    headers: input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : undefined,
     body: formData,
   });
 
@@ -238,12 +260,18 @@ export async function createCollectionFromCards(input: {
   type: 'comic' | 'set';
   title?: string;
   childCardIds: number[];
+  idempotencyKey?: string;
 }) {
   const response = await fetch(`${apiBaseUrl}/api/cards/collections`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    headers: { 'Content-Type': 'application/json', ...(input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : {}) },
+    body: JSON.stringify({ type: input.type, title: input.title, childCardIds: input.childCardIds }),
   });
+  return readJson<Card>(response);
+}
+
+export async function getCardCreationRequest(scope: 'media' | 'collection', key: string) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/creation-requests/${scope}/${encodeURIComponent(key)}`);
   return readJson<Card>(response);
 }
 
@@ -345,7 +373,7 @@ async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(data?.error ?? 'Request failed.');
+    throw new CardHttpError(data?.error ?? 'Request failed.', response.status);
   }
 
   return normalizeCardData(data) as T;

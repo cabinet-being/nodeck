@@ -3,6 +3,7 @@ import {
   GalleryVerticalEnd,
   Globe,
   Heart,
+  House,
   Layers3,
   Plus,
   Settings,
@@ -18,6 +19,7 @@ export type RouteItem = {
 };
 
 export const routes: RouteItem[] = [
+  { path: '/', label: 'Home', icon: House, group: 'core' },
   { path: '/gallery', label: 'Gallery', icon: GalleryVerticalEnd, group: 'core' },
   { path: '/favorites', label: 'Favorites', icon: Heart, group: 'core' },
   { path: '/cards', label: 'Cards', icon: Archive, group: 'core' },
@@ -25,6 +27,7 @@ export const routes: RouteItem[] = [
   { path: '/tags', label: 'Tags', icon: Tag, group: 'core' },
   { path: '/sources', label: 'Sources', icon: Globe, group: 'core' },
   { path: '/cards/new', label: 'Create Card', icon: Plus, group: 'create' },
+  { path: '/cards/import', label: 'Bulk import', icon: Plus, group: 'create' },
   { path: '/decks/new', label: 'Create Deck', icon: Plus, group: 'create' },
   { path: '/settings', label: 'Settings', icon: Settings, group: 'service' },
   { path: '/service', label: 'Service', icon: Wrench, group: 'service' },

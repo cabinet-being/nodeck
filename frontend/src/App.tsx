@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Search } from 'lucide-react';
 
 import { AppSidebar } from '@/components/app-sidebar';
+import { BulkImportPage } from '@/pages/bulk-import-page';
 import { Input } from '@/components/ui/input';
 import { CardDetailsPage } from '@/pages/card-details-page';
 import { CardsPage } from '@/pages/cards-page';
@@ -12,7 +13,9 @@ import { DecksPage } from '@/pages/decks-page';
 import { EditDeckPage } from '@/pages/edit-deck-page';
 import { EditCardPage } from '@/pages/edit-card-page';
 import { FavoritesPage } from '@/pages/favorites-page';
+import { FeedPage } from '@/pages/feed-page';
 import { GalleryPage } from '@/pages/gallery-page';
+import { HomePage } from '@/pages/home-page';
 import { SourcesPage } from '@/pages/sources-page';
 import { TagsPage } from '@/pages/tags-page';
 
@@ -26,6 +29,7 @@ function getCurrentUrl() {
 
 export function App() {
   const [currentUrl, setCurrentUrl] = React.useState(getCurrentUrl);
+  const [globalSearch, setGlobalSearch] = React.useState('');
 
   React.useEffect(() => {
     const handlePopState = () => setCurrentUrl(getCurrentUrl());
@@ -41,6 +45,12 @@ export function App() {
   const currentSearch = React.useMemo(() => {
     return new URL(currentUrl, window.location.origin).search;
   }, [currentUrl]);
+
+  React.useEffect(() => {
+    if (currentPath === '/gallery') {
+      setGlobalSearch(new URLSearchParams(currentSearch).get('search') ?? '');
+    }
+  }, [currentPath, currentSearch]);
 
   const navigate = React.useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
@@ -80,20 +90,21 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-cols-[17rem_1fr]">
+      <div className="grid min-h-screen grid-cols-1 grid-rows-[auto_1fr] md:grid-cols-[17rem_minmax(0,1fr)] md:grid-rows-1">
         <AppSidebar currentPath={currentPath} onNavigate={navigate} />
 
         <div className="flex min-w-0 flex-col">
-          <header className="bg-background/95 sticky top-0 z-10 flex h-16 items-center border-b px-6 backdrop-blur">
-            <div className="relative w-full max-w-xl">
+          <header className="bg-background/95 sticky top-16 z-10 flex h-16 items-center border-b px-6 backdrop-blur md:top-0">
+            <form className="relative w-full max-w-xl" onSubmit={(event) => {
+              event.preventDefault();
+              const query = globalSearch.trim();
+              navigateTo(query ? `/gallery?search=${encodeURIComponent(query)}` : '/gallery');
+            }}>
               <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" />
-              <Input
-                type="search"
-                aria-label="Global search"
-                placeholder="Search Nodeck"
-                className="pl-9"
-              />
-            </div>
+              <Input type="search" aria-label="Global search" placeholder="Search Nodeck"
+                className="pl-9" value={globalSearch}
+                onChange={(event) => setGlobalSearch(event.target.value)} />
+            </form>
           </header>
 
           <main className="min-w-0 flex-1">
@@ -140,8 +151,21 @@ function RouteContent({
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   onNavigateTo: (path: string) => void;
 }) {
+  if (currentPath === '/') {
+    return <HomePage onNavigate={onNavigate} />;
+  }
+
+  if (currentPath === '/feed/recommended' || currentPath === '/feed/daily') {
+    return <FeedPage kind={currentPath === '/feed/daily' ? 'daily' : 'recommended'}
+      currentSearch={currentSearch} onNavigate={onNavigate} onNavigateTo={onNavigateTo} />;
+  }
+
   if (currentPath === '/cards/new') {
     return <CreateCardPage onCreated={onNavigateTo} />;
+  }
+
+  if (currentPath === '/cards/import') {
+    return <BulkImportPage />;
   }
 
   if (currentPath === '/decks/new') {

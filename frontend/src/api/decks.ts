@@ -56,6 +56,28 @@ export async function getDeck(id: number) {
   return readJson<DeckDetails>(response);
 }
 
+export async function getCardDecks(cardId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${cardId}/decks`);
+
+  return readJson<DeckSummary[]>(response);
+}
+
+export async function addCardToDeck(deckId: number, cardId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/decks/${deckId}/cards/${cardId}`, {
+    method: 'PUT',
+  });
+
+  return readJson<DeckDetails>(response);
+}
+
+export async function removeCardFromDeck(deckId: number, cardId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/decks/${deckId}/cards/${cardId}`, {
+    method: 'DELETE',
+  });
+
+  return readJson<DeckDetails>(response);
+}
+
 export async function getFavorites() {
   const response = await fetch(`${apiBaseUrl}/api/favorites`);
 

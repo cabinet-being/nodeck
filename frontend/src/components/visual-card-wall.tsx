@@ -1,7 +1,8 @@
 import * as React from 'react';
 import { Grid3X3, LayoutGrid } from 'lucide-react';
 
-import { resolveApiUrl, type Card } from '@/api/cards';
+import { type Card } from '@/api/cards';
+import { CardPreview } from '@/components/card-preview';
 import { FavoriteToggle } from '@/components/favorite-toggle';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -11,7 +12,9 @@ export type VisualCardDensity = 'default' | 'compact';
 
 export const visualCardViewStorageKey = 'nodeck.visualCardView';
 
-export type VisualCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl' | 'isFavorite'>;
+export type VisualCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl'> & {
+  isFavorite?: Card['isFavorite'];
+};
 
 export function useVisualCardView(storageKey = visualCardViewStorageKey) {
   const [view, setView] = React.useState<VisualCardView>(() => {
@@ -61,11 +64,13 @@ export function VisualCardWall({
   view,
   density = 'default',
   onNavigate,
+  renderCaption,
 }: {
   cards: VisualCard[];
   view: VisualCardView;
   density?: VisualCardDensity;
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  renderCaption?: (index: number) => React.ReactNode;
 }) {
   const [favoriteOverrides, setFavoriteOverrides] = React.useState<Record<number, boolean>>({});
 
@@ -88,39 +93,42 @@ export function VisualCardWall({
             )
       )}
     >
-      {cards.map((card) => (
+      {cards.map((card, index) => (
         <div
-          key={card.id}
+          key={renderCaption ? `${card.id}-${index}` : card.id}
           className={cn(
             'bg-muted relative w-full max-w-full min-w-0 overflow-hidden rounded-lg border',
-            view === 'grid' ? 'block aspect-square' : 'mb-3 block break-inside-avoid'
+            view === 'grid'
+              ? !renderCaption && 'block aspect-square'
+              : 'mb-3 block break-inside-avoid'
           )}
         >
           <a
             href={`/cards/${card.id}`}
             onClick={onNavigate}
-            className={cn('block', view === 'grid' ? 'size-full' : 'w-full')}
+            aria-label={`Open ${card.title || card.type} #${card.id}`}
+            className={cn(
+              'block',
+              view === 'grid'
+                ? renderCaption ? 'aspect-square w-full' : 'size-full'
+                : 'w-full'
+            )}
           >
-            {card.previewUrl ? (
-              <img
-                src={resolveApiUrl(card.previewUrl)}
-                alt={card.title ?? ''}
-                className={cn(
-                  'w-full object-cover',
-                  view === 'grid' ? 'size-full' : 'h-auto'
-                )}
-                loading="lazy"
-              />
-            ) : null}
+            <CardPreview url={card.previewUrl} title={card.title} type={card.type}
+              imageClassName={cn('w-full object-cover', view === 'grid' ? 'size-full' : 'h-auto')}
+              fallbackClassName="aspect-square" />
           </a>
-          <FavoriteToggle
-            cardId={card.id}
-            isFavorite={favoriteOverrides[card.id] ?? card.isFavorite}
-            className="absolute right-2 top-2 bg-background/90"
-            onChange={(isFavorite) =>
-              setFavoriteOverrides((current) => ({ ...current, [card.id]: isFavorite }))
-            }
-          />
+          {card.isFavorite !== undefined ? (
+            <FavoriteToggle
+              cardId={card.id}
+              isFavorite={favoriteOverrides[card.id] ?? card.isFavorite}
+              className="absolute right-2 top-2 bg-background/90"
+              onChange={(isFavorite) =>
+                setFavoriteOverrides((current) => ({ ...current, [card.id]: isFavorite }))
+              }
+            />
+          ) : null}
+          {renderCaption ? renderCaption(index) : null}
         </div>
       ))}
     </div>

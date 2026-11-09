@@ -22,10 +22,12 @@ export function GalleryPage({
   onNavigateTo: (path: string) => void;
 }) {
   const [cards, setCards] = React.useState<Card[]>([]);
+  const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [view, setView] = useVisualCardView('nodeck.galleryView');
   const [selectedTags, setSelectedTags] = React.useState<Tag[]>([]);
   const [selectedSource, setSelectedSource] = React.useState<Source | null>(null);
+  const [searchDraft, setSearchDraft] = React.useState('');
   const [tagSearch, setTagSearch] = React.useState('');
   const [sourceSearch, setSourceSearch] = React.useState('');
   const [tagChoices, setTagChoices] = React.useState<Tag[]>([]);
@@ -36,6 +38,7 @@ export function GalleryPage({
     const params = new URLSearchParams(currentSearch);
     const tagIds = parseIds(params.get('catalog_tags'));
     const sourceId = parseSingleId(params.get('catalog_source'));
+    setSearchDraft(params.get('search') ?? '');
     Promise.all([
       Promise.all(tagIds.map((id) => getTag(id).catch(() => null))),
       sourceId ? getSource(sourceId).catch(() => null) : Promise.resolve(null),
@@ -51,17 +54,21 @@ export function GalleryPage({
     const params = new URLSearchParams(currentSearch);
     let active = true;
     setError(null);
+    setLoading(true);
+    setCards([]);
     listCards({
       types: ['media', 'comic', 'set'],
       tags: parseIds(params.get('tags')),
       source: parseSingleId(params.get('source')),
       catalogTags: parseIds(params.get('catalog_tags')),
       catalogSource: parseSingleId(params.get('catalog_source')),
+      search: params.get('search')?.trim() || undefined,
       excludeContainedMedia: true,
       sort: 'created_at',
       order: 'desc',
     }).then((results) => { if (active) setCards(results); })
-      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load gallery.'); });
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load gallery.'); })
+      .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [currentSearch]);
 
@@ -83,6 +90,7 @@ export function GalleryPage({
 
   function applyFilters() {
     const params = new URLSearchParams();
+    if (searchDraft.trim()) params.set('search', searchDraft.trim());
     if (selectedTags.length > 0) params.set('catalog_tags', selectedTags.map((tag) => tag.id).join(','));
     if (selectedSource) params.set('catalog_source', String(selectedSource.id));
     onNavigateTo(`/gallery${params.toString() ? `?${params.toString()}` : ''}`);
@@ -91,6 +99,7 @@ export function GalleryPage({
   function clearFilters() {
     setSelectedTags([]);
     setSelectedSource(null);
+    setSearchDraft('');
     setTagSearch('');
     setSourceSearch('');
     onNavigateTo('/gallery');
@@ -101,6 +110,11 @@ export function GalleryPage({
 
   return (
     <section className="flex flex-col gap-4 p-6">
+      <form className="flex max-w-2xl gap-2" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
+        <Input type="search" aria-label="Search cards" placeholder="Search cards by title or ID"
+          value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} />
+        <Button type="submit" variant="outline">Search</Button>
+      </form>
       <div className="grid gap-3 xl:grid-cols-[1fr_auto]">
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
           <div className="relative grid content-start gap-2">
@@ -146,7 +160,10 @@ export function GalleryPage({
       </div>
       {hasLegacyFilters ? <p className="text-muted-foreground text-xs">Legacy filters are active. Apply a new selection to replace them.</p> : null}
       {error ? <p className="text-destructive text-sm">{error}</p> : null}
-      <VisualCardWall cards={cards} view={view} onNavigate={onNavigate} />
+      {loading ? <p className="text-muted-foreground text-sm">Loading gallery…</p> : null}
+      {!loading && !error && cards.length === 0 ?
+        <p className="text-muted-foreground rounded-lg border p-6 text-center text-sm">No cards match this view.</p> : null}
+      {!loading && cards.length > 0 ? <VisualCardWall cards={cards} view={view} onNavigate={onNavigate} /> : null}
     </section>
   );
 }
