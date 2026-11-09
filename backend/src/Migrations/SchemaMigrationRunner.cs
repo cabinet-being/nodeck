@@ -23,6 +23,7 @@ public sealed class SchemaMigrationRunner
         (7, "speech-analysis-jobs-v1"),
         (8, "tag-suggestion-source-v1"),
         (9, "interest-signals-v1"),
+        (10, "card-creation-requests-v1"),
     ];
 
     private readonly string _connectionString;
@@ -115,6 +116,7 @@ public sealed class SchemaMigrationRunner
                     case 7: await _catalog.InitializeSpeechAnalysisJobsAsync(); break;
                     case 8: await _catalog.InitializeTagSuggestionSourceAsync(); break;
                     case 9: await _interest.InitializeAsync(); break;
+                    case 10: await _cards.InitializeCreationRequestsAsync(); break;
                 }
 
                 var after = await SnapshotAsync(connection);
@@ -150,6 +152,10 @@ public sealed class SchemaMigrationRunner
                 if (version == 9 && after != previous)
                     throw new InvalidOperationException(
                         "Migration 9 changed existing row or file counts. " +
+                        "Stop the API and restore the pre-migration backup before accepting writes.");
+                if (version == 10 && after != previous)
+                    throw new InvalidOperationException(
+                        "Migration 10 changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");
                 await VerifyReferencesAsync(connection);
                 await VerifyCollectionOwnershipAsync(connection);
@@ -222,6 +228,7 @@ public sealed class SchemaMigrationRunner
             await Count("card_speech_analysis_jobs"),
             await Count("card_view_events"),
             await Count("card_daily_votes"),
+            await Count("card_creation_requests"),
             appFiles,
             userDecks);
     }
@@ -243,6 +250,8 @@ public sealed class SchemaMigrationRunner
         long Number(string key) => long.TryParse(Require(key), NumberStyles.None,
             CultureInfo.InvariantCulture, out var value) && value >= 0 ? value
             : throw new InvalidOperationException($"Backup manifest has invalid {key}.");
+        long CreationRequestsCount() => currentVersion < 10 &&
+            !entries.ContainsKey("count.card_creation_requests") ? 0 : Number("count.card_creation_requests");
 
         if (Require("format") != "1" || Require("database") != database ||
             Number("startingVersion") != currentVersion ||
@@ -260,6 +269,7 @@ public sealed class SchemaMigrationRunner
             Number("count.card_speech_analysis_jobs") != snapshot.CardSpeechAnalysisJobs ||
             Number("count.card_view_events") != snapshot.CardViewEvents ||
             Number("count.card_daily_votes") != snapshot.CardDailyVotes ||
+            CreationRequestsCount() != snapshot.CardCreationRequests ||
             Number("app_file_count") != snapshot.AppFiles)
             throw new InvalidOperationException("Backup manifest does not match the current database and files. Create a new backup.");
 
@@ -357,13 +367,13 @@ public sealed class SchemaMigrationRunner
         long Cards, long CardRelations, long Decks, long DeckCards,
         long Tags, long Sources, long TagAliases, long CardTags, long CardSources,
         long CardTagSuggestions, long CardImageAnalysisJobs, long CardSpeechAnalysisJobs,
-        long CardViewEvents, long CardDailyVotes,
+        long CardViewEvents, long CardDailyVotes, long CardCreationRequests,
         long AppFiles, long UserDecks)
     {
         public bool HasUserData => Cards > 0 || CardRelations > 0 || DeckCards > 0 ||
             UserDecks > 0 || Tags > 0 || Sources > 0 || TagAliases > 0 ||
             CardTags > 0 || CardSources > 0 || CardTagSuggestions > 0 ||
             CardImageAnalysisJobs > 0 || CardSpeechAnalysisJobs > 0 ||
-            CardViewEvents > 0 || CardDailyVotes > 0 || AppFiles > 0;
+            CardViewEvents > 0 || CardDailyVotes > 0 || CardCreationRequests > 0 || AppFiles > 0;
     }
 }

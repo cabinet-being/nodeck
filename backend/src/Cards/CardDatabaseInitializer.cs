@@ -127,4 +127,25 @@ public sealed class CardDatabaseInitializer
             await connection.ExecuteAsync(
                 "ALTER TABLE card_relations ADD UNIQUE INDEX uq_card_relations_contained_child (contained_child_id);");
     }
+
+    public async Task InitializeCreationRequestsAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await connection.ExecuteAsync("""
+            CREATE TABLE IF NOT EXISTS card_creation_requests (
+                scope VARCHAR(16) NOT NULL,
+                request_key CHAR(36) NOT NULL,
+                request_hash BINARY(32) NOT NULL,
+                card_id BIGINT NULL,
+                created_at_utc DATETIME(6) NOT NULL,
+                PRIMARY KEY (scope, request_key),
+                CONSTRAINT fk_card_creation_requests_card
+                    FOREIGN KEY (card_id) REFERENCES cards(id)
+                    ON DELETE SET NULL,
+                INDEX idx_card_creation_requests_card_id (card_id)
+            );
+            """);
+    }
 }

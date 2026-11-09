@@ -19,16 +19,64 @@ public sealed class CardRepository
 
     private readonly string _connectionString;
 
+    private sealed class CreationRequestRow
+    {
+        public byte[] RequestHash { get; init; } = [];
+        public long? CardId { get; init; }
+    }
+
     public CardRepository(IConfiguration configuration)
     {
         _connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("Missing database connection string.");
     }
 
+    private static Task<int> InsertCreationRequestAsync(
+        MySqlConnection connection, MySqlTransaction transaction, CardCreationRequest request) =>
+        connection.ExecuteAsync(
+            """
+            INSERT INTO card_creation_requests (scope, request_key, request_hash, card_id, created_at_utc)
+            VALUES (@Scope, @Key, @Hash, NULL, UTC_TIMESTAMP());
+            """,
+            new { request.Scope, request.Key, request.Hash }, transaction);
+
+    private static Task<int> CompleteCreationRequestAsync(
+        MySqlConnection connection, MySqlTransaction transaction, CardCreationRequest request, long cardId) =>
+        connection.ExecuteAsync(
+            "UPDATE card_creation_requests SET card_id = @CardId WHERE scope = @Scope AND request_key = @Key;",
+            new { CardId = cardId, request.Scope, request.Key }, transaction);
+
+    public async Task<CardCreationResult> GetCreationResultAsync(
+        CardCreationRequest request, byte[]? expectedHash = null)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        var row = await connection.QuerySingleOrDefaultAsync<CreationRequestRow>(
+            """
+            SELECT request_hash AS RequestHash, card_id AS CardId
+            FROM card_creation_requests WHERE scope = @Scope AND request_key = @Key;
+            """, new { request.Scope, request.Key });
+        if (row is null) return new CardCreationResult(CardCreationStatus.Unknown, null);
+        if (expectedHash is not null && !row.RequestHash.AsSpan().SequenceEqual(expectedHash))
+            return new CardCreationResult(CardCreationStatus.Conflict, null);
+        if (row.CardId is null) return new CardCreationResult(CardCreationStatus.Gone, null);
+        var card = await GetByIdAsync(row.CardId.Value);
+        return card is null
+            ? new CardCreationResult(CardCreationStatus.Gone, null)
+            : new CardCreationResult(CardCreationStatus.Replayed, card);
+    }
+
     public async Task<CardDetails> CreateAsync(
         CreateCardData data,
         Func<long, Task<CardFileAssets?>> createAssets,
         Action<long> cleanupAssets)
+        => (await CreateAsync(data, createAssets, cleanupAssets, null)).Card!;
+
+    public async Task<CardCreationResult> CreateAsync(
+        CreateCardData data,
+        Func<long, Task<CardFileAssets?>> createAssets,
+        Action<long> cleanupAssets,
+        CardCreationRequest? creationRequest)
     {
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
@@ -37,6 +85,8 @@ public sealed class CardRepository
 
         try
         {
+            if (creationRequest is not null)
+                await InsertCreationRequestAsync(connection, transaction, creationRequest);
             cardId = await InsertCardAsync(connection, transaction, data.Type, data.Title, data.PropertiesJson, data.Metadata);
             var assets = await createAssets(cardId);
             var previewPath = assets?.PreviewPath;
@@ -55,16 +105,24 @@ public sealed class CardRepository
                 await SpeechAnalysisQueueRepository.RefreshAsync(connection, transaction, cardId,
                     assets.MediaType == "video" && assets.HasAudio);
             }
+            if (creationRequest is not null)
+                await CompleteCreationRequestAsync(connection, transaction, creationRequest, cardId);
             await transaction.CommitAsync();
 
-            return BuildCreatedCardDetails(
+            return new CardCreationResult(CardCreationStatus.Created, BuildCreatedCardDetails(
                 cardId,
                 data.Type,
                 data.Title,
                 previewPath,
                 metadata,
                 data.PropertiesJson,
-                data.Relations);
+                data.Relations));
+        }
+        catch (MySqlException exception) when (creationRequest is not null && cardId == 0 &&
+            exception.ErrorCode == MySqlErrorCode.DuplicateKeyEntry)
+        {
+            await transaction.RollbackAsync();
+            return await GetCreationResultAsync(creationRequest, creationRequest.Hash);
         }
         catch
         {
@@ -83,6 +141,13 @@ public sealed class CardRepository
         CreateCardCollectionData data,
         Func<long, IFormFile, Task<CardFileAssets>> createAssets,
         Action<long> cleanupAssets)
+        => (await CreateCollectionAsync(data, createAssets, cleanupAssets, null)).Card!;
+
+    public async Task<CardCreationResult> CreateCollectionAsync(
+        CreateCardCollectionData data,
+        Func<long, IFormFile, Task<CardFileAssets>> createAssets,
+        Action<long> cleanupAssets,
+        CardCreationRequest? creationRequest)
     {
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
@@ -91,6 +156,8 @@ public sealed class CardRepository
 
         try
         {
+            if (creationRequest is not null)
+                await InsertCreationRequestAsync(connection, transaction, creationRequest);
             var parentId = await InsertCardAsync(connection, transaction, data.Type, data.Title, data.PropertiesJson, data.Metadata);
             createdCardIds.Add(parentId);
             long? previousMediaId = null;
@@ -147,6 +214,8 @@ public sealed class CardRepository
             data.Metadata["contained_count"] = data.Images.Count;
             await UpdateCardAssetsAsync(connection, transaction, parentId, parentPreviewPath, data.Metadata);
             await InsertRelationsAsync(connection, transaction, parentId, data.Relations);
+            if (creationRequest is not null)
+                await CompleteCreationRequestAsync(connection, transaction, creationRequest, parentId);
             await transaction.CommitAsync();
 
             var containedCards = createdCardIds
@@ -163,7 +232,7 @@ public sealed class CardRepository
 
             var relations = BuildCollectionRelations(parentId, createdCardIds, data);
 
-            return new CardDetails(
+            return new CardCreationResult(CardCreationStatus.Created, new CardDetails(
                 parentId,
                 data.Type,
                 data.Title,
@@ -174,7 +243,13 @@ public sealed class CardRepository
                 false,
                 relations,
                 [],
-                containedCards);
+                containedCards));
+        }
+        catch (MySqlException exception) when (creationRequest is not null && createdCardIds.Count == 0 &&
+            exception.ErrorCode == MySqlErrorCode.DuplicateKeyEntry)
+        {
+            await transaction.RollbackAsync();
+            return await GetCreationResultAsync(creationRequest, creationRequest.Hash);
         }
         catch
         {
@@ -190,6 +265,10 @@ public sealed class CardRepository
     }
 
     public async Task<CardDetails> CreateCollectionFromExistingAsync(CreateExistingCollectionRequest request)
+        => (await CreateCollectionFromExistingAsync(request, null)).Card!;
+
+    public async Task<CardCreationResult> CreateCollectionFromExistingAsync(
+        CreateExistingCollectionRequest request, CardCreationRequest? creationRequest)
     {
         if (request.Type is not ("comic" or "set") || request.ChildCardIds is null || request.ChildCardIds.Count < 2)
             throw new InvalidOperationException("A comic or set requires at least two existing media cards.");
@@ -197,19 +276,30 @@ public sealed class CardRepository
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
-        long id;
+        long id = 0;
         try
         {
+            if (creationRequest is not null)
+                await InsertCreationRequestAsync(connection, transaction, creationRequest);
             id = await InsertCardAsync(connection, transaction, request.Type, request.Title, null, CreateMetadata());
             await ReplaceCollectionChildrenAsync(connection, transaction, id, request.Type, request.ChildCardIds);
+            if (creationRequest is not null)
+                await CompleteCreationRequestAsync(connection, transaction, creationRequest, id);
             await transaction.CommitAsync();
+        }
+        catch (MySqlException exception) when (creationRequest is not null && id == 0 &&
+            exception.ErrorCode == MySqlErrorCode.DuplicateKeyEntry)
+        {
+            await transaction.RollbackAsync();
+            return await GetCreationResultAsync(creationRequest, creationRequest.Hash);
         }
         catch
         {
             await transaction.RollbackAsync();
             throw;
         }
-        return await GetByIdAsync(id) ?? throw new InvalidOperationException("Created collection could not be read.");
+        return new CardCreationResult(CardCreationStatus.Created,
+            await GetByIdAsync(id) ?? throw new InvalidOperationException("Created collection could not be read."));
     }
 
     public async Task<CardDetails?> UpdateCollectionChildrenAsync(long id, IReadOnlyList<long> childCardIds)

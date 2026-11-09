@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using MySqlConnector;
 using MyApp.Api.Analysis;
 using MyApp.Api.Storage;
 
@@ -7,12 +8,15 @@ namespace MyApp.Api.Cards;
 
 public static class CardEndpoints
 {
+    private const int TooEarlyStatusCode = 425;
+
     public static IEndpointRouteBuilder MapCardEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/cards");
 
         group.MapPost("", CreateCardAsync);
         group.MapPost("/collections", CreateExistingCollectionAsync);
+        group.MapGet("/creation-requests/{scope}/{key}", GetCreationRequestAsync);
         group.MapGet("", ListCardsAsync);
         group.MapGet("/{id:long}", GetCardAsync);
         group.MapPut("/{id:long}", UpdateCardAsync);
@@ -47,18 +51,71 @@ public static class CardEndpoints
     }
 
     private static async Task<IResult> CreateExistingCollectionAsync(
-        CreateExistingCollectionRequest request, CardRepository repository)
+        HttpRequest httpRequest, CreateExistingCollectionRequest request, CardRepository repository)
     {
+        if (!TryReadCreationKey(httpRequest, out var key, out var keyError))
+            return Results.BadRequest(new { error = keyError });
         try
         {
-            var card = await repository.CreateCollectionFromExistingAsync(request);
-            return Results.Created($"/api/cards/{card.Id}", card);
+            var creation = key is null ? null : new CardCreationRequest(
+                "collection", key, CardCreationHash.Collection(request));
+            var result = await repository.CreateCollectionFromExistingAsync(request, creation);
+            return CreationResponse(result);
         }
         catch (InvalidOperationException exception)
         {
             return Results.BadRequest(new { error = exception.Message });
         }
+        catch (MySqlException exception) when (IsRetryableLockError(exception))
+        {
+            return Results.StatusCode(TooEarlyStatusCode);
+        }
     }
+
+    private static async Task<IResult> GetCreationRequestAsync(
+        string scope, string key, CardRepository repository)
+    {
+        if (scope is not ("media" or "collection") || !IsCanonicalUuid(key))
+            return Results.BadRequest(new { error = "Scope must be media or collection and key must be a canonical UUID." });
+        var result = await repository.GetCreationResultAsync(new CardCreationRequest(scope, key, []));
+        return result.Status switch
+        {
+            CardCreationStatus.Replayed => Results.Ok(result.Card),
+            CardCreationStatus.Gone => Results.StatusCode(StatusCodes.Status410Gone),
+            _ => Results.NotFound(new { error = "Creation request not found." }),
+        };
+    }
+
+    private static IResult CreationResponse(CardCreationResult result) => result.Status switch
+    {
+        CardCreationStatus.Created => Results.Created($"/api/cards/{result.Card!.Id}", result.Card),
+        CardCreationStatus.Replayed => Results.Ok(result.Card),
+        CardCreationStatus.Conflict => Results.Conflict(new { error = "Idempotency key was used with a different request." }),
+        CardCreationStatus.Gone => Results.StatusCode(StatusCodes.Status410Gone),
+        _ => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
+    };
+
+    private static bool TryReadCreationKey(HttpRequest request, out string? key, out string? error)
+    {
+        key = null;
+        error = null;
+        if (!request.Headers.TryGetValue("Idempotency-Key", out var values)) return true;
+        var candidate = values.ToString();
+        if (!IsCanonicalUuid(candidate))
+        {
+            error = "Idempotency-Key must be a canonical UUID.";
+            return false;
+        }
+        key = candidate;
+        return true;
+    }
+
+    private static bool IsCanonicalUuid(string value) =>
+        Guid.TryParseExact(value, "D", out var parsed) &&
+        string.Equals(value, parsed.ToString("D"), StringComparison.Ordinal);
+
+    private static bool IsRetryableLockError(MySqlException exception) =>
+        exception.Number is 1205 or 1213;
 
     private static async Task<IResult> UpdateCollectionChildrenAsync(
         long id, UpdateCollectionChildrenRequest request, CardRepository repository)
@@ -85,6 +142,8 @@ public static class CardEndpoints
         CardRepository repository,
         PreviewService previewService)
     {
+        if (!TryReadCreationKey(request, out var key, out var keyError))
+            return Results.BadRequest(new { error = keyError });
         if (!request.HasFormContentType)
         {
             return Results.BadRequest(new { error = "Card creation requires multipart form data." });
@@ -102,6 +161,9 @@ public static class CardEndpoints
         {
             return Results.BadRequest(new { error = "Create tags and sources through their catalog endpoints." });
         }
+
+        if (key is not null && type != "media")
+            return Results.BadRequest(new { error = "Idempotency-Key is supported only for media cards here." });
 
         var title = NormalizeOptionalString(form["title"].ToString());
 
@@ -146,14 +208,18 @@ public static class CardEndpoints
                 return Results.BadRequest(new { error = "Media uploads are only supported for media cards." });
             }
 
+            var creation = key is null ? null : new CardCreationRequest("media", key,
+                await CardCreationHash.MediaAsync(type, title, propertiesJson, relations, image,
+                    request.HttpContext.RequestAborted));
             var created = await repository.CreateAsync(
                 new CreateCardData(type, title, propertiesJson, metadata, relations),
                 async cardId => image is null
                     ? null
                     : await previewService.SaveMediaAndCreatePreviewAsync(cardId, image),
-                previewService.DeleteCardFiles);
+                previewService.DeleteCardFiles,
+                creation);
 
-            return Results.Created($"/api/cards/{created.Id}", created);
+            return CreationResponse(created);
         }
         catch (JsonException exception)
         {
@@ -162,6 +228,10 @@ public static class CardEndpoints
         catch (InvalidOperationException exception)
         {
             return Results.BadRequest(new { error = exception.Message });
+        }
+        catch (MySqlException exception) when (IsRetryableLockError(exception))
+        {
+            return Results.StatusCode(TooEarlyStatusCode);
         }
     }
 
