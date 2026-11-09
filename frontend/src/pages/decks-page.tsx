@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Eye, Pencil, Trash2 } from 'lucide-react';
+import { Heart, Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
 
 import { deleteDeck, listDecks, type DeckSummary } from '@/api/decks';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -38,7 +38,7 @@ export function DecksPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Decks</h1>
         <a href="/decks/new" onClick={onNavigate} className={buttonVariants()}>
-          Create Deck
+          <Plus className="size-4" /> Create deck
         </a>
       </div>
 
@@ -60,72 +60,39 @@ export function DecksPage({
 
       {error ? <div className="text-destructive text-sm">{error}</div> : null}
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-muted/50 text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">ID</th>
-              <th className="px-3 py-2 text-left font-medium">Title</th>
-              <th className="px-3 py-2 text-left font-medium">Cards</th>
-              <th className="px-3 py-2 text-left font-medium">Created</th>
-              <th className="px-3 py-2 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {decks.map((deck) => (
-              <tr key={deck.id} className="border-t">
-                <td className="px-3 py-2">
-                  <a href={`/decks/${deck.id}`} onClick={onNavigate} className="hover:underline">
-                    #{deck.id}
+      <div className="divide-y overflow-hidden rounded-xl border">
+        {decks.map((deck) => (
+          <div key={deck.id} className="flex min-w-0 items-center gap-3 p-3 hover:bg-muted/30">
+            <a href={`/decks/${deck.id}`} onClick={onNavigate}
+              className="bg-muted text-muted-foreground flex size-12 shrink-0 items-center justify-center rounded-lg"
+              aria-label={`Open ${deck.title}`}>
+              {deck.systemKey === 'favorites' ? <Heart className="size-5" /> : <Layers3 className="size-5" />}
+            </a>
+            <div className="min-w-0 flex-1">
+              <a href={`/decks/${deck.id}`} onClick={onNavigate}
+                className="block truncate text-sm font-medium hover:underline">{deck.title}</a>
+              <span className="text-muted-foreground text-xs">{deck.cardCount} cards</span>
+            </div>
+            <div className="flex shrink-0 justify-end gap-1">
+              {deck.systemKey === 'favorites' ? null : (
+                <>
+                  <a href={`/decks/${deck.id}/edit`} onClick={onNavigate}
+                    className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+                    aria-label={`Edit deck ${deck.id}`}>
+                    <Pencil className="size-4" />
                   </a>
-                </td>
-                <td className="px-3 py-2">{deck.title}</td>
-                <td className="px-3 py-2">{deck.cardCount}</td>
-                <td className="px-3 py-2">{String(deck.metadata.created_at ?? '')}</td>
-                <td className="px-3 py-2">
-                  <div className="flex justify-end gap-1">
-                    <a
-                      href={`/decks/${deck.id}`}
-                      onClick={onNavigate}
-                      className={buttonVariants({ variant: 'ghost', size: 'icon' })}
-                      aria-label={`View deck ${deck.id}`}
-                    >
-                      <Eye className="size-4" />
-                    </a>
-                    {deck.systemKey === 'favorites' ? null : (
-                      <>
-                        <a
-                          href={`/decks/${deck.id}/edit`}
-                          onClick={onNavigate}
-                          className={buttonVariants({ variant: 'ghost', size: 'icon' })}
-                          aria-label={`Edit deck ${deck.id}`}
-                        >
-                          <Pencil className="size-4" />
-                        </a>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Delete deck ${deck.id}`}
-                          onClick={() => setDeckToDelete(deck)}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!isLoading && decks.length === 0 ? (
-              <tr>
-                <td className="text-muted-foreground px-3 py-6 text-center" colSpan={5}>
-                  No decks
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+                  <Button type="button" variant="ghost" size="icon"
+                    aria-label={`Delete deck ${deck.id}`} onClick={() => setDeckToDelete(deck)}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+        {!isLoading && decks.length === 0 ? (
+          <p className="text-muted-foreground px-3 py-8 text-center text-sm">No decks</p>
+        ) : null}
       </div>
 
       <Dialog

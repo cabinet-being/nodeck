@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { Eye, Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 
 import { cardTypes, deleteCard, getCard, getCardDeletionImpact, listCards, type Card, type CardDeletionImpact } from '@/api/cards';
 import { FavoriteToggle } from '@/components/favorite-toggle';
+import { CardPreview } from '@/components/card-preview';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
@@ -46,7 +47,7 @@ export function CardsPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Cards</h1>
         <a href="/cards/new" onClick={onNavigate} className={buttonVariants()}>
-          Create Card
+          <Plus className="size-4" /> Create card
         </a>
       </div>
 
@@ -80,77 +81,41 @@ export function CardsPage({
 
       {error ? <div className="text-destructive text-sm">{error}</div> : null}
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-muted/50 text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">ID</th>
-              <th className="px-3 py-2 text-left font-medium">Type</th>
-              <th className="px-3 py-2 text-left font-medium">Title</th>
-              <th className="px-3 py-2 text-left font-medium">Preview</th>
-              <th className="px-3 py-2 text-left font-medium">Created</th>
-              <th className="px-3 py-2 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cards.map((card) => (
-              <tr key={card.id} className="border-t">
-                <td className="px-3 py-2">
-                  <a href={`/cards/${card.id}`} onClick={onNavigate} className="hover:underline">
-                    #{card.id}
-                  </a>
-                </td>
-                <td className="px-3 py-2">
-                  <Badge variant="outline">{card.type}</Badge>
-                </td>
-                <td className="px-3 py-2">{card.title}</td>
-                <td className="px-3 py-2">{card.previewUrl ? 'yes' : 'no'}</td>
-                <td className="px-3 py-2">{String(card.metadata.created_at ?? '')}</td>
-                <td className="px-3 py-2">
-                  <div className="flex justify-end gap-1">
-                    <FavoriteToggle
-                      cardId={card.id}
-                      isFavorite={card.isFavorite}
-                      onChange={(isFavorite) => updateFavorite(card.id, isFavorite)}
-                    />
-                    <a
-                      href={`/cards/${card.id}`}
-                      onClick={onNavigate}
-                      className={buttonVariants({ variant: 'ghost', size: 'icon' })}
-                      aria-label={`View card ${card.id}`}
-                    >
-                      <Eye className="size-4" />
-                    </a>
-                    <a
-                      href={`/cards/${card.id}/edit`}
-                      onClick={onNavigate}
-                      className={buttonVariants({ variant: 'ghost', size: 'icon' })}
-                      aria-label={`Edit card ${card.id}`}
-                    >
-                      <Pencil className="size-4" />
-                    </a>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete card ${card.id}`}
-                      onClick={() => openDelete(card)}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!isLoading && cards.length === 0 ? (
-              <tr>
-                <td className="text-muted-foreground px-3 py-6 text-center" colSpan={6}>
-                  No cards
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+      <div className="divide-y overflow-hidden rounded-xl border">
+        {cards.map((card) => (
+          <div key={card.id} className="flex min-w-0 items-center gap-3 p-2.5 hover:bg-muted/30">
+            <a href={`/cards/${card.id}`} onClick={onNavigate} className="size-16 shrink-0 overflow-hidden rounded-lg bg-muted">
+              <CardPreview url={card.previewUrl} title={card.title} type={card.type}
+                imageClassName="size-full object-cover" fallbackClassName="size-full" />
+            </a>
+            <div className="min-w-0 flex-1">
+              <a href={`/cards/${card.id}`} onClick={onNavigate}
+                className="block truncate text-sm font-medium hover:underline" title={card.title || `Card ${card.id}`}>
+                {card.title || `Card ${card.id}`}
+              </a>
+              <Badge variant="outline" className="mt-1 text-[10px]">{card.type}</Badge>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <FavoriteToggle
+                cardId={card.id}
+                isFavorite={card.isFavorite}
+                onChange={(isFavorite) => updateFavorite(card.id, isFavorite)}
+              />
+              <a href={`/cards/${card.id}/edit`} onClick={onNavigate}
+                className={buttonVariants({ variant: 'ghost', size: 'icon' })}
+                aria-label={`Edit card ${card.id}`}>
+                <Pencil className="size-4" />
+              </a>
+              <Button type="button" variant="ghost" size="icon"
+                aria-label={`Delete card ${card.id}`} onClick={() => openDelete(card)}>
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
+        {!isLoading && cards.length === 0 ? (
+          <p className="text-muted-foreground px-3 py-8 text-center text-sm">No cards</p>
+        ) : null}
       </div>
 
       <Dialog
