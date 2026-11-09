@@ -65,6 +65,8 @@ export type CardListParams = {
   excludeContainedMedia?: boolean;
   sort?: 'created_at';
   order?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
 };
 
 export type CreateRelationInput = {
@@ -134,6 +136,8 @@ export async function listCards(params: CardListParams = {}) {
   if (params.excludeContainedMedia) searchParams.set('exclude_contained_media', 'true');
   if (params.sort) searchParams.set('sort', params.sort);
   if (params.order) searchParams.set('order', params.order);
+  if (params.limit) searchParams.set('limit', String(params.limit));
+  if (params.offset) searchParams.set('offset', String(params.offset));
 
   const response = await fetch(`${apiBaseUrl}/api/cards?${searchParams.toString()}`);
 

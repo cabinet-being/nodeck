@@ -12,6 +12,8 @@ import {
   VisualCardWall,
 } from '@/components/visual-card-wall';
 
+const pageSize = 48;
+
 export function GalleryPage({
   currentSearch,
   onNavigate,
@@ -22,6 +24,7 @@ export function GalleryPage({
   onNavigateTo: (path: string) => void;
 }) {
   const [cards, setCards] = React.useState<Card[]>([]);
+  const [hasNextPage, setHasNextPage] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [view, setView] = useVisualCardView('nodeck.galleryView');
@@ -32,6 +35,7 @@ export function GalleryPage({
   const [sourceSearch, setSourceSearch] = React.useState('');
   const [tagChoices, setTagChoices] = React.useState<Tag[]>([]);
   const [sourceChoices, setSourceChoices] = React.useState<Source[]>([]);
+  const page = parsePage(new URLSearchParams(currentSearch).get('page'));
 
   React.useEffect(() => {
     let active = true;
@@ -56,6 +60,7 @@ export function GalleryPage({
     setError(null);
     setLoading(true);
     setCards([]);
+    setHasNextPage(false);
     listCards({
       types: ['media', 'comic', 'set'],
       tags: parseIds(params.get('tags')),
@@ -66,11 +71,17 @@ export function GalleryPage({
       excludeContainedMedia: true,
       sort: 'created_at',
       order: 'desc',
-    }).then((results) => { if (active) setCards(results); })
+      limit: pageSize + 1,
+      offset: (page - 1) * pageSize,
+    }).then((results) => {
+      if (!active) return;
+      setCards(results.slice(0, pageSize));
+      setHasNextPage(results.length > pageSize);
+    })
       .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load gallery.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [currentSearch]);
+  }, [currentSearch, page]);
 
   React.useEffect(() => {
     if (!tagSearch.trim()) { setTagChoices([]); return; }
@@ -88,11 +99,18 @@ export function GalleryPage({
     return () => { active = false; };
   }, [sourceSearch]);
 
-  function applyFilters() {
+  function applyFilters(tags = selectedTags, source = selectedSource, search = searchDraft) {
     const params = new URLSearchParams();
-    if (searchDraft.trim()) params.set('search', searchDraft.trim());
-    if (selectedTags.length > 0) params.set('catalog_tags', selectedTags.map((tag) => tag.id).join(','));
-    if (selectedSource) params.set('catalog_source', String(selectedSource.id));
+    if (search.trim()) params.set('search', search.trim());
+    if (tags.length > 0) params.set('catalog_tags', tags.map((tag) => tag.id).join(','));
+    if (source) params.set('catalog_source', String(source.id));
+    onNavigateTo(`/gallery${params.toString() ? `?${params.toString()}` : ''}`);
+  }
+
+  function goToPage(nextPage: number) {
+    const params = new URLSearchParams(currentSearch);
+    if (nextPage <= 1) params.delete('page');
+    else params.set('page', String(nextPage));
     onNavigateTo(`/gallery${params.toString() ? `?${params.toString()}` : ''}`);
   }
 
@@ -115,7 +133,7 @@ export function GalleryPage({
         <VisualCardViewToggle view={view} onChange={setView} />
       </div>
       <form className="flex max-w-2xl gap-2" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
-        <Input type="search" aria-label="Search cards" placeholder="Search gallery"
+        <Input type="search" aria-label="Search cards and tags" placeholder="Search titles or tags"
           value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} />
         <Button type="submit" size="icon" variant="outline" aria-label="Search gallery" title="Search"><Search className="size-4" /></Button>
       </form>
@@ -131,7 +149,11 @@ export function GalleryPage({
               {selectedTags.map((tag) => <span key={tag.id} className="inline-flex items-center gap-1">
                 <TagChip name={tag.name} category={tag.category} origin={tag.origin} />
                 <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove ${tag.name} filter`}
-                  onClick={() => setSelectedTags((current) => current.filter((item) => item.id !== tag.id))}>
+                  onClick={() => {
+                    const next = selectedTags.filter((item) => item.id !== tag.id);
+                    setSelectedTags(next);
+                    applyFilters(next);
+                  }}>
                   <X className="size-3" />
                 </Button>
               </span>)}
@@ -141,7 +163,12 @@ export function GalleryPage({
             {tagSearch && tagChoices.length > 0 ? <div className="bg-background absolute top-full z-20 mt-1 grid max-h-64 w-full overflow-auto rounded-lg border p-1 shadow-lg">
               {tagChoices.filter((tag) => !selectedTags.some((selected) => selected.id === tag.id))
                 .map((tag) => <Button key={tag.id} type="button" variant="ghost" className="justify-start"
-                  onClick={() => { setSelectedTags((current) => [...current, tag]); setTagSearch(''); }}>
+                  onClick={() => {
+                    const next = [...selectedTags, tag];
+                    setSelectedTags(next);
+                    setTagSearch('');
+                    applyFilters(next);
+                  }}>
                   {tag.name}{tag.nameConflict ? ' · legacy duplicate' : ''}
                 </Button>)}
             </div> : null}
@@ -151,18 +178,22 @@ export function GalleryPage({
             {selectedSource ? <div className="flex items-center gap-1 text-sm">
               <span className="truncate">{selectedSource.name}</span>
               <Button type="button" size="icon-xs" variant="ghost" aria-label="Remove source filter"
-                onClick={() => setSelectedSource(null)}><X className="size-3" /></Button>
+                onClick={() => { setSelectedSource(null); applyFilters(selectedTags, null); }}><X className="size-3" /></Button>
             </div> : null}
             <Input type="search" aria-label="Find source filter" placeholder="Find source"
               value={sourceSearch} onChange={(event) => setSourceSearch(event.target.value)} />
             {sourceSearch && sourceChoices.length > 0 ? <div className="bg-background absolute top-full z-20 mt-1 grid max-h-64 w-full overflow-auto rounded-lg border p-1 shadow-lg">
               {sourceChoices.map((source) => <Button key={source.id} type="button" variant="ghost"
-                className="justify-start" onClick={() => { setSelectedSource(source); setSourceSearch(''); }}>
+                className="justify-start" onClick={() => {
+                  setSelectedSource(source);
+                  setSourceSearch('');
+                  applyFilters(selectedTags, source);
+                }}>
                 {source.name}{source.nameConflict ? ' · legacy duplicate' : ''}
               </Button>)}
             </div> : null}
           </div>
-          <Button type="button" variant="outline" onClick={applyFilters}>Apply</Button>
+          <Button type="button" variant="outline" onClick={() => applyFilters()}>Apply</Button>
           <Button type="button" variant="ghost" onClick={clearFilters} aria-label="Clear filters" title="Clear filters"><RotateCcw className="size-4" /><span className="sr-only">Clear filters</span></Button>
         </div>
       </div>
@@ -173,6 +204,13 @@ export function GalleryPage({
       {!loading && !error && cards.length === 0 ?
         <p className="text-muted-foreground rounded-lg border p-6 text-center text-sm">No cards match this view.</p> : null}
       {!loading && cards.length > 0 ? <VisualCardWall cards={cards} view={view} onNavigate={onNavigate} /> : null}
+      {!error && (page > 1 || hasNextPage) ? <nav className="flex items-center justify-center gap-3 py-2" aria-label="Gallery pages">
+        <Button type="button" variant="outline" disabled={loading || page <= 1}
+          onClick={() => goToPage(page - 1)}>Previous</Button>
+        <span className="text-muted-foreground text-sm">Page {page}</span>
+        <Button type="button" variant="outline" disabled={loading || !hasNextPage}
+          onClick={() => goToPage(page + 1)}>Next</Button>
+      </nav> : null}
     </section>
   );
 }
@@ -186,4 +224,9 @@ function parseIds(value: string | null) {
 function parseSingleId(value: string | null) {
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : undefined;
+}
+
+function parsePage(value: string | null) {
+  const page = Number(value);
+  return Number.isInteger(page) && page > 0 && page <= 100_000 ? page : 1;
 }
