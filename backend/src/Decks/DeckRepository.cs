@@ -117,6 +117,29 @@ public sealed class DeckRepository
         return ToDetails(deck, cards);
     }
 
+    public async Task<IReadOnlyList<DeckSummary>> GetCardDecksAsync(long cardId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        var decks = await connection.QueryAsync<DbDeckSummary>(
+            """
+            SELECT
+                d.id AS Id,
+                d.title AS Title,
+                (SELECT COUNT(*) FROM deck_cards all_cards WHERE all_cards.deck_id = d.id) AS CardCount,
+                d.properties AS Properties,
+                d.metadata AS Metadata,
+                d.system_key AS SystemKey
+            FROM deck_cards membership
+            JOIN decks d ON d.id = membership.deck_id
+            WHERE membership.card_id = @CardId
+              AND d.system_key IS NULL
+            ORDER BY d.id DESC;
+            """,
+            new { CardId = cardId });
+
+        return decks.Select(ToSummary).ToList();
+    }
+
     public async Task<DeckDetails?> UpdateAsync(long id, DeckRequest request)
     {
         var title = NormalizeTitle(request.Title);
@@ -185,6 +208,98 @@ public sealed class DeckRepository
         await InsertMembershipsAsync(connection, transaction, id, cards);
         await transaction.CommitAsync();
 
+        return await GetByIdAsync(id);
+    }
+
+    public async Task<DeckDetails?> AddCardAsync(long id, long cardId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        if (!await LockEditableDeckAsync(connection, transaction, id))
+        {
+            await transaction.RollbackAsync();
+            return null;
+        }
+
+        await ValidateCardsExistAsync(
+            connection,
+            transaction,
+            new[] { new DeckCardInput(cardId, null) });
+
+        var existing = await connection.ExecuteScalarAsync<long>(
+            """
+            SELECT COUNT(*)
+            FROM deck_cards
+            WHERE deck_id = @DeckId
+              AND card_id = @CardId;
+            """,
+            new { DeckId = id, CardId = cardId },
+            transaction);
+
+        if (existing == 0)
+        {
+            var position = await connection.ExecuteScalarAsync<long>(
+                """
+                SELECT COALESCE(MAX(position) + 1, 0)
+                FROM deck_cards
+                WHERE deck_id = @DeckId;
+                """,
+                new { DeckId = id },
+                transaction);
+
+            await connection.ExecuteAsync(
+                """
+                INSERT INTO deck_cards (deck_id, card_id, position, properties, metadata)
+                VALUES (@DeckId, @CardId, @Position, NULL, @Metadata);
+                """,
+                new
+                {
+                    DeckId = id,
+                    CardId = cardId,
+                    Position = (int)position,
+                    Metadata = CreateMembershipMetadata().ToJsonString(),
+                },
+                transaction);
+        }
+
+        await transaction.CommitAsync();
+        return await GetByIdAsync(id);
+    }
+
+    public async Task<DeckDetails?> RemoveCardAsync(long id, long cardId)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+
+        if (!await LockEditableDeckAsync(connection, transaction, id))
+        {
+            await transaction.RollbackAsync();
+            return null;
+        }
+
+        await ValidateCardsExistAsync(
+            connection,
+            transaction,
+            new[] { new DeckCardInput(cardId, null) });
+
+        var removed = await connection.ExecuteAsync(
+            """
+            DELETE FROM deck_cards
+            WHERE deck_id = @DeckId
+              AND card_id = @CardId;
+            """,
+            new { DeckId = id, CardId = cardId },
+            transaction);
+
+        if (removed > 0)
+        {
+            await NormalizeDeckPositionsAsync(connection, transaction, id);
+        }
+
+        await transaction.CommitAsync();
         return await GetByIdAsync(id);
     }
 
@@ -365,6 +480,39 @@ public sealed class DeckRepository
                 },
                 transaction);
         }
+    }
+
+    private static async Task<bool> LockEditableDeckAsync(
+        IDbConnection connection,
+        IDbTransaction transaction,
+        long deckId)
+    {
+        var deck = await connection.QuerySingleOrDefaultAsync<DbDeck>(
+            """
+            SELECT
+                id AS Id,
+                title AS Title,
+                properties AS Properties,
+                metadata AS Metadata,
+                system_key AS SystemKey
+            FROM decks
+            WHERE id = @DeckId
+            FOR UPDATE;
+            """,
+            new { DeckId = deckId },
+            transaction);
+
+        if (deck is null)
+        {
+            return false;
+        }
+
+        if (string.Equals(deck.SystemKey, FavoritesSystemKey, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Favorites deck cannot be edited.");
+        }
+
+        return true;
     }
 
     private async Task<long> EnsureFavoritesDeckAsync()

@@ -13,6 +13,9 @@ public static class DeckEndpoints
         group.MapGet("/{id:long}", GetDeckAsync);
         group.MapPut("/{id:long}", UpdateDeckAsync);
         group.MapDelete("/{id:long}", DeleteDeckAsync);
+        group.MapPut("/{id:long}/cards/{cardId:long}", AddCardAsync);
+        group.MapDelete("/{id:long}/cards/{cardId:long}", RemoveCardAsync);
+        app.MapGet("/api/cards/{cardId:long}/decks", GetCardDecksAsync);
 
         return app;
     }
@@ -86,6 +89,38 @@ public static class DeckEndpoints
             var deleted = await repository.DeleteAsync(id);
 
             return deleted ? Results.NoContent() : Results.NotFound(new { error = "Deck not found." });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    }
+
+    private static async Task<IResult> GetCardDecksAsync(DeckRepository repository, long cardId)
+    {
+        var decks = await repository.GetCardDecksAsync(cardId);
+        return Results.Ok(decks);
+    }
+
+    private static async Task<IResult> AddCardAsync(DeckRepository repository, long id, long cardId)
+    {
+        try
+        {
+            var deck = await repository.AddCardAsync(id, cardId);
+            return deck is null ? Results.NotFound(new { error = "Deck not found." }) : Results.Ok(deck);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.BadRequest(new { error = exception.Message });
+        }
+    }
+
+    private static async Task<IResult> RemoveCardAsync(DeckRepository repository, long id, long cardId)
+    {
+        try
+        {
+            var deck = await repository.RemoveCardAsync(id, cardId);
+            return deck is null ? Results.NotFound(new { error = "Deck not found." }) : Results.Ok(deck);
         }
         catch (InvalidOperationException exception)
         {
