@@ -4,6 +4,7 @@ using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using MyApp.Api.Cards;
+using MyApp.Api.Analysis;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
 using MyApp.Api.Interest;
@@ -15,6 +16,76 @@ namespace MyApp.Api.Tests;
 [Collection("Collection database")]
 public sealed class DanbooruTagImporterTests
 {
+    [DatabaseFact]
+    public async Task WdSeedIsIdempotentAndDoesNotCompleteFullImport()
+    {
+        await using var database = await ImportDatabase.CreateAsync();
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path, "tag_id,name,category,count\n10,general_tag,0,100\n20,character_tag,4,50\n30,rating_tag,9,20\n");
+            var seeder = new WdVocabularySeeder(database.ConnectionString);
+            var first = await seeder.RunAsync(path);
+            var second = await seeder.RunAsync(path);
+
+            Assert.Equal(new WdVocabularySeedResult(2, 2, 0, 0), first);
+            Assert.Equal(new WdVocabularySeedResult(2, 0, 2, 0), second);
+            Assert.Equal(new[] { "general", "character" },
+                (await database.QueryAsync<string>("SELECT category FROM tags ORDER BY danbooru_id;")).ToArray());
+            Assert.Equal(0, await database.ScalarAsync<int>("SELECT COUNT(*) FROM danbooru_import_state WHERE kind = 'tags' AND completed = TRUE;"));
+            Assert.Equal(1, await database.ScalarAsync<int>("SELECT COUNT(*) FROM danbooru_import_state WHERE kind = 'wd_vocabulary' AND completed = TRUE;"));
+            var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Default"] = database.ConnectionString
+            }).Build();
+            Assert.True(await new AnalysisQueueRepository(config).IsVocabularyReadyAsync(default));
+            using var http = new HttpClient(new StubHandler(uri => uri.AbsolutePath == "/tags.json" && !uri.Query.Contains("page=")
+                ? """[{"id":20,"name":"character_tag","category":4},{"id":10,"name":"general_tag","category":0}]"""
+                : "[]"));
+            var full = await new DanbooruTagImporter(database.ConnectionString, http).RunAsync(
+                new DanbooruImportOptions { UserAgent = "nodeck-tests/1.0", PageSize = 2 });
+            Assert.True(full.TagsCompleted);
+            Assert.True(full.AliasesCompleted);
+            Assert.Equal(2, await database.ScalarAsync<int>("SELECT COUNT(*) FROM tags WHERE origin = 'danbooru';"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [DatabaseFact]
+    public async Task WdSeedSkipsOccupiedNamesAndPreservesExistingRows()
+    {
+        await using var database = await ImportDatabase.CreateAsync();
+        await database.ExecuteAsync("INSERT INTO tags (name, canonical_key, category, origin) VALUES ('custom_name', 'custom_name', 'general', 'user');");
+        await database.ExecuteAsync("INSERT INTO tags (name, canonical_key, category, origin, danbooru_id) VALUES ('old_name', 'danbooru-tag:20', 'general', 'danbooru', 20);");
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path, "tag_id,name,category,count\n10,custom_name,0,100\n20,new_name,4,50\n30,safe_name,0,20\n");
+            var result = await new WdVocabularySeeder(database.ConnectionString).RunAsync(path);
+
+            Assert.Equal(new WdVocabularySeedResult(3, 1, 0, 2), result);
+            Assert.Equal(1, await database.ScalarAsync<int>("SELECT COUNT(*) FROM tags WHERE name = 'custom_name' AND origin = 'user';"));
+            Assert.Equal(1, await database.ScalarAsync<int>("SELECT COUNT(*) FROM tags WHERE danbooru_id = 20 AND name = 'old_name' AND category = 'general';"));
+            Assert.Equal(0, await database.ScalarAsync<int>("SELECT COUNT(*) FROM tags WHERE name = 'new_name';"));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [DatabaseFact]
+    public async Task InvalidWdCsvDoesNotPublishReadiness()
+    {
+        await using var database = await ImportDatabase.CreateAsync();
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path, "tag_id,name,category,count\n10,good,0,100\ninvalid,row,4,10\n");
+            await Assert.ThrowsAsync<InvalidDataException>(() => new WdVocabularySeeder(database.ConnectionString).RunAsync(path));
+            Assert.Equal(0, await database.ScalarAsync<int>("SELECT COUNT(*) FROM tags;"));
+            Assert.Equal(0, await database.ScalarAsync<int>("SELECT COUNT(*) FROM danbooru_import_state WHERE kind = 'wd_vocabulary';"));
+        }
+        finally { File.Delete(path); }
+    }
+
     [DatabaseFact]
     public async Task TwoPagesResumeAndRerunKeepUniqueTagsCategoriesAndAliasState()
     {

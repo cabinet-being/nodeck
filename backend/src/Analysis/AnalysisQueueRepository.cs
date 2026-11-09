@@ -42,8 +42,8 @@ public sealed class AnalysisQueueRepository
         await connection.OpenAsync(cancellationToken);
         return await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
             SELECT COUNT(*) FROM danbooru_import_state
-            WHERE kind = 'tags' AND completed = TRUE;
-            """, cancellationToken: cancellationToken)) == 1;
+            WHERE kind IN ('tags', 'wd_vocabulary') AND completed = TRUE;
+            """, cancellationToken: cancellationToken)) > 0;
     }
 
     public async Task<AnalysisJobStatus?> GetStatusAsync(long cardId,

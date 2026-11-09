@@ -10,6 +10,15 @@ using MyApp.Api.Storage;
 
 var importingDanbooru = args.Length > 0 && args[0] == "import-danbooru-tags";
 var analyzingCard = args.Length > 0 && args[0] == "analyze-card";
+var seedingWdTags = args.Length > 0 && args[0] == "seed-wd-tags";
+if (seedingWdTags && args.Contains("--help"))
+{
+    Console.WriteLine("Usage: seed-wd-tags");
+    Console.WriteLine("Set NODECK_TAGGER_MODEL_DIR to the directory containing selected_tags.csv.");
+    return;
+}
+if (seedingWdTags && args.Length != 1)
+    throw new ArgumentException("Usage: seed-wd-tags");
 if (importingDanbooru && args.Contains("--help"))
 {
     Console.WriteLine("Usage: import-danbooru-tags [--page-size 1..1000] [--max-pages N] [--refresh]");
@@ -72,7 +81,7 @@ if (importingDanbooru)
         throw new ArgumentException("Set NODECK_DANBOORU_USER_AGENT before importing Danbooru tags.");
 }
 
-var builder = WebApplication.CreateBuilder(importingDanbooru || analyzingCard ? [] : args);
+var builder = WebApplication.CreateBuilder(importingDanbooru || analyzingCard || seedingWdTags ? [] : args);
 
 builder.Services.AddScoped<CardRepository>();
 builder.Services.AddScoped<DeckRepository>();
@@ -82,7 +91,7 @@ builder.Services.AddScoped<InterestRepository>();
 builder.Services.AddScoped<RecommendationRepository>();
 builder.Services.AddSingleton<AnalysisQueueRepository>();
 builder.Services.AddSingleton<SpeechAnalysisQueueRepository>();
-if (!importingDanbooru && !analyzingCard)
+if (!importingDanbooru && !analyzingCard && !seedingWdTags)
 {
     builder.Services.AddHostedService<ImageAnalysisWorker>();
     builder.Services.AddHostedService<SpeechAnalysisWorker>();
@@ -119,6 +128,20 @@ if (importOptions is not null)
     Console.WriteLine($"Danbooru import: {result.Pages} pages, {result.Processed} entries, " +
         $"{result.Conflicts} conflicts; tags complete: {result.TagsCompleted}; " +
         $"aliases complete: {result.AliasesCompleted}.");
+    return;
+}
+if (seedingWdTags)
+{
+    var appDataRoot = app.Configuration["NODECK_APP_DATA"]
+        ?? Path.Combine(AppContext.BaseDirectory, "data");
+    var modelDirectory = app.Configuration["NODECK_TAGGER_MODEL_DIR"]
+        ?? Path.Combine(appDataRoot, "models", "wd-vit-tagger-v3");
+    var connectionString = app.Configuration.GetConnectionString("Default")
+        ?? throw new InvalidOperationException("Missing database connection string.");
+    var result = await new WdVocabularySeeder(connectionString).RunAsync(
+        Path.Combine(modelDirectory, "selected_tags.csv"));
+    Console.WriteLine($"WD vocabulary: {result.Eligible} eligible, {result.Inserted} inserted, " +
+        $"{result.Existing} existing, {result.Conflicts} conflicts.");
     return;
 }
 if (analysisCardId is long cardId)
