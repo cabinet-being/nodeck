@@ -12,22 +12,38 @@ public sealed partial class PreviewService
     private static readonly TimeSpan TranscodingTimeout = TimeSpan.FromMinutes(10);
 
     private readonly string _appDataRoot;
+    private readonly MediaProcessingGate _gate;
+    private readonly double _previewQualityThreshold;
+    private readonly long _maxImagePixels;
+
+    /// <summary>Test seam: replaces the animated preview render (throw InvalidOperationException to simulate failure).</summary>
+    internal Func<string, string, double, Task>? AnimatedRenderOverride { get; set; }
 
     public PreviewService(IConfiguration configuration)
     {
+        _gate = new MediaProcessingGate(ReadInt(configuration, "Media:MaxConcurrentProcessing", 2));
+        _previewQualityThreshold = double.TryParse(configuration["Media:PreviewQualityThreshold"],
+            System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var threshold)
+            ? threshold : 0.25;
+        _maxImagePixels = ReadInt(configuration, "Media:MaxImagePixels", 50_000_000);
         _appDataRoot = configuration["NODECK_APP_DATA"]
             ?? Environment.GetEnvironmentVariable("NODECK_APP_DATA")
             ?? Path.Combine(AppContext.BaseDirectory, "data");
     }
 
+    private static int ReadInt(IConfiguration configuration, string key, int fallback) =>
+        int.TryParse(configuration[key], System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var value) && value > 0 ? value : fallback;
+
     public async Task<CardFileAssets> SaveMediaAndCreatePreviewAsync(long cardId, IFormFile media)
     {
         try
         {
+            using var slot = await _gate.AcquireAsync();
             return await DetectImageExtensionAsync(media) switch
             {
                 ".gif" => await SaveGifAndCreatePreviewAsync(cardId, media),
-                not null => await SaveImageAndCreatePreviewAsync(cardId, media),
+                not null => await SaveImageCoreAsync(cardId, media),
                 _ => await SaveVideoAndCreatePreviewAsync(cardId, media),
             };
         }
@@ -41,6 +57,12 @@ public sealed partial class PreviewService
     }
 
     public async Task<CardFileAssets> SaveImageAndCreatePreviewAsync(long cardId, IFormFile image)
+    {
+        using var slot = await _gate.AcquireAsync();
+        return await SaveImageCoreAsync(cardId, image);
+    }
+
+    private async Task<CardFileAssets> SaveImageCoreAsync(long cardId, IFormFile image)
     {
         if (image.Length <= 0)
         {
@@ -79,12 +101,15 @@ public sealed partial class PreviewService
         catch (Exception exception)
         {
             DeleteCardFiles(cardId);
+            if (exception is ImageTooLargeException)
+                throw new InvalidOperationException($"File '{originalFileName}': {exception.Message}", exception);
             throw new InvalidOperationException($"File '{originalFileName}': image could not be read or previewed.", exception);
         }
     }
 
     public async Task<PendingCardFileReplacement> PrepareMediaReplacementAsync(long cardId, IFormFile media)
     {
+        using var slot = await _gate.AcquireAsync();
         var stagingRoot = Path.Combine(_appDataRoot, "tmp", "replacements", Guid.NewGuid().ToString("N"));
         var stagingCardDirectory = Path.Combine(stagingRoot, "cards", cardId.ToString());
         var stagingPreviewDirectory = Path.Combine(stagingRoot, "cache", "cards", cardId.ToString());
@@ -140,6 +165,7 @@ public sealed partial class PreviewService
         if (!File.Exists(originalPath))
             throw new InvalidOperationException("Original media file is missing.");
 
+        using var slot = await _gate.AcquireAsync();
         var stagingRoot = Path.Combine(_appDataRoot, "tmp", "preview-overrides", Guid.NewGuid().ToString("N"));
         var stagingPreviewDirectory = Path.Combine(stagingRoot, "preview");
         Directory.CreateDirectory(stagingPreviewDirectory);
@@ -148,24 +174,27 @@ public sealed partial class PreviewService
 
         try
         {
-            double selectedStart;
+            AnimatedPreviewResult result;
             if (startSeconds is null)
             {
-                selectedStart = await GenerateAnimatedAssetsAsync(originalPath, previewPath, posterPath, duration);
+                result = await GenerateAnimatedAssetsAsync(originalPath, previewPath, posterPath, duration);
             }
             else
             {
                 var clock = Stopwatch.StartNew();
                 await RenderAnimatedAssetsAtStartAsync(originalPath, previewPath, posterPath,
                     startSeconds.Value, duration, clock);
-                selectedStart = startSeconds.Value;
+                result = new AnimatedPreviewResult(startSeconds.Value, 0, "manual", true);
             }
 
             return new PendingPreviewReplacement(
                 stagingRoot, stagingPreviewDirectory,
                 Path.Combine(_appDataRoot, "cache", "cards", cardId.ToString()),
                 Path.Combine(_appDataRoot, "tmp", "preview-override-backups", Guid.NewGuid().ToString("N")),
-                selectedStart);
+                result.Start,
+                result.Selection,
+                result.Animated ? "preview.gif" : "poster.webp",
+                result.Selection == "manual" ? null : Math.Max(0, result.Score));
         }
         catch
         {

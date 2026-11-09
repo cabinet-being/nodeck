@@ -91,7 +91,7 @@ public sealed partial class PreviewService
             File.Move(temporaryUploadPath, originalPath, overwrite: true);
         }
 
-        var previewStart = await GenerateAnimatedAssetsAsync(originalPath, previewPath,
+        var preview = await GenerateAnimatedAssetsAsync(originalPath, previewPath,
             Path.Combine(previewDirectory, "poster.webp"), probe.Duration);
 
         string? playbackPath = null;
@@ -113,7 +113,7 @@ public sealed partial class PreviewService
 
         return new CardFileAssets(
             relativeContentPath,
-            relativePreviewPath,
+            preview.Animated ? relativePreviewPath : BuildPosterPath(cardId),
             "video",
             probe.MimeType,
             originalFileName,
@@ -129,10 +129,15 @@ public sealed partial class PreviewService
             AudioChannels: probe.AudioChannels,
             AudioSampleRate: probe.AudioSampleRate,
             PosterPath: BuildPosterPath(cardId),
-            PreviewStartSeconds: previewStart);
+            PreviewStartSeconds: preview.Start,
+            PreviewSelection: preview.Selection,
+            PreviewScore: Math.Max(0, preview.Score),
+            FrameRate: probe.FrameRate);
     }
 
-    private async Task<double> GenerateAnimatedAssetsAsync(string originalPath, string previewPath,
+    internal sealed record AnimatedPreviewResult(double Start, double Score, string Selection, bool Animated);
+
+    private async Task<AnimatedPreviewResult> GenerateAnimatedAssetsAsync(string originalPath, string previewPath,
         string posterPath, double duration)
     {
         const int candidateCount = 10;
@@ -181,13 +186,25 @@ public sealed partial class PreviewService
                     if (TimeSpan.FromSeconds(90) - clock.Elapsed <= TimeSpan.Zero) break;
                     await RenderAnimatedAssetsAtStartAsync(originalPath, previewPath, posterPath,
                         candidate.Start, duration, clock);
-                    return candidate.Start;
+                    return new AnimatedPreviewResult(candidate.Start, candidate.Score,
+                        candidate.Score >= _previewQualityThreshold ? "auto" : "fallback", true);
                 }
                 catch (InvalidOperationException)
                 {
                     File.Delete(previewPath);
                     File.Delete(posterPath);
                 }
+            }
+
+            // Animation failed everywhere: keep the upload with a poster-only preview at the best start.
+            try
+            {
+                await RenderPosterAsync(originalPath, posterPath, ordered[0].Start, duration, Stopwatch.StartNew());
+                return new AnimatedPreviewResult(ordered[0].Start, ordered[0].Score, "poster_only", false);
+            }
+            catch (InvalidOperationException)
+            {
+                File.Delete(posterPath);
             }
 
             throw new InvalidOperationException("Failed to generate animated preview and poster.");
@@ -200,6 +217,13 @@ public sealed partial class PreviewService
     {
         var window = duration > 0 ? Math.Min(Math.Max(duration, 0.1), 3.0) : 3.0;
         await RenderAnimatedPreviewAsync(originalPath, previewPath, start, window, clock);
+        await RenderPosterAsync(originalPath, posterPath, start, duration, clock);
+    }
+
+    private async Task RenderPosterAsync(string originalPath, string posterPath, double start,
+        double duration, Stopwatch clock)
+    {
+        var window = duration > 0 ? Math.Min(Math.Max(duration, 0.1), 3.0) : 3.0;
         var posterTime = start + (duration > 0 ? window / 2 : 0);
         var poster = await RunProcessAsync("ffmpeg", [
             "-v", "error", "-y", "-ss", FormatSeconds(posterTime), "-i", originalPath,
@@ -215,6 +239,11 @@ public sealed partial class PreviewService
     private async Task RenderAnimatedPreviewAsync(string originalPath, string previewPath,
         double start, double duration, Stopwatch clock)
     {
+        if (AnimatedRenderOverride is { } renderOverride)
+        {
+            await renderOverride(originalPath, previewPath, start);
+            return;
+        }
         var palettePath = Path.Combine(Path.GetDirectoryName(previewPath)!, "palette.png");
         var scaleFilter = $"fps=10,scale={MaxPreviewDimension}:{MaxPreviewDimension}:force_original_aspect_ratio=decrease:flags=lanczos";
         var inputArguments = new[] { "-ss", FormatSeconds(start), "-i", originalPath };

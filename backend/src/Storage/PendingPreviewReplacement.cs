@@ -10,16 +10,23 @@ public sealed class PendingPreviewReplacement
     private bool _newPreviewPromoted;
 
     public PendingPreviewReplacement(string stagingRoot, string stagingPreviewDirectory,
-        string finalPreviewDirectory, string backupPreviewDirectory, double previewStartSeconds)
+        string finalPreviewDirectory, string backupPreviewDirectory, double previewStartSeconds,
+        string previewSelection = "auto", string previewFileName = "preview.gif", double? previewScore = null)
     {
         _stagingRoot = stagingRoot;
         _stagingPreviewDirectory = stagingPreviewDirectory;
         _finalPreviewDirectory = finalPreviewDirectory;
         _backupPreviewDirectory = backupPreviewDirectory;
         PreviewStartSeconds = previewStartSeconds;
+        PreviewSelection = previewSelection;
+        PreviewFileName = previewFileName;
+        PreviewScore = previewScore;
     }
 
     public double PreviewStartSeconds { get; }
+    public string PreviewSelection { get; }
+    public string PreviewFileName { get; }
+    public double? PreviewScore { get; }
 
     public Task PromoteAsync()
     {

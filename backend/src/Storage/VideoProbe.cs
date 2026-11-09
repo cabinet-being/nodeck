@@ -14,7 +14,7 @@ internal static class VideoProbe
             "-print_format",
             "json",
             "-show_entries",
-            "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,channels,sample_rate",
+            "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,channels,sample_rate,avg_frame_rate,r_frame_rate",
             videoPath,
         ]);
 
@@ -58,6 +58,7 @@ internal static class VideoProbe
         string? pixelFormat = null;
         int? audioChannels = null;
         int? audioSampleRate = null;
+        double? frameRate = null;
         foreach (var stream in root.GetProperty("streams").EnumerateArray())
         {
             var codecType = stream.GetProperty("codec_type").GetString();
@@ -77,6 +78,9 @@ internal static class VideoProbe
             videoCodec ??= stream.TryGetProperty("codec_name", out var videoCodecElement) ? videoCodecElement.GetString() : null;
             pixelFormat ??= stream.TryGetProperty("pix_fmt", out var pixelFormatElement) ? pixelFormatElement.GetString() : null;
 
+            if (frameRate is null)
+                frameRate = ParseFrameRate(stream, "avg_frame_rate") ?? ParseFrameRate(stream, "r_frame_rate");
+
             var streamWidth = stream.TryGetProperty("width", out var widthElement) ? widthElement.GetInt32() : 0;
             var streamHeight = stream.TryGetProperty("height", out var heightElement) ? heightElement.GetInt32() : 0;
 
@@ -88,9 +92,25 @@ internal static class VideoProbe
         }
 
         if (width > 0 && height > 0)
-            return new VideoProbeResult(mimeType, container!, width, height, duration, hasAudio, videoCodec, audioCodec, pixelFormat, audioChannels, audioSampleRate);
+            return new VideoProbeResult(mimeType, container!, width, height, duration, hasAudio, videoCodec, audioCodec, pixelFormat, audioChannels, audioSampleRate, frameRate);
 
         throw new InvalidOperationException("Uploaded file does not contain a readable video stream.");
+    }
+
+    internal static double? ParseFrameRate(JsonElement stream, string property)
+    {
+        if (!stream.TryGetProperty(property, out var element) || element.ValueKind != JsonValueKind.String) return null;
+        var text = element.GetString();
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var parts = text.Split('/');
+        if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var numerator)) return null;
+        var denominator = 1.0;
+        if (parts.Length == 2 &&
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out denominator)) return null;
+        if (parts.Length > 2 || !double.IsFinite(numerator) || numerator <= 0 || !double.IsFinite(denominator) || denominator <= 0)
+            return null;
+        var rate = numerator / denominator;
+        return double.IsFinite(rate) && rate > 0 ? rate : null;
     }
 
     internal static async Task<string?> DetectVideoContainerAsync(string path, string formatName)
@@ -118,5 +138,5 @@ internal static class VideoProbe
         };
     }
 
-    internal sealed record VideoProbeResult(string MimeType, string Container, int Width, int Height, double Duration, bool HasAudio, string? VideoCodec, string? AudioCodec, string? PixelFormat, int? AudioChannels, int? AudioSampleRate);
+    internal sealed record VideoProbeResult(string MimeType, string Container, int Width, int Height, double Duration, bool HasAudio, string? VideoCodec, string? AudioCodec, string? PixelFormat, int? AudioChannels, int? AudioSampleRate, double? FrameRate = null);
 }

@@ -185,6 +185,10 @@ function PreviewStartControl({ card, onUpdated }: { card: Card; onUpdated: (card
   if (!canAdjust) return null;
 
   const manual = card.metadata.preview_start_manual === true;
+  const selection = card.metadata.preview_selection;
+  const startLabel = selection === 'poster_only' ? 'Poster only'
+    : selection === 'fallback' ? 'Auto (low quality)'
+    : manual ? 'Manual' : 'Automatic';
   const selectedStart = Number(startSeconds);
   const validStart = startSeconds.trim() !== '' && Number.isFinite(selectedStart)
     && selectedStart >= 0 && selectedStart <= maxStart;
@@ -234,7 +238,7 @@ function PreviewStartControl({ card, onUpdated }: { card: Card; onUpdated: (card
             </div>
           ) : null}
         </div>
-        <p className="text-muted-foreground">{manual ? 'Manual' : 'Automatic'} start: {currentStart.toFixed(1)}s of {duration.toFixed(1)}s</p>
+        <p className="text-muted-foreground">{startLabel} start: {currentStart.toFixed(1)}s of {duration.toFixed(1)}s</p>
         <label className="grid gap-2 font-medium">
           Start time (seconds)
           <div className="flex flex-wrap items-center gap-3">

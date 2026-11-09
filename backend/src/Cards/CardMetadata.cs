@@ -40,6 +40,11 @@ internal static class CardMetadata
             metadata.Remove("duration");
         }
 
+        SetOrRemove(metadata, "preview_selection", assets.PreviewSelection is null ? null : JsonValue.Create(assets.PreviewSelection));
+        SetOrRemove(metadata, "preview_score", assets.PreviewScore is null ? null : JsonValue.Create(assets.PreviewScore.Value));
+        SetOrRemove(metadata, "frame_rate", assets.FrameRate is null ? null : JsonValue.Create(assets.FrameRate.Value));
+        SetOrRemove(metadata, "animated", assets.Animated is null ? null : JsonValue.Create(assets.Animated.Value));
+
         if (assets.FrameCount is not null)
         {
             metadata["frame_count"] = assets.FrameCount.Value;
@@ -48,6 +53,12 @@ internal static class CardMetadata
         {
             metadata.Remove("frame_count");
         }
+    }
+
+    internal static void SetOrRemove(JsonObject metadata, string key, JsonNode? value)
+    {
+        if (value is null) metadata.Remove(key);
+        else metadata[key] = value;
     }
 
     internal static JsonNode ParseRequiredJson(string json) =>

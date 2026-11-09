@@ -192,7 +192,10 @@ public sealed partial class CardRepository
             replacement = await preparePreview(id, contentPath, duration.Value, startSeconds);
             metadata["preview_start_seconds"] = replacement.PreviewStartSeconds;
             metadata["preview_start_manual"] = startSeconds is not null;
-            var previewPath = Path.Combine("cache", "cards", id.ToString(), "preview.gif").Replace('\\', '/');
+            metadata["preview_selection"] = replacement.PreviewSelection;
+            if (replacement.PreviewScore is { } previewScore) metadata["preview_score"] = previewScore;
+            else metadata.Remove("preview_score");
+            var previewPath = Path.Combine("cache", "cards", id.ToString(), replacement.PreviewFileName).Replace('\\', '/');
             var posterPath = Path.Combine("cache", "cards", id.ToString(), "poster.webp").Replace('\\', '/');
             metadata["preview_path"] = previewPath;
             metadata["poster_path"] = posterPath;

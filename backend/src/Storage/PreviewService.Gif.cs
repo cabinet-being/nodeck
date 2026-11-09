@@ -74,14 +74,14 @@ public sealed partial class PreviewService
         var previewPath = Path.Combine(previewDirectory, "preview.gif");
 
         File.Move(temporaryUploadPath, originalPath, overwrite: true);
-        var previewStart = await GenerateAnimatedAssetsAsync(originalPath, previewPath,
+        var preview = await GenerateAnimatedAssetsAsync(originalPath, previewPath,
             Path.Combine(previewDirectory, "poster.webp"), metadata.Duration);
 
         var fileInfo = new FileInfo(originalPath);
 
         return new CardFileAssets(
             relativeContentPath,
-            relativePreviewPath,
+            preview.Animated ? relativePreviewPath : BuildPosterPath(cardId),
             "gif",
             "image/gif",
             originalFileName,
@@ -91,6 +91,9 @@ public sealed partial class PreviewService
             metadata.Duration,
             metadata.FrameCount,
             PosterPath: BuildPosterPath(cardId),
-            PreviewStartSeconds: previewStart);
+            PreviewStartSeconds: preview.Start,
+            PreviewSelection: preview.Selection,
+            PreviewScore: Math.Max(0, preview.Score),
+            Animated: metadata.FrameCount > 1);
     }
 }

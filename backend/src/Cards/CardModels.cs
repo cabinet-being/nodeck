@@ -130,7 +130,11 @@ public sealed record CardFileAssets(
     int? AudioChannels = null,
     int? AudioSampleRate = null,
     string? PosterPath = null,
-    double? PreviewStartSeconds = null);
+    double? PreviewStartSeconds = null,
+    string? PreviewSelection = null,
+    double? PreviewScore = null,
+    double? FrameRate = null,
+    bool? Animated = null);
 
 internal sealed record DbCard(
     long Id,
