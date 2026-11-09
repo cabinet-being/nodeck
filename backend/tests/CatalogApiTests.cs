@@ -12,6 +12,56 @@ namespace MyApp.Api.Tests;
 public sealed class CatalogApiTests
 {
     [DatabaseFact]
+    public async Task CardSearchFindsAssignedTagNamesAndAliasesAcrossPages()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;
+        var configuration = Configuration(connectionString);
+        await EnsureSchemaAsync(connectionString, configuration);
+        var cards = new CardRepository(configuration);
+        var catalog = new CatalogRepository(configuration);
+        var assignments = new CardCatalogRepository(configuration);
+        await using var connection = new MySqlConnection(connectionString);
+        await connection.OpenAsync();
+        var token = Guid.NewGuid().ToString("N");
+        var firstId = await InsertCardAsync(connection, "media", $"first-{token}");
+        var secondId = await InsertCardAsync(connection, "media", $"second-{token}");
+        var groupId = await InsertCardAsync(connection, "set", $"group-{token}");
+        long tagId = 0;
+        try
+        {
+            tagId = (await catalog.CreateTagAsync(new TagRequest($"tag-{token}",
+                [$"alias-{token}"]))).Id;
+            await assignments.SetTagAsync(firstId, tagId);
+            await connection.ExecuteAsync("""
+                INSERT INTO card_relations (from_card_id, to_card_id, relation_type, metadata)
+                VALUES (@GroupId, @FirstId, 'contains', JSON_OBJECT());
+                """, new { GroupId = groupId, FirstId = firstId });
+
+            async Task<IReadOnlyList<CardSummary>> List(string search, int limit = 200, int offset = 0) =>
+                await cards.ListAsync(["media"], null, search, false, [], null, [], null,
+                    "created_at", "asc", limit, offset);
+
+            Assert.Equal(firstId, Assert.Single(await List($"tag-{token}")).Id);
+            Assert.Equal(firstId, Assert.Single(await List($"alias-{token}")).Id);
+            Assert.Empty(await List($"tag%{token}"));
+            Assert.Equal(groupId, Assert.Single(await cards.ListAsync(["set"], null, $"tag-{token}",
+                true, [], null, [], null, "created_at", "desc")).Id);
+            Assert.Equal(groupId, Assert.Single(await cards.ListAsync(["set"], null, null,
+                true, [], null, [tagId], null, "created_at", "desc")).Id);
+            Assert.Equal(firstId, Assert.Single(await List(token, 1)).Id);
+            Assert.Equal(secondId, Assert.Single(await List(token, 1, 1)).Id);
+            Assert.Empty(await List(token, 1, 2));
+        }
+        finally
+        {
+            await connection.ExecuteAsync("DELETE FROM cards WHERE id IN @Ids;",
+                new { Ids = new[] { firstId, secondId, groupId } });
+            if (tagId != 0)
+                await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = tagId });
+        }
+    }
+
+    [DatabaseFact]
     public async Task CardAssignmentsBridgeLegacyRelationsAndNewCatalogEntries()
     {
         var connectionString = Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!;

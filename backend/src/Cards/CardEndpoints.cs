@@ -248,12 +248,16 @@ public static class CardEndpoints
         string? search,
         string? exclude_contained_media,
         string? sort,
-        string? order)
+        string? order,
+        int? limit,
+        int? offset)
     {
         if (!TryReadTypes(type, types, out var requestedTypes, out var typeError))
         {
             return Results.BadRequest(new { error = typeError });
         }
+        if (limit is < 1 or > 200 || offset < 0)
+            return Results.BadRequest(new { error = "limit must be 1–200 and offset must be nonnegative." });
 
         var cards = await repository.ListAsync(
             requestedTypes,
@@ -265,7 +269,9 @@ public static class CardEndpoints
             ParseLongList(catalog_tags),
             ParseLongOrNull(catalog_source),
             sort ?? "created_at",
-            order ?? "desc");
+            order ?? "desc",
+            limit ?? 200,
+            offset ?? 0);
 
         return Results.Ok(cards);
     }
