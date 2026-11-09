@@ -151,6 +151,18 @@ async function tryFingerprint(file: File): Promise<string | undefined> {
   try { return await sampledFingerprint(file); } catch { return undefined; }
 }
 
+async function fingerprintFiles(files: File[]): Promise<(string | undefined)[]> {
+  const results = new Array<string | undefined>(files.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+    while (next < files.length) {
+      const index = next++;
+      results[index] = await tryFingerprint(files[index]);
+    }
+  }));
+  return results;
+}
+
 const allowedExtensions = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm']);
 
 function isSupported(file: File) {
@@ -295,13 +307,25 @@ export function BulkImportPage() {
     try {
       const analysis = await getCardAnalysis(item.cardId);
       if (mounted.current) {
-        setItems((current) => current.map((candidate) => candidate.id === item.id
-          ? { ...candidate, analysis, analysisError: undefined } : candidate));
+        setItems((current) => {
+          const previous = current.find((candidate) => candidate.id === item.id);
+          if (!previous || previous.analysis?.state === analysis?.state
+            && previous.analysis?.attempts === analysis?.attempts
+            && previous.analysis?.availableAtUtc === analysis?.availableAtUtc
+            && previous.analysis?.lastError === analysis?.lastError
+            && !previous.analysisError) return current;
+          return current.map((candidate) => candidate.id === item.id
+            ? { ...candidate, analysis, analysisError: undefined } : candidate);
+        });
       }
     } catch (cause) {
       if (mounted.current) {
-        setItems((current) => current.map((candidate) => candidate.id === item.id
-          ? { ...candidate, analysisError: errorMessage(cause) } : candidate));
+        setItems((current) => {
+          const error = errorMessage(cause);
+          if (current.find((candidate) => candidate.id === item.id)?.analysisError === error) return current;
+          return current.map((candidate) => candidate.id === item.id
+            ? { ...candidate, analysisError: error } : candidate);
+        });
       }
     } finally {
       analysisInFlight.current.delete(item.cardId);
@@ -336,7 +360,7 @@ export function BulkImportPage() {
     preparingFilesRef.current = true;
     setIsPreparingFiles(true);
     const generation = fileSelectionGeneration.current;
-    const fingerprints = await Promise.all(incoming.map(tryFingerprint));
+    const fingerprints = await fingerprintFiles(incoming);
     if (!mounted.current || generation !== fileSelectionGeneration.current) return;
     preparingFilesRef.current = false;
     setIsPreparingFiles(false);
@@ -844,6 +868,8 @@ export function BulkImportPage() {
   }
 
   const completedFiles = items.filter((item) => item.cardId).length;
+  const analyzedFiles = items.filter((item) => item.cardId && item.analysis?.state === 'done').length;
+  const analysisFailures = items.filter((item) => item.cardId && item.analysis?.state === 'failed').length;
   const failedFiles = items.filter((item) => !item.cardId && item.status === 'error').length;
   const reviewFiles = items.filter((item) => item.status === 'needs-review').length;
   const pendingFiles = items.length - completedFiles - failedFiles - reviewFiles;
@@ -896,7 +922,11 @@ export function BulkImportPage() {
         {isRunning && <Button type="button" variant="outline" disabled={pauseRequested} onClick={requestPause}>
           <Pause className="size-4" />{pauseRequested ? 'Pausing...' : 'Pause'}
         </Button>}
-        <span className="text-muted-foreground text-sm" aria-label={`${items.length} total, ${completedFiles} uploaded, ${failedFiles} errors, ${reviewFiles} need review, ${pendingFiles} pending`}>{completedFiles}/{items.length} uploaded{failedFiles > 0 && ` · ${failedFiles} errors`}{reviewFiles > 0 && ` · ${reviewFiles} review`}</span>
+        <span className="text-muted-foreground text-sm" aria-label={`${items.length} total, ${completedFiles} uploaded, ${analyzedFiles} analyzed, ${failedFiles} upload errors, ${analysisFailures} analysis errors, ${reviewFiles} need review, ${pendingFiles} pending`}>
+          {completedFiles}/{items.length} uploaded{completedFiles > 0 && ` · ${analyzedFiles}/${completedFiles} analyzed`}
+          {failedFiles > 0 && ` · ${failedFiles} upload errors`}{analysisFailures > 0 && ` · ${analysisFailures} analysis errors`}
+          {reviewFiles > 0 && ` · ${reviewFiles} review`}
+        </span>
       </div>
       {isRunning && <p role="status" className="text-muted-foreground text-sm">Current: {currentStep ?? 'Preparing next step'}{pauseRequested ? ' · pause requested' : ''}</p>}
       {notice && <p role="status" className="text-sm">{notice}</p>}
@@ -947,12 +977,12 @@ export function BulkImportPage() {
           const groupItems = items.filter((candidate) => candidate.groupId === item.groupId);
           const position = groupItems.findIndex((candidate) => candidate.id === item.id);
           const locked = !!group?.cardId && !!item.cardId;
-          return <article key={item.id} className="flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center">
+          return <article key={item.id} className="flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center [content-visibility:auto] [contain-intrinsic-size:auto_120px]">
             <div className="bg-muted flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg">
               {!item.previewUrl ? <span className="text-muted-foreground text-xs">No file</span>
                 : item.descriptor.type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(item.descriptor.name)
-                  ? <video className="size-full object-cover" src={item.previewUrl} muted playsInline preload="metadata" />
-                  : <img className="size-full object-cover" src={item.previewUrl} alt="" />}
+                  ? <video className="size-full object-cover" src={item.previewUrl} muted playsInline preload="none" />
+                  : <img className="size-full object-cover" src={item.previewUrl} alt="" loading="lazy" decoding="async" />}
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium" title={item.descriptor.name}>{item.descriptor.name}</p>
