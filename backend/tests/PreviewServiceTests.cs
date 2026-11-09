@@ -28,6 +28,61 @@ public sealed class PreviewServiceTests
     }
 
     [Fact]
+    public async Task OpenReadRejectsSiblingDirectoryWithStorageRootPrefix()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "nodeck-preview-tests", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(parent, "data");
+        var sibling = Path.Combine(parent, "data-evil");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(sibling);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "allowed.txt"), "inside root");
+            await File.WriteAllTextAsync(Path.Combine(sibling, "secret.txt"), "outside root");
+            var service = CreateService(root);
+
+            using (var stream = Assert.IsType<FileStream>(service.OpenRead("allowed.txt")))
+            using (var reader = new StreamReader(stream))
+            {
+                Assert.Equal("inside root", await reader.ReadToEndAsync());
+            }
+
+            Assert.Throws<InvalidOperationException>(() => service.OpenRead("../data-evil/secret.txt"));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CanReadStoredFileAcceptsOnlyExistingFilesWithinStorageRoot()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "nodeck-preview-tests", Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(parent, "data");
+        var sibling = Path.Combine(parent, "data-evil");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(sibling);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(root, "allowed.txt"), "inside root");
+            await File.WriteAllTextAsync(Path.Combine(sibling, "secret.txt"), "outside root");
+            var service = CreateService(root);
+
+            Assert.True(service.CanReadStoredFile("allowed.txt"));
+            Assert.False(service.CanReadStoredFile("missing.txt"));
+            Assert.False(service.CanReadStoredFile(null));
+            Assert.False(service.CanReadStoredFile("../data-evil/secret.txt"));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public void CardFileAssetsPreservesGifFrameCount()
     {
         var assets = new CardFileAssets(

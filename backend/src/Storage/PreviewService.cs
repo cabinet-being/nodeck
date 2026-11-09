@@ -188,6 +188,22 @@ public sealed class PreviewService
         return File.Exists(fullPath) ? File.OpenRead(fullPath) : null;
     }
 
+    public bool CanReadStoredFile(string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) return false;
+
+        try
+        {
+            using var stream = OpenRead(relativePath);
+            return stream is not null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
     public string GetContentType(string relativePath)
     {
         return Path.GetExtension(relativePath).ToLowerInvariant() switch
@@ -864,8 +880,11 @@ public sealed class PreviewService
         var normalizedPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
         var fullPath = Path.GetFullPath(Path.Combine(_appDataRoot, normalizedPath));
         var rootPath = Path.GetFullPath(_appDataRoot);
+        var pathFromRoot = Path.GetRelativePath(rootPath, fullPath);
 
-        if (!fullPath.StartsWith(rootPath, StringComparison.Ordinal))
+        if (Path.IsPathRooted(pathFromRoot) ||
+            pathFromRoot == ".." ||
+            pathFromRoot.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Storage path escapes the application data directory.");
         }
