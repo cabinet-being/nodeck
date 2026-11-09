@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check, Plus, Save, X } from 'lucide-react';
+import { Check, ChevronDown, Plus, Save, X } from 'lucide-react';
 
 import {
   createSource, createTag, decideTagSuggestion, deleteCardSource, deleteCardTag,
@@ -27,6 +27,14 @@ export function CardCatalogPanel({ cardId, metadata }: {
   const [sourceDrafts, setSourceDrafts] = React.useState<Record<number, string>>({});
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = React.useState(false);
+  const [showAllSuggestions, setShowAllSuggestions] = React.useState(false);
+  const suggestionsId = React.useId();
+
+  React.useEffect(() => {
+    setSuggestionsOpen(false);
+    setShowAllSuggestions(false);
+  }, [cardId]);
 
   React.useEffect(() => {
     let active = true;
@@ -98,9 +106,18 @@ export function CardCatalogPanel({ cardId, metadata }: {
       </div>
 
       {suggestions.length > 0 ? <div className="grid gap-2" aria-label="Suggested tags">
-        <h3 className="text-muted-foreground text-xs font-medium">Suggested</h3>
-        <div className="flex flex-wrap gap-2">
-          {suggestions.map((suggestion) => <span key={suggestion.tagId}
+        <h3>
+          <Button type="button" variant="ghost" size="sm" className="w-full justify-between px-2"
+            aria-expanded={suggestionsOpen} aria-controls={suggestionsId}
+            onClick={() => setSuggestionsOpen((open) => !open)}>
+            <span>Suggested tags <span className="text-muted-foreground">({suggestions.length} to review)</span></span>
+            <ChevronDown className={`size-4 transition-transform ${suggestionsOpen ? 'rotate-180' : ''}`} />
+          </Button>
+        </h3>
+        <div id={suggestionsId} className={suggestionsOpen ? 'grid gap-2' : ''}>
+          {suggestionsOpen ? <>
+            <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto">
+            {(showAllSuggestions ? suggestions : suggestions.slice(0, 8)).map((suggestion) => <span key={suggestion.tagId}
             className="inline-flex items-center gap-1 rounded-full border px-1.5 py-1"
             title={suggestion.modelKey ? `Suggested by ${suggestion.modelKey}` : undefined}>
             <TagChip name={suggestion.name} category={suggestion.category} origin={suggestion.origin} />
@@ -115,7 +132,13 @@ export function CardCatalogPanel({ cardId, metadata }: {
               onClick={() => run(() => decideTagSuggestion(cardId, suggestion.tagId, 'rejected'))}>
               <X className="size-3" />
             </Button>
-          </span>)}
+            </span>)}
+            </div>
+            {!showAllSuggestions && suggestions.length > 8 ? <Button type="button" variant="ghost" size="sm"
+              className="justify-self-start" onClick={() => setShowAllSuggestions(true)}>
+              Show all {suggestions.length} suggestions
+            </Button> : null}
+          </> : null}
         </div>
       </div> : null}
 
