@@ -62,6 +62,40 @@ public sealed class SchemaMigrationTests
     }
 
     [DatabaseFact]
+    public async Task FreshSchemaWithDirectoryPlaceholdersDoesNotRequireBackup()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+        await schema.ApplySqlAsync("001_cards.sql", "002_catalog.sql");
+        var appDataRoot = schema.Configuration["NODECK_APP_DATA"]!;
+        foreach (var directory in new[] { "cache", "cards", "config", "uploads", "user-data" })
+        {
+            var path = Path.Combine(appDataRoot, directory);
+            Directory.CreateDirectory(path);
+            await File.WriteAllTextAsync(Path.Combine(path, ".gitkeep"), "");
+        }
+
+        await CreateRunner(schema.Configuration).InitializeAsync();
+
+        await using var connection = await schema.OpenAsync();
+        Assert.Equal(10, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+    }
+
+    [DatabaseFact]
+    public async Task UnversionedSchemaWithActualAppFileStillRequiresBackup()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+        await schema.ApplySqlAsync("001_cards.sql", "002_catalog.sql");
+        var appDataRoot = schema.Configuration["NODECK_APP_DATA"]!;
+        await File.WriteAllTextAsync(Path.Combine(appDataRoot, "existing-upload.png"), "content");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateRunner(schema.Configuration).InitializeAsync());
+
+        Assert.Contains("backup", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await schema.TableExistsAsync("schema_migrations"));
+    }
+
+    [DatabaseFact]
     public async Task MatchingBackupAllowsLegacyMigrationWithoutLosingCardsOrRelations()
     {
         await using var schema = await IsolatedSchema.CreateAsync();

@@ -207,9 +207,18 @@ public sealed class SchemaMigrationRunner
     {
         async Task<long> Count(string table) => await TableExistsAsync(connection, table)
             ? await connection.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM `{table}`;") : 0;
-        var appFiles = Directory.Exists(_appDataRoot)
-            ? Directory.EnumerateFiles(_appDataRoot, "*", SearchOption.AllDirectories)
-                .LongCount(path => (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0) : 0;
+        long appFiles = 0;
+        long userAppFiles = 0;
+        if (Directory.Exists(_appDataRoot))
+        {
+            foreach (var path in Directory.EnumerateFiles(_appDataRoot, "*", SearchOption.AllDirectories))
+            {
+                if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) continue;
+                appFiles++;
+                if (!string.Equals(Path.GetFileName(path), ".gitkeep", StringComparison.Ordinal))
+                    userAppFiles++;
+            }
+        }
         var userDecks = await TableExistsAsync(connection, "decks")
             ? await connection.ExecuteScalarAsync<long>(
                 "SELECT COUNT(*) FROM decks WHERE system_key IS NULL OR system_key <> 'favorites';") : 0;
@@ -230,6 +239,7 @@ public sealed class SchemaMigrationRunner
             await Count("card_daily_votes"),
             await Count("card_creation_requests"),
             appFiles,
+            userAppFiles,
             userDecks);
     }
 
@@ -368,12 +378,12 @@ public sealed class SchemaMigrationRunner
         long Tags, long Sources, long TagAliases, long CardTags, long CardSources,
         long CardTagSuggestions, long CardImageAnalysisJobs, long CardSpeechAnalysisJobs,
         long CardViewEvents, long CardDailyVotes, long CardCreationRequests,
-        long AppFiles, long UserDecks)
+        long AppFiles, long UserAppFiles, long UserDecks)
     {
         public bool HasUserData => Cards > 0 || CardRelations > 0 || DeckCards > 0 ||
             UserDecks > 0 || Tags > 0 || Sources > 0 || TagAliases > 0 ||
             CardTags > 0 || CardSources > 0 || CardTagSuggestions > 0 ||
             CardImageAnalysisJobs > 0 || CardSpeechAnalysisJobs > 0 ||
-            CardViewEvents > 0 || CardDailyVotes > 0 || CardCreationRequests > 0 || AppFiles > 0;
+            CardViewEvents > 0 || CardDailyVotes > 0 || CardCreationRequests > 0 || UserAppFiles > 0;
     }
 }
