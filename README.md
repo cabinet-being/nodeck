@@ -130,9 +130,9 @@ In collections mode, up to three strongest child signal weights contribute to a 
 
 Both recommendation endpoints check stored files before returning a card. Media needs a readable original and, when its metadata declares a playback file path, a readable playback copy; a JSON `null` playback path needs no copy. A comic or set needs a readable cover preview and at least one readable child media file. Missing, unreadable, and paths that resolve lexically outside the storage root fail the check. The daily endpoint scans its deterministic order in pages of 100, up to 5,000 candidates per mode, filling result slots with readable cards; it considers today's uploads only if no older readable card is found. Child checks scan at most 10,000 rows per batch of 100 collections. These caps can leave a result short of its requested limit even when readable cards exist beyond them. If a preview URL fails in the browser, its tile shows the card type instead.
 
-## Danbooru tag vocabulary
+## Danbooru tag vocabulary (optional full import)
 
-After the database upgrade, import the reusable Danbooru tags and aliases with a contactable User-Agent. Keep MySQL running; the import command starts a one-off backend container and does not start the API server:
+The WD label seed in the next section is enough to start image tagging. To add the complete Danbooru tag and alias vocabulary later, use a contactable User-Agent. Keep MySQL running; the import command starts a one-off backend container and does not start the API server:
 
 ```bash
 docker compose up -d mysql
@@ -145,16 +145,18 @@ Tag proposals have their own database records until accepted. On a card page, pe
 
 ## Local image tagging
 
-Install the pinned [WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) ONNX model and labels into the backend data volume. The script checks both SHA-256 hashes. The model is about 362 MB; it runs locally on CPU. Import Danbooru tags first, since proposals reference entries in that catalog.
+Install the pinned [WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) ONNX model and labels into the backend data volume, then seed its general and character Danbooru tags from `selected_tags.csv`. The script checks both SHA-256 hashes. The model is about 362 MB; it runs locally on CPU. After the normal `docker compose up --build` setup, run:
 
 ```bash
 scripts/install-wd-tagger.sh
-docker compose run --rm backend analyze-card 123
+docker compose run --rm backend seed-wd-tags
 ```
 
-Once the model is installed and the Danbooru tag import is complete, the backend automatically analyzes newly uploaded or replaced JPEG, PNG, WebP, GIF, MP4, MOV, and WebM media cards, including pages added to a comic or set. Static images use their preview; GIF and video use up to 30 baseline frames sampled across ten parts of the original file, plus up to ten frames probed between visibly different parts. The optional scene probes have a 15-second budget and are kept only when distinct from both neighboring baseline frames. Repeated frames reuse one inference, and tags are combined by peak confidence and appearances in different parts. MySQL stores each job so a restart does not discard it. The worker runs one analysis at a time, retries failures up to five times, and discards results when the media was replaced during analysis. Pending proposals can then be reviewed on the card page. `GET /api/cards/{id}/analysis` shows a job's state, attempt count, next attempt time, and last error; a card without an analysis job returns 404.
+The seed is safe to rerun: it preserves existing tags, reports name or ID conflicts, and records readiness separately from the complete Danbooru import. The running backend then processes queued image jobs automatically; a full Danbooru import can follow later. The model and labels persist in `volumes/app_data/`, and the seeded catalog persists in MySQL under `volumes/mysql_data/`. Keep these data directories out of Git; the seed needs no Danbooru User-Agent. Speech recognition has its own setup below, unchanged by this step.
 
-Replace `123` in the command above with the ID of an older media card to analyze it manually. Existing cards are not queued automatically by the schema upgrade, avoiding a sudden full-library CPU load. The model submits up to 40 general or character tag proposals matched by Danbooru ID. Custom tag similarity and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/` and must stay out of Git. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
+Once the model is installed and either the WD seed or the full Danbooru tag import is complete, the backend automatically analyzes newly uploaded or replaced JPEG, PNG, WebP, GIF, MP4, MOV, and WebM media cards, including pages added to a comic or set. Static images use their preview; GIF and video use up to 30 baseline frames sampled across ten parts of the original file, plus up to ten frames probed between visibly different parts. The optional scene probes have a 15-second budget and are kept only when distinct from both neighboring baseline frames. Repeated frames reuse one inference, and tags are combined by peak confidence and appearances in different parts. MySQL stores each job so a restart does not discard it. The worker runs one analysis at a time, retries failures up to five times, and discards results when the media was replaced during analysis. Pending proposals can then be reviewed on the card page. `GET /api/cards/{id}/analysis` shows a job's state, attempt count, next attempt time, and last error; a card without an analysis job returns 404.
+
+To analyze an older media card, run `docker compose run --rm backend analyze-card 123`, replacing `123` with its ID. Existing cards are not queued automatically by the schema upgrade, avoiding a sudden full-library CPU load. The model submits up to 40 general or character tag proposals matched by Danbooru ID. Custom tag similarity and calibration on anime and realistic samples remain separate work. The model and labels are stored under `volumes/app_data/models/wd-vit-tagger-v3/`. Set `NODECK_TAGGER_MODEL_DIR` to use another model directory.
 
 ## Local speech recognition
 
