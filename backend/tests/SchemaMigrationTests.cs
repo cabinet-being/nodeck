@@ -597,6 +597,35 @@ public sealed class SchemaMigrationTests
     }
 
     [DatabaseFact]
+    public async Task BackupVerificationExcludesModelsAndAcceptsLegacyManifestsThatCountedThem()
+    {
+        foreach (var (appFileCount, accepted) in new[] { (1L, true), (2L, true), (3L, false) })
+        {
+            await using var schema = await IsolatedSchema.CreateAsync();
+            var cardId = await SeedVersionElevenAsync(schema);
+            Assert.True(cardId > 0);
+            // One real app file plus one downloaded model file that backups exclude.
+            Directory.CreateDirectory(Path.Combine(schema.AppDataPath, "cards"));
+            await File.WriteAllTextAsync(Path.Combine(schema.AppDataPath, "cards", "a.bin"), "x");
+            Directory.CreateDirectory(Path.Combine(schema.AppDataPath, "models", "wd"));
+            await File.WriteAllTextAsync(Path.Combine(schema.AppDataPath, "models", "wd", "model.onnx"), "m");
+            var manifest = await schema.WriteMatchingBackupManifestAsync(startingVersion: 11, appFileCount: appFileCount);
+
+            var runner = CreateRunner(schema.ConfigurationWithManifest(manifest));
+            if (accepted)
+            {
+                await runner.InitializeAsync();
+                await using var connection = await schema.OpenAsync();
+                Assert.Equal(12, await connection.ExecuteScalarAsync<int>("SELECT MAX(version) FROM schema_migrations;"));
+            }
+            else
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => runner.InitializeAsync());
+            }
+        }
+    }
+
+    [DatabaseFact]
     public async Task VersionTwelveUpgradeAddsContentHashColumnAndIndexAndPreservesCounts()
     {
         await using var schema = await IsolatedSchema.CreateAsync();
@@ -936,6 +965,8 @@ public sealed class SchemaMigrationTests
 
         public IConfiguration Configuration { get; }
 
+        public string AppDataPath => Path.Combine(_temporaryRoot, "app_data");
+
         public IConfiguration ConfigurationWithManifest(string path) => new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -999,7 +1030,7 @@ public sealed class SchemaMigrationTests
                 """, new { Table = table }) != 0;
         }
 
-        public async Task<string> WriteMatchingBackupManifestAsync(int startingVersion = 0)
+        public async Task<string> WriteMatchingBackupManifestAsync(int startingVersion = 0, long appFileCount = 0)
         {
             var backupRoot = Path.Combine(_temporaryRoot, "backup");
             Directory.CreateDirectory(backupRoot);
@@ -1032,7 +1063,7 @@ public sealed class SchemaMigrationTests
                 $"startingVersion={startingVersion}",
                 $"database_sha256={await Sha256Async(databasePath)}",
                 $"app_data_sha256={await Sha256Async(dataPath)}",
-                "app_file_count=0",
+                $"app_file_count={appFileCount}",
                 $"count.cards={cards}",
                 $"count.card_relations={relations}",
                 $"count.decks={decks}",

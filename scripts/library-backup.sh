@@ -20,6 +20,8 @@ The destination receives a new nodeck-UTC_TIMESTAMP directory with a manifest.
 Restore requires the backend to be stopped. It verifies both SHA-256 hashes,
 replaces the configured MySQL database, and moves the current app_data directory
 aside as app_data.before-restore-UTC_TIMESTAMP before installing saved files.
+Downloaded models (app_data/models) are not backed up; restore keeps the
+currently installed ones (reinstall with scripts/install-models.sh if missing).
 Inspect the manifest and keep a fresh backup before restoring.
 EOF
 }
@@ -159,13 +161,14 @@ backup() {
     docker compose exec -T mysql sh -c \
         'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -u root --single-transaction --quick --routines --triggers --events --hex-blob --set-gtid-purged=OFF --no-tablespaces "$MYSQL_DATABASE"' \
         > "$temp/database.sql"
-    tar -C volumes -cf "$temp/app_data.tar" app_data
+    # Downloaded models (app_data/models, re-installable with scripts/install-models.sh) are not backed up.
+    tar -C volumes --exclude=app_data/models -cf "$temp/app_data.tar" app_data
 
     {
         printf 'format=1\ncreated_utc=%s\ndatabase=%s\nstartingVersion=%s\n' "$stamp" "$db" "$version"
         printf 'database_sha256=%s\n' "$(sha256sum "$temp/database.sql" | awk '{print $1}')"
         printf 'app_data_sha256=%s\n' "$(sha256sum "$temp/app_data.tar" | awk '{print $1}')"
-        printf 'app_file_count=%s\n' "$(find volumes/app_data -type f -printf '.' | wc -c | awk '{print $1}')"
+        printf 'app_file_count=%s\n' "$(find volumes/app_data -path volumes/app_data/models -prune -o -type f -printf '.' | wc -c | awk '{print $1}')"
     } > "$temp/manifest.txt"
     write_counts "$temp/manifest.txt"
     mv -- "$temp" "$final"
@@ -181,7 +184,7 @@ restore() {
     mysql_running || die 'The mysql service must be running.'
     backend_running && die 'Stop the backend before restoring.'
 
-    local saved="$1" manifest db active_db expected actual stamp staged previous file_count
+    local saved="$1" manifest db active_db expected actual stamp staged previous file_count all_count
     saved="$(cd "$saved" && pwd -P)" || die 'Backup directory does not exist.'
     manifest="$saved/manifest.txt"
     [[ -f "$manifest" && -f "$saved/database.sql" && -f "$saved/app_data.tar" ]] || die 'Backup is incomplete.'
@@ -209,8 +212,10 @@ restore() {
     trap cleanup_restore_failure EXIT
     tar -C "$staged" -xf "$saved/app_data.tar"
     [[ -d "$staged/app_data" ]] || die 'Archive does not contain app_data.'
-    file_count="$(find "$staged/app_data" -type f -printf '.' | wc -c | awk '{print $1}')"
-    [[ "$file_count" == "$expected" ]] || die 'Archive file count differs from manifest.'
+    # New backups exclude models/; older ones counted them, so accept either count.
+    file_count="$(find "$staged/app_data" -path "$staged/app_data/models" -prune -o -type f -printf '.' | wc -c | awk '{print $1}')"
+    all_count="$(find "$staged/app_data" -type f -printf '.' | wc -c | awk '{print $1}')"
+    [[ "$file_count" == "$expected" || "$all_count" == "$expected" ]] || die 'Archive file count differs from manifest.'
     previous="$project_root/volumes/app_data.before-restore-$stamp"
     [[ ! -e "$previous" ]] || die "Previous directory already exists: $previous"
 
@@ -223,6 +228,11 @@ restore() {
     restore_previous="$previous"
     mv -- volumes/app_data "$previous"
     mv -- "$staged/app_data" volumes/app_data
+    if [[ -d "$previous/models" ]]; then
+        # Keep the currently installed models instead of any models in an older backup.
+        rm -rf -- volumes/app_data/models
+        mv -- "$previous/models" volumes/app_data/models
+    fi
     rmdir -- "$staged"
     restore_stage=''
     restore_previous=''

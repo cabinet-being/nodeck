@@ -29,6 +29,17 @@ public sealed class ImageAnalysisWorker : BackgroundService
         {
             try
             {
+                if (ModelFilesExist() && !await _queue.IsVocabularyReadyAsync(stoppingToken))
+                {
+                    // Runs in this background loop, so requests are never blocked; idempotent.
+                    var seeded = await WdVocabularyAutoSeed.SeedIfNeededAsync(
+                        _configuration.GetConnectionString("Default")
+                            ?? throw new InvalidOperationException("Missing database connection string."),
+                        _queue, Path.Combine(ModelDirectory(), "selected_tags.csv"), stoppingToken);
+                    if (seeded is not null)
+                        _logger.LogInformation("Seeded WD vocabulary: {Eligible} eligible, {Inserted} inserted, {Existing} existing, {Conflicts} conflicts.",
+                            seeded.Eligible, seeded.Inserted, seeded.Existing, seeded.Conflicts);
+                }
                 if (!ModelFilesExist() || !await _queue.IsVocabularyReadyAsync(stoppingToken))
                 {
                     await Task.Delay(PollInterval, stoppingToken);
@@ -96,14 +107,19 @@ public sealed class ImageAnalysisWorker : BackgroundService
         }
     }
 
-    private bool ModelFilesExist()
+    private string ModelDirectory()
     {
         var dataRoot = _configuration["NODECK_APP_DATA"]
             ?? Environment.GetEnvironmentVariable("NODECK_APP_DATA")
             ?? Path.Combine(AppContext.BaseDirectory, "data");
-        var modelDirectory = _configuration["NODECK_TAGGER_MODEL_DIR"]
+        return _configuration["NODECK_TAGGER_MODEL_DIR"]
             ?? Environment.GetEnvironmentVariable("NODECK_TAGGER_MODEL_DIR")
             ?? Path.Combine(dataRoot, "models", "wd-vit-tagger-v3");
+    }
+
+    private bool ModelFilesExist()
+    {
+        var modelDirectory = ModelDirectory();
         return File.Exists(Path.Combine(modelDirectory, "model.onnx")) &&
             File.Exists(Path.Combine(modelDirectory, "selected_tags.csv"));
     }

@@ -221,11 +221,19 @@ public sealed class SchemaMigrationRunner
             ? await connection.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM `{table}`;") : 0;
         long appFiles = 0;
         long userAppFiles = 0;
+        long modelFiles = 0;
         if (Directory.Exists(_appDataRoot))
         {
+            var modelsRoot = Path.Combine(Path.GetFullPath(_appDataRoot), "models") + Path.DirectorySeparatorChar;
             foreach (var path in Directory.EnumerateFiles(_appDataRoot, "*", SearchOption.AllDirectories))
             {
                 if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) continue;
+                // Downloaded models are re-installable and excluded from backups (top-level models/ only).
+                if (Path.GetFullPath(path).StartsWith(modelsRoot, StringComparison.Ordinal))
+                {
+                    modelFiles++;
+                    continue;
+                }
                 appFiles++;
                 if (!string.Equals(Path.GetFileName(path), ".gitkeep", StringComparison.Ordinal))
                     userAppFiles++;
@@ -253,7 +261,8 @@ public sealed class SchemaMigrationRunner
             await Count("card_tag_decisions"),
             appFiles,
             userAppFiles,
-            userDecks);
+            userDecks,
+            modelFiles);
     }
 
     private void VerifyBackup(string database, int currentVersion, DatabaseSnapshot snapshot)
@@ -297,7 +306,9 @@ public sealed class SchemaMigrationRunner
             Number("count.card_daily_votes") != snapshot.CardDailyVotes ||
             CreationRequestsCount() != snapshot.CardCreationRequests ||
             TagDecisionsCount() != snapshot.CardTagDecisions ||
-            Number("app_file_count") != snapshot.AppFiles)
+            // Current backups exclude models/; manifests from the older script counted them too.
+            (Number("app_file_count") != snapshot.AppFiles &&
+                Number("app_file_count") != snapshot.AppFiles + snapshot.ModelFiles))
             throw new InvalidOperationException("Backup manifest does not match the current database and files. Create a new backup.");
 
         var directory = Path.GetDirectoryName(Path.GetFullPath(_backupManifest))!;
@@ -395,7 +406,7 @@ public sealed class SchemaMigrationRunner
         long Tags, long Sources, long TagAliases, long CardTags, long CardSources,
         long CardTagSuggestions, long CardImageAnalysisJobs, long CardSpeechAnalysisJobs,
         long CardViewEvents, long CardDailyVotes, long CardCreationRequests, long CardTagDecisions,
-        long AppFiles, long UserAppFiles, long UserDecks)
+        long AppFiles, long UserAppFiles, long UserDecks, long ModelFiles = 0)
     {
         public bool HasUserData => Cards > 0 || CardRelations > 0 || DeckCards > 0 ||
             UserDecks > 0 || Tags > 0 || Sources > 0 || TagAliases > 0 ||

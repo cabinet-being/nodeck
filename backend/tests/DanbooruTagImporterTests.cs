@@ -52,6 +52,31 @@ public sealed class DanbooruTagImporterTests
     }
 
     [DatabaseFact]
+    public async Task WdAutoSeedRunsOnlyWhenLabelsExistAndVocabularyIsNotReady()
+    {
+        await using var database = await ImportDatabase.CreateAsync();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Default"] = database.ConnectionString
+        }).Build();
+        var queue = new AnalysisQueueRepository(config);
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path, "tag_id,name,category,count\n10,general_tag,0,100\n");
+            var missing = path + ".missing";
+            Assert.Null(await WdVocabularyAutoSeed.SeedIfNeededAsync(database.ConnectionString, queue, missing, default));
+            Assert.False(await queue.IsVocabularyReadyAsync(default));
+
+            var first = await WdVocabularyAutoSeed.SeedIfNeededAsync(database.ConnectionString, queue, path, default);
+            Assert.Equal(new WdVocabularySeedResult(1, 1, 0, 0), first);
+            Assert.True(await queue.IsVocabularyReadyAsync(default));
+            Assert.Null(await WdVocabularyAutoSeed.SeedIfNeededAsync(database.ConnectionString, queue, path, default));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [DatabaseFact]
     public async Task WdSeedSkipsOccupiedNamesAndPreservesExistingRows()
     {
         await using var database = await ImportDatabase.CreateAsync();
