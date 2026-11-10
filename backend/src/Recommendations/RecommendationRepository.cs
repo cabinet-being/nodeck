@@ -315,10 +315,22 @@ public sealed class RecommendationRepository
             cancellationToken: cancellationToken));
         var tagsByCard = candidateTags.GroupBy(row => Resolve(row.CardId))
             .ToDictionary(group => group.Key, group => group.Select(row => row.TagId).Distinct().ToArray());
+        // Leave-one-out: what a card (or its children) itself put into the tag profile.
+        // Without this, liked cards always max out affinity with the profile they created
+        // and "For you" just repeats them instead of finding similar cards.
+        var ownProfileShare = new Dictionary<(long CardId, long TagId), double>();
+        foreach (var row in candidateTags.DistinctBy(row => (row.CardId, row.TagId)))
+            if (cardWeights.TryGetValue(row.CardId, out var ownWeight))
+            {
+                var key = (Resolve(row.CardId), row.TagId);
+                ownProfileShare[key] = ownProfileShare.GetValueOrDefault(key) + ownWeight;
+            }
 
         // Specificity: rare tags and informative categories count more. One GROUP BY
         // over card_tags (idx_card_tags_tag) covers every tag that can contribute.
-        var involvedTags = scoringTagWeights.Keys.Concat(contextTags).Distinct().ToArray();
+        // Every candidate tag needs a specificity: affinity is a mean over all of a card's tags.
+        var involvedTags = scoringTagWeights.Keys.Concat(contextTags)
+            .Concat(tagsByCard.Values.SelectMany(tags => tags)).Distinct().ToArray();
         var specificity = new Dictionary<long, double>();
         if (involvedTags.Length > 0)
         {
@@ -349,14 +361,31 @@ public sealed class RecommendationRepository
         }
         double Spec(long tagId) => specificity.GetValueOrDefault(tagId);
 
-        // Affinity from the tag profile and, with a context card, overlap with its tags.
+        // Affinity: specificity-weighted mean of the card's tags' profile weights, each
+        // normalised by the strongest profile tag, so it lies in [-1, 1]. A raw sum saturated
+        // for almost every card of a familiar genre and stopped telling cards apart.
+        // Leave-one-out: a card's own share of the profile is removed first.
+        var profileMax = scoringTagWeights.Values.Select(Math.Abs).DefaultIfEmpty(0).Max();
         var contextSpecTotal = contextTags.Sum(Spec);
         foreach (var (cardId, tags) in tagsByCard)
         {
             if (!scores.ContainsKey(cardId)) continue;
-            scores[cardId] += o.WAffinity * Math.Clamp(
-                tags.Sum(tagId => scoringTagWeights.GetValueOrDefault(tagId) * Spec(tagId)),
-                -o.TagProfileClamp, o.TagProfileClamp);
+            if (profileMax > 0)
+            {
+                double weighted = 0, specTotal = 0;
+                foreach (var tagId in tags)
+                {
+                    var spec = Spec(tagId);
+                    specTotal += spec;
+                    if (scoringTagWeights.TryGetValue(tagId, out var profileWeight))
+                        weighted += spec * Math.Clamp(
+                            (profileWeight - ownProfileShare.GetValueOrDefault((cardId, tagId))) / profileMax, -1, 1);
+                }
+                // The prior shrinks sparsely tagged cards toward zero: one shared generic tag
+                // must not look like a perfect match.
+                if (specTotal > 0)
+                    scores[cardId] += o.WAffinity * o.AffinityScale * weighted / (specTotal + o.AffinitySpecPrior);
+            }
             if (contextSpecTotal > 0)
                 scores[cardId] += o.WContext * o.ContextScale *
                     tags.Where(contextTags.Contains).Sum(Spec) / contextSpecTotal;
@@ -411,22 +440,12 @@ public sealed class RecommendationRepository
                 scores[cardId] += o.WSelfVote * weight;
         }
 
-        // Recently viewed cards are demoted unless the latest vote is positive.
-        var latestPositiveIds = (await connection.QueryAsync<long>(new CommandDefinition("""
-            SELECT v.card_id FROM card_daily_votes v
-            WHERE v.card_id IN @Ids AND v.vote = 1
-              AND NOT EXISTS (
-                  SELECT 1 FROM card_daily_votes newer
-                  WHERE newer.card_id = v.card_id
-                    AND (newer.updated_at_utc > v.updated_at_utc
-                         OR (newer.updated_at_utc = v.updated_at_utc
-                             AND newer.vote_date > v.vote_date))
-              );
-            """, new { Ids = scores.Keys.ToArray() }, cancellationToken: cancellationToken))).ToHashSet();
+        // Recently viewed cards are demoted for SeenWindowDays, liked ones included: a like
+        // already feeds the profile and the card's own vote score, and exempting it made
+        // "For you" repeat yesterday's likes. They come back once the window passes.
         foreach (var group in recentViewWeights.Where(pair => candidateIds.Contains(pair.Key))
                      .GroupBy(pair => Resolve(pair.Key)))
         {
-            if (latestPositiveIds.Contains(group.Key)) continue;
             scores[group.Key] -= o.WSeen * Math.Min(o.SeenCap, group.Sum(pair => pair.Value));
         }
 

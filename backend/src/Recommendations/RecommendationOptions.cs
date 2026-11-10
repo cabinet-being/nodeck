@@ -34,6 +34,10 @@ public sealed class RecommendationOptions
     public double TagProfileClamp { get; set; } = 12.0;
     public double ContextTagWeight { get; set; } = 4.0;
     public double ContextScale { get; set; } = 8.0;
+    /// <summary>Score range of the normalised profile affinity, which lies in [-1, 1] before scaling.</summary>
+    public double AffinityScale { get; set; } = 8.0;
+    /// <summary>Specificity mass added to the affinity denominator; shrinks sparsely tagged cards.</summary>
+    public double AffinitySpecPrior { get; set; } = 2.0;
     public double SuggestCap { get; set; } = 3.0;
     public double SeenCap { get; set; } = 3.0;
     public double FreshnessMax { get; set; } = 2.0;

@@ -133,27 +133,35 @@ public sealed class RecommendationTests
     [DatabaseFact]
     public async Task PositiveVotesOnSeparateDaysStrengthenUnseenTaggedCandidate()
     {
+        // The profile is relative: a second daily vote raises its tags against the rest
+        // of the profile, so the candidate sharing them overtakes an otherwise equal one.
         var now = DateTime.UtcNow;
         var clock = new MutableTimeProvider(new DateTimeOffset(now));
         await using var scope = await RecommendationScope.CreateAsync(clock);
-        var liked = await scope.AddCardAsync("media", "liked source");
-        var matching = await scope.AddCardAsync("media", "unseen matching");
+        var likedA = await scope.AddCardAsync("media", "liked source A");
+        var likedB = await scope.AddCardAsync("media", "liked source B");
+        var matchA = await scope.AddCardAsync("media", "unseen matching A");
+        var matchB = await scope.AddCardAsync("media", "unseen matching B");
         var unrelated = await scope.AddCardAsync("media", "unseen unrelated");
-        var tag = await scope.AddTagAsync("repeated vote profile");
-        await scope.AssignTagAsync(liked, tag);
-        await scope.AssignTagAsync(matching, tag);
-        await scope.VoteAsync(liked, 1, now.Date.AddDays(-1));
+        await scope.SameAgeAsync(likedA, likedB, matchA, matchB, unrelated);
+        var tagA = await scope.AddTagAsync("repeated vote profile A");
+        var tagB = await scope.AddTagAsync("repeated vote profile B");
+        await scope.AssignTagAsync(likedA, tagA);
+        await scope.AssignTagAsync(matchA, tagA);
+        await scope.AssignTagAsync(likedB, tagB);
+        await scope.AssignTagAsync(matchB, tagB);
+        await scope.VoteAsync(likedA, 1, now.Date.AddDays(-1));
+        await scope.VoteAsync(likedB, 1, now.Date.AddDays(-1));
 
-        var url = $"/api/recommendations?mode=pages&contextCardId={liked}";
+        var url = "/api/recommendations?mode=pages";
         var afterOneVote = await scope.GetItemsAsync(url);
-        await scope.VoteAsync(liked, 1, now.Date);
+        await scope.VoteAsync(likedA, 1, now.Date);
         var afterTwoVotes = await scope.GetItemsAsync(url);
 
-        Assert.DoesNotContain(afterOneVote, item => CardId(item) == liked);
-        Assert.DoesNotContain(afterTwoVotes, item => CardId(item) == liked);
-        Assert.True(ScoreOf(afterOneVote, matching) > ScoreOf(afterOneVote, unrelated));
-        Assert.True(ScoreOf(afterTwoVotes, matching) > ScoreOf(afterOneVote, matching));
-        Assert.Equal(ScoreOf(afterOneVote, unrelated), ScoreOf(afterTwoVotes, unrelated));
+        Assert.True(ScoreOf(afterOneVote, matchA) > ScoreOf(afterOneVote, unrelated));
+        Assert.Equal(ScoreOf(afterOneVote, matchA), ScoreOf(afterOneVote, matchB), 6);
+        Assert.True(ScoreOf(afterTwoVotes, matchA) > ScoreOf(afterTwoVotes, matchB));
+        Assert.Equal(ScoreOf(afterOneVote, unrelated), ScoreOf(afterTwoVotes, unrelated), 6);
     }
 
     [DatabaseFact]
@@ -679,7 +687,7 @@ public sealed class RecommendationTests
     }
 
     [DatabaseFact]
-    public async Task LatestPositiveVoteCardIsNotPenalizedAsSeen()
+    public async Task RecentlyViewedLikedCardIsStillPenalizedAsSeen()
     {
         await using var scope = await RecommendationScope.CreateAsync();
         var likedViewed = await scope.AddCardAsync("media", "liked and viewed");
@@ -691,7 +699,7 @@ public sealed class RecommendationTests
 
         var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
 
-        Assert.Equal(ScoreOf(items, likedOnly), ScoreOf(items, likedViewed), 6);
+        Assert.True(ScoreOf(items, likedViewed) < ScoreOf(items, likedOnly));
     }
 
     [DatabaseFact]
@@ -750,6 +758,92 @@ public sealed class RecommendationTests
 
         Assert.Equal(new[] { first, second }, items.Select(CardId).Order().ToArray());
         Assert.All(items, item => Assert.True(double.IsFinite(item.GetProperty("score").GetDouble())));
+    }
+
+    [DatabaseFact]
+    public async Task LikedCardDoesNotGetAffinityFromTheProfileItBuilt()
+    {
+        await using var scope = await RecommendationScope.CreateAsync(configureOptions: o => o.WSelfVote = 0);
+        var liked = await scope.AddCardAsync("media", "loo liked");
+        var unseen = await scope.AddCardAsync("media", "loo unseen same tag");
+        var untagged = await scope.AddCardAsync("media", "loo untagged");
+        await scope.SameAgeAsync(liked, unseen, untagged);
+        var tag = await scope.AddTagAsync("loo tag");
+        await scope.AssignTagAsync(liked, tag);
+        await scope.AssignTagAsync(unseen, tag);
+        await scope.VoteAsync(liked, 1, DateTime.UtcNow.Date.AddDays(-1));
+
+        var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+
+        Assert.True(ScoreOf(items, unseen) > ScoreOf(items, liked));
+        Assert.True(IndexOf(items, unseen) < IndexOf(items, liked));
+        // The only profile contribution is the liked card's own, so its affinity is removed entirely.
+        Assert.Equal(ScoreOf(items, untagged), ScoreOf(items, liked), 6);
+        Assert.True(ScoreOf(items, unseen) > ScoreOf(items, untagged));
+    }
+
+    [DatabaseFact]
+    public async Task SparselyTaggedCandidateScoresBelowFullyMatchingCandidate()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var source = await scope.AddCardAsync("media", "sparse source");
+        var sparse = await scope.AddCardAsync("media", "sparse one tag");
+        var full = await scope.AddCardAsync("media", "sparse all tags");
+        await scope.SameAgeAsync(source, sparse, full);
+        var tags = new List<long>();
+        for (var i = 1; i <= 4; i++) tags.Add(await scope.AddTagAsync($"sparse tag {i}"));
+        foreach (var tag in tags) await scope.AssignTagAsync(source, tag);
+        await scope.AssignTagAsync(sparse, tags[0]);
+        foreach (var tag in tags) await scope.AssignTagAsync(full, tag);
+        await scope.VoteAsync(source, 1, DateTime.UtcNow.Date.AddDays(-1));
+
+        var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+
+        Assert.True(ScoreOf(items, full) > ScoreOf(items, sparse));
+        Assert.True(IndexOf(items, full) < IndexOf(items, sparse));
+    }
+
+    [DatabaseFact]
+    public async Task ProfileAffinityIsBoundedByAffinityScale()
+    {
+        await using var scope = await RecommendationScope.CreateAsync(configureOptions: o =>
+        {
+            o.WSelfVote = 0;
+            o.WFresh = 0;
+            o.WSeen = 0;
+            o.WSuggest = 0;
+            // Diversity is a selection-time penalty on repeated tags, not part of affinity.
+            o.WDiversity = 0;
+        });
+        var tags = new List<long>();
+        for (var i = 0; i < 8; i++) tags.Add(await scope.AddTagAsync($"bound tag {i}"));
+        var likedIds = new List<long>();
+        for (var i = 0; i < 10; i++)
+        {
+            var liked = await scope.AddCardAsync("media", $"bound liked {i}");
+            likedIds.Add(liked);
+            foreach (var tag in tags.Take(8 - i % 4)) await scope.AssignTagAsync(liked, tag);
+            await scope.VoteAsync(liked, 1, DateTime.UtcNow.Date.AddDays(-1));
+        }
+        var candidates = new List<long>();
+        for (var i = 0; i < 3; i++)
+        {
+            var candidate = await scope.AddCardAsync("media", $"bound candidate {i}");
+            candidates.Add(candidate);
+            foreach (var tag in tags.Take(8 - i * 3)) await scope.AssignTagAsync(candidate, tag);
+        }
+        var options = new RecommendationOptions();
+        var bound = options.AffinityScale * options.WAffinity + 1e-6;
+
+        var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+
+        Assert.All(candidates, id =>
+        {
+            var score = ScoreOf(items, id);
+            Assert.True(score > 0, $"candidate {id} score {score}");
+            Assert.True(score <= bound, $"candidate {id} score {score} exceeds {bound}");
+        });
+        Assert.All(items, item => Assert.InRange(item.GetProperty("score").GetDouble(), -bound, bound));
     }
 
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response) =>
