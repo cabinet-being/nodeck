@@ -64,8 +64,8 @@ export const deleteSource = (id: number) =>
   request<void>(`/api/sources/${id}`, { method: 'DELETE' });
 
 export const listCardTags = (cardId: number) => request<CardTag[]>(`/api/cards/${cardId}/tags`);
-export const setCardTag = (cardId: number, tagId: number) =>
-  request<void>(`/api/cards/${cardId}/tags/${tagId}`, { method: 'PUT' });
+export const setCardTag = (cardId: number, tagId: number, signal?: AbortSignal) =>
+  request<void>(`/api/cards/${cardId}/tags/${tagId}`, { method: 'PUT', signal });
 export const deleteCardTag = (cardId: number, tagId: number) =>
   request<void>(`/api/cards/${cardId}/tags/${tagId}`, { method: 'DELETE' });
 export const listTagSuggestions = (cardId: number) =>
@@ -81,8 +81,8 @@ export const decideTagSuggestions = (cardId: number, decision: 'accepted' | 'rej
 
 export const listCardSources = (cardId: number) =>
   request<CardSource[]>(`/api/cards/${cardId}/sources`);
-export const setCardSource = (cardId: number, sourceId: number, originalUrl: string) =>
+export const setCardSource = (cardId: number, sourceId: number, originalUrl: string, signal?: AbortSignal) =>
   request<void>(`/api/cards/${cardId}/sources/${sourceId}`,
-    json({ originalUrl: originalUrl.trim() || null }, 'PUT'));
+    { ...json({ originalUrl: originalUrl.trim() || null }, 'PUT'), signal });
 export const deleteCardSource = (cardId: number, sourceId: number) =>
   request<void>(`/api/cards/${cardId}/sources/${sourceId}`, { method: 'DELETE' });

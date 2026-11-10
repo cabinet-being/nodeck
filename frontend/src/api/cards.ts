@@ -227,7 +227,7 @@ export async function deleteCardRelation(relationId: number) {
   }
 }
 
-export async function createCard(input: CreateCardInput) {
+export async function createCard(input: CreateCardInput, signal?: AbortSignal) {
   const formData = new FormData();
   formData.set('type', input.type);
 
@@ -255,6 +255,7 @@ export async function createCard(input: CreateCardInput) {
     method: 'POST',
     headers: input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : undefined,
     body: formData,
+    signal,
   });
 
   return readJson<Card>(response);
@@ -274,9 +275,44 @@ export async function createCollectionFromCards(input: {
   return readJson<Card>(response);
 }
 
-export async function getCardCreationRequest(scope: 'media' | 'collection', key: string) {
-  const response = await fetch(`${apiBaseUrl}/api/cards/creation-requests/${scope}/${encodeURIComponent(key)}`);
+export async function getCardCreationRequest(scope: 'media' | 'collection', key: string, signal?: AbortSignal) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/creation-requests/${scope}/${encodeURIComponent(key)}`, { signal });
   return readJson<Card>(response);
+}
+
+export type DuplicateMatch = { sha256: string; cardIds: number[] };
+
+export async function findDuplicatesByHash(sha256: string[], signal?: AbortSignal): Promise<DuplicateMatch[]> {
+  const matches: DuplicateMatch[] = [];
+  for (let start = 0; start < sha256.length; start += 500) {
+    const response = await fetch(`${apiBaseUrl}/api/cards/duplicates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sha256: sha256.slice(start, start + 500) }),
+      signal,
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) throw new CardHttpError(data?.error ?? 'Request failed.', response.status);
+    if (Array.isArray(data?.matches)) matches.push(...(data.matches as DuplicateMatch[]));
+  }
+  return matches;
+}
+
+export async function moveCardChild(
+  parentId: number,
+  childId: number,
+  targetParentId: number,
+  position: number | null,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/cards/${parentId}/children/${childId}/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetParentId, position }),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new CardHttpError(data?.error ?? 'Request failed.', response.status);
+  }
 }
 
 export async function updateCollectionChildren(id: number, childCardIds: number[]) {

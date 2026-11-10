@@ -16,6 +16,8 @@ public static class CardEndpoints
 
         group.MapPost("", CreateCardAsync);
         group.MapPost("/collections", CreateExistingCollectionAsync);
+        group.MapPost("/duplicates", FindDuplicatesAsync);
+        group.MapPost("/{id:long}/children/{childId:long}/move", MoveChildAsync);
         group.MapGet("/creation-requests/{scope}/{key}", GetCreationRequestAsync);
         group.MapGet("", ListCardsAsync);
         group.MapGet("/{id:long}", GetCardAsync);
@@ -129,6 +131,34 @@ public static class CardEndpoints
         {
             return Results.BadRequest(new { error = exception.Message });
         }
+    }
+
+    private static async Task<IResult> MoveChildAsync(
+        long id, long childId, MoveChildRequest request, CardRepository repository)
+    {
+        var (status, error) = await repository.MoveChildAsync(id, childId, request.TargetParentId, request.Position);
+        return status switch
+        {
+            MoveChildStatus.Moved => Results.NoContent(),
+            MoveChildStatus.NotFound => Results.NotFound(new { error }),
+            _ => Results.BadRequest(new { error }),
+        };
+    }
+
+    private static async Task<IResult> FindDuplicatesAsync(DuplicatesRequest request, CardRepository repository)
+    {
+        var hashes = request.Sha256;
+        if (hashes is null || hashes.Count is < 1 or > 500)
+            return Results.BadRequest(new { error = "sha256 must contain 1 to 500 entries." });
+        var normalized = new List<string>();
+        foreach (var hash in hashes)
+        {
+            if (hash is null || hash.Length != 64 || !hash.All(Uri.IsHexDigit))
+                return Results.BadRequest(new { error = "Every sha256 entry must be 64 hexadecimal characters." });
+            normalized.Add(hash.ToLowerInvariant());
+        }
+        var matches = await repository.FindDuplicatesAsync(normalized.Distinct().ToList());
+        return Results.Ok(new { matches = matches.Select(m => new { sha256 = m.Sha256, cardIds = m.CardIds }) });
     }
 
     private static async Task<IResult> GetDeletionImpactAsync(long id, CardRepository repository)

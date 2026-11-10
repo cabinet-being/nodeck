@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS cards (
     preview VARCHAR(512) NULL,
     properties JSON NULL,
     metadata JSON NOT NULL,
+    content_sha256 CHAR(64) NULL,
     created_at DATETIME(6)
         GENERATED ALWAYS AS (
             STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.created_at')), '%Y-%m-%dT%H:%i:%sZ')
@@ -14,7 +15,8 @@ CREATE TABLE IF NOT EXISTS cards (
     CONSTRAINT chk_cards_properties_json CHECK (properties IS NULL OR JSON_VALID(properties)),
     CONSTRAINT chk_cards_metadata_json CHECK (JSON_VALID(metadata)),
     INDEX idx_cards_type (type),
-    INDEX idx_cards_created_at (created_at)
+    INDEX idx_cards_created_at (created_at),
+    INDEX idx_cards_content_sha256 (content_sha256)
 );
 
 CREATE TABLE IF NOT EXISTS card_relations (

@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { getCard, listCards, resolveApiUrl, updateCard, updateCardPreview, updateCollectionChildren, type Card } from '@/api/cards';
+import { getCard, listCards, moveCardChild, resolveApiUrl, updateCard, updateCardPreview, updateCollectionChildren, type Card } from '@/api/cards';
 import {
   CardForm,
   keyValueRowsFromRecord,
@@ -144,14 +144,24 @@ export function EditCardPage({
             <p className="text-muted-foreground text-sm">Add, remove, or reorder existing media. Removed media remain in the library.</p>
             <ExistingMediaPicker selected={selectedMedia} onChange={(cards) => { setSelectedMedia(cards); setChildrenMessage(null); }} disabled={isSavingChildren} />
             {childrenMessage ? <p className="text-sm" role="status">{childrenMessage}</p> : null}
-            <Button type="button" disabled={isSavingChildren || selectedMedia.length < 2} onClick={saveChildren}>
+            <Button type="button" disabled={isSavingChildren} onClick={saveChildren}>
               {isSavingChildren ? 'Saving contents...' : 'Save contents'}
             </Button>
+            {(card.containedCards ?? []).length > 0 ? (
+              <MoveChildren card={card} onMoved={reloadCard} />
+            ) : null}
           </CardContent>
         </UiCard>
       ) : null}
     </section>
   );
+
+  async function reloadCard() {
+    const loaded = await getCard(cardId);
+    setCard(loaded);
+    setSelectedMedia((loaded.containedCards ?? []).map((item) => ({ ...item, properties: null, metadata: {} })));
+    setChildrenMessage(null);
+  }
 
   async function saveChildren() {
     setIsSavingChildren(true);
@@ -166,6 +176,103 @@ export function EditCardPage({
       setIsSavingChildren(false);
     }
   }
+}
+
+function MoveChildren({ card, onMoved }: { card: Card; onMoved: () => Promise<void> }) {
+  const children = card.containedCards ?? [];
+  const [movingId, setMovingId] = React.useState<number | null>(null);
+  const [search, setSearch] = React.useState('');
+  const [targets, setTargets] = React.useState<Card[]>([]);
+  const [targetId, setTargetId] = React.useState<number | null>(null);
+  const [position, setPosition] = React.useState('');
+  const [isBusy, setIsBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (movingId === null) return;
+    let isCurrent = true;
+    const timer = window.setTimeout(() => {
+      listCards({ types: ['comic', 'set'], search: search.trim() || undefined, limit: 20, sort: 'created_at', order: 'desc' })
+        .then((cards) => { if (isCurrent) setTargets(cards.filter((item) => item.id !== card.id)); })
+        .catch((cause) => { if (isCurrent) setError(cause instanceof Error ? cause.message : 'Unable to search collections.'); });
+    }, 250);
+    return () => { isCurrent = false; window.clearTimeout(timer); };
+  }, [movingId, search, card.id]);
+
+  function open(childId: number) {
+    setMovingId(childId);
+    setSearch('');
+    setTargets([]);
+    setTargetId(null);
+    setPosition('');
+    setError(null);
+    setMessage(null);
+  }
+
+  const parsedPosition = position.trim() === '' ? null : Number(position);
+  const positionValid = parsedPosition === null || (Number.isInteger(parsedPosition) && parsedPosition >= 0);
+
+  async function move() {
+    if (movingId === null || targetId === null || !positionValid) return;
+    setIsBusy(true);
+    setError(null);
+    try {
+      await moveCardChild(card.id, movingId, targetId, parsedPosition);
+      setMovingId(null);
+      setMessage(`Moved #${movingId} to #${targetId}.`);
+      await onMoved();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to move the item.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-2 text-sm">
+      <h3 className="font-medium">Move saved items</h3>
+      {message ? <p role="status">{message}</p> : null}
+      {children.map((child) => (
+        <div key={child.id} className="grid gap-2 rounded-lg border px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>#{child.id}{child.title ? ` ${child.title}` : ''}</span>
+            <Button type="button" size="sm" variant="outline" aria-label={`Move #${child.id} to another collection`}
+              disabled={isBusy} onClick={() => (movingId === child.id ? setMovingId(null) : open(child.id))}>
+              {movingId === child.id ? 'Close' : 'Move to...'}
+            </Button>
+          </div>
+          {movingId === child.id ? (
+            <div className="grid gap-2">
+              <Input aria-label="Search target comic or set" placeholder="Search comics and sets" value={search}
+                onChange={(event) => setSearch(event.currentTarget.value)} />
+              <div className="grid max-h-48 gap-1 overflow-auto" role="listbox" aria-label="Target collections">
+                {targets.length === 0 ? <span className="text-muted-foreground">No matching comics or sets.</span> : null}
+                {targets.map((target) => (
+                  <button key={target.id} type="button" role="option" aria-selected={targetId === target.id}
+                    className={`rounded border px-2 py-1 text-left ${targetId === target.id ? 'border-primary bg-accent' : ''}`}
+                    onClick={() => setTargetId(target.id)}>
+                    <Badge variant="outline">{target.type}</Badge> #{target.id}{target.title ? ` ${target.title}` : ''}
+                  </button>
+                ))}
+              </div>
+              <label className="flex flex-wrap items-center gap-2">
+                Position (0-based, empty to append)
+                <Input type="number" min={0} step={1} className="w-24" value={position}
+                  onChange={(event) => setPosition(event.currentTarget.value)} />
+              </label>
+              {error ? <p role="alert" className="text-destructive">{error}</p> : null}
+              <div>
+                <Button type="button" size="sm" disabled={isBusy || targetId === null || !positionValid} onClick={move}>
+                  {isBusy ? 'Moving...' : 'Move'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function PreviewStartControl({ card, onUpdated }: { card: Card; onUpdated: (card: Card) => void }) {

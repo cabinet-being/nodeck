@@ -81,7 +81,7 @@ public sealed partial class CardRepository
                 ApplyAssetMetadata(metadata, assets);
             }
 
-            await UpdateCardAssetsAsync(connection, transaction, cardId, previewPath, metadata);
+            await UpdateCardAssetsAsync(connection, transaction, cardId, previewPath, metadata, assets?.ContentSha256);
             await InsertRelationsAsync(connection, transaction, cardId, data.Relations);
             if (data.Type == "media" && assets is not null)
             {
@@ -150,18 +150,21 @@ public sealed partial class CardRepository
         IDbTransaction transaction,
         long cardId,
         string? previewPath,
-        JsonObject metadata)
+        JsonObject metadata,
+        string? contentSha256 = null)
     {
         await connection.ExecuteAsync(
             """
             UPDATE cards
             SET preview = @Preview,
-                metadata = @Metadata
+                metadata = @Metadata,
+                content_sha256 = COALESCE(@Sha, content_sha256)
             WHERE id = @Id;
             """,
             new
             {
                 Id = cardId,
+                Sha = contentSha256,
                 Preview = previewPath,
                 Metadata = metadata.ToJsonString(),
             },

@@ -63,12 +63,14 @@ public sealed partial class CardRepository
                 SET title = @Title,
                     preview = @Preview,
                     properties = @Properties,
-                    metadata = @Metadata
+                    metadata = @Metadata,
+                    content_sha256 = COALESCE(@Sha, content_sha256)
                 WHERE id = @Id;
                 """,
                 new
                 {
                     Id = id,
+                    Sha = data.Assets?.ContentSha256,
                     data.Title,
                     Preview = previewPath,
                     Properties = data.PropertiesJson,

@@ -134,7 +134,8 @@ public sealed record CardFileAssets(
     string? PreviewSelection = null,
     double? PreviewScore = null,
     double? FrameRate = null,
-    bool? Animated = null);
+    bool? Animated = null,
+    string? ContentSha256 = null);
 
 internal sealed record DbCard(
     long Id,

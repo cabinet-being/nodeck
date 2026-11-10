@@ -25,6 +25,7 @@ public sealed class SchemaMigrationRunner
         (9, "interest-signals-v1"),
         (10, "card-creation-requests-v1"),
         (11, "tag-decision-log-v1"),
+        (12, "card-content-hash-v1"),
     ];
 
     private readonly string _connectionString;
@@ -119,6 +120,7 @@ public sealed class SchemaMigrationRunner
                     case 9: await _interest.InitializeAsync(); break;
                     case 10: await _cards.InitializeCreationRequestsAsync(); break;
                     case 11: await _catalog.InitializeTagDecisionLogAsync(); break;
+                    case 12: await _cards.InitializeContentHashAsync(); break;
                 }
 
                 var after = await SnapshotAsync(connection);
@@ -162,6 +164,10 @@ public sealed class SchemaMigrationRunner
                 if (version == 11 && after != previous)
                     throw new InvalidOperationException(
                         "Migration 11 changed existing row or file counts. " +
+                        "Stop the API and restore the pre-migration backup before accepting writes.");
+                if (version == 12 && after != previous)
+                    throw new InvalidOperationException(
+                        "Migration 12 changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");
                 await VerifyReferencesAsync(connection);
                 await VerifyCollectionOwnershipAsync(connection);

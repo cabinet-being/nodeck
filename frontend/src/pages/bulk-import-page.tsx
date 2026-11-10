@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { ArrowDown, ArrowUp, CircleHelp, Pause, Plus, RotateCw, Trash2, Upload } from 'lucide-react';
+import { ArrowDown, ArrowUp, CircleHelp, Pause, X, Plus, RotateCw, Trash2, Upload } from 'lucide-react';
 
-import { CardHttpError, createCard, createCollectionFromCards, getCard, getCardAnalysis, getCardCreationRequest, updateCollectionChildren, type CardAnalysis, type Card } from '@/api/cards';
+import { CardHttpError, createCard, createCollectionFromCards, getCard, getCardAnalysis, getCardCreationRequest, findDuplicatesByHash, updateCollectionChildren, type CardAnalysis, type Card } from '@/api/cards';
 import { setCardSource, setCardTag } from '@/api/catalog';
 import { BulkImportCatalogPicker, type BulkImportCatalogSelection } from '@/components/bulk-import-catalog-picker';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -25,6 +26,10 @@ type ImportItem = {
   creationAttempted?: boolean;
   error?: string;
   possibleDuplicate?: boolean;
+  sha256?: string;
+  hashSkipped?: boolean;
+  duplicateCardIds?: number[];
+  uploadAnyway?: boolean;
   metadataStatus?: MetadataStatus;
   metadataError?: string;
   assignedTagIds?: number[];
@@ -104,6 +109,8 @@ function readDraft(): { draft: SavedDraft | null; warning: string | null } {
         || (item.creationAttempted !== undefined && typeof item.creationAttempted !== 'boolean')
         || (item.assignedTagIds !== undefined && (!Array.isArray(item.assignedTagIds)
           || !item.assignedTagIds.every(isPositiveId)))) throw new Error('Invalid saved item');
+      if ((item.sha256 !== undefined && (typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)))
+        || (item.duplicateCardIds !== undefined && (!Array.isArray(item.duplicateCardIds) || !item.duplicateCardIds.every(isPositiveId)))) throw new Error('Invalid saved hash');
       if (item.fingerprint !== undefined && (typeof item.fingerprint !== 'string'
         || !/^sample-sha256-v1:[a-f0-9]{64}$/.test(item.fingerprint))) throw new Error('Invalid sampled fingerprint');
     }
@@ -163,6 +170,32 @@ async function fingerprintFiles(files: File[]): Promise<(string | undefined)[]> 
   return results;
 }
 
+const uploadConcurrency = 3;
+const hashConcurrency = 2;
+const maxHashBytes = 1024 * 1024 * 1024;
+
+async function tryFullHash(file: File): Promise<string | undefined> {
+  try {
+    if (!globalThis.crypto?.subtle) return undefined;
+    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
+    return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch { return undefined; }
+}
+
+function isBlockedDuplicate(item: Pick<ImportItem, 'duplicateCardIds' | 'uploadAnyway' | 'cardId'>) {
+  return !item.cardId && !!item.duplicateCardIds?.length && !item.uploadAnyway;
+}
+
+function mediaTypeLabel(descriptor: FileDescriptor): 'Image' | 'GIF' | 'Video' {
+  const extension = descriptor.name.split('.').pop()?.toLowerCase() ?? '';
+  const mime = descriptor.type.toLowerCase();
+  if (mime === 'image/gif' || (!mime && extension === 'gif')) return 'GIF';
+  if (mime.startsWith('video/') || (!mime && ['mp4', 'mov', 'webm'].includes(extension))) return 'Video';
+  if (mime.startsWith('image/')) return 'Image';
+  if (extension === 'gif') return 'GIF';
+  return ['mp4', 'mov', 'webm'].includes(extension) ? 'Video' : 'Image';
+}
+
 const allowedExtensions = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm']);
 
 function isSupported(file: File) {
@@ -194,9 +227,9 @@ function isUnconfirmedPost(cause: unknown) {
   return !(cause instanceof CardHttpError) || cause.status >= 500;
 }
 
-async function findCreationResult(scope: 'media' | 'collection', key: string): Promise<Card | null> {
+async function findCreationResult(scope: 'media' | 'collection', key: string, signal?: AbortSignal): Promise<Card | null> {
   try {
-    return await getCardCreationRequest(scope, key);
+    return await getCardCreationRequest(scope, key, signal);
   } catch (cause) {
     if (cause instanceof CardHttpError && cause.status === 404) return null;
     throw cause;
@@ -239,6 +272,7 @@ export function BulkImportPage() {
   const [isRunning, setIsRunning] = React.useState(false);
   const [isPreparingFiles, setIsPreparingFiles] = React.useState(false);
   const [pauseRequested, setPauseRequested] = React.useState(false);
+  const [cancelRequested, setCancelRequested] = React.useState(false);
   const [currentStep, setCurrentStep] = React.useState<string | null>(null);
   const [isDragging, setIsDragging] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -262,6 +296,8 @@ export function BulkImportPage() {
   const analysisCursor = React.useRef(0);
   const mounted = React.useRef(true);
   const pauseRequestedRef = React.useRef(false);
+  const cancelRequestedRef = React.useRef(false);
+  const abortRef = React.useRef<AbortController | null>(null);
   const preparingFilesRef = React.useRef(false);
   const fileSelectionGeneration = React.useRef(0);
   itemsRef.current = items;
@@ -570,23 +606,44 @@ export function BulkImportPage() {
     pauseRequestedRef.current = false;
     setPauseRequested(false);
     setNotice(null);
+    cancelRequestedRef.current = false;
+    setCancelRequested(false);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const signal = controller.signal;
+    const stopRequested = () => !mounted.current || pauseRequestedRef.current;
     const working = items.map((item) => ({ ...item }));
     const workingGroups = groups.map((group) => ({ ...group }));
     let failures = 0;
     let paused = false;
 
     try {
-      for (const item of working) {
-        if (!mounted.current || pauseRequestedRef.current) { paused = true; break; }
-        if (!item.file && !item.cardId && !item.creationKey) continue;
-        if (item.file && !isSupported(item.file)) continue;
-        if (item.status === 'needs-review') continue;
+      await checkServerDuplicates(working, signal, stopRequested);
+      if (stopRequested()) paused = true;
+      const candidates = working.filter((item) => !(!item.file && !item.cardId && !item.creationKey)
+        && !(item.file && !isSupported(item.file)) && item.status !== 'needs-review');
+      let cursor = 0;
+      const inFlight = new Set<string>();
+      const processItem = async (item: ImportItem) => {
+        if (isBlockedDuplicate(item)) return;
+        inFlight.add(item.descriptor.name);
+        try {
+          await processItemSteps(item);
+        } finally {
+          inFlight.delete(item.descriptor.name);
+        }
+      };
+      const processItemSteps = async (item: ImportItem) => {
+        if (stopRequested()) { paused = true; return; }
+        if (!item.file && !item.cardId && !item.creationKey) return;
+        if (item.file && !isSupported(item.file)) return;
+        if (item.status === 'needs-review') return;
         if (!item.cardId) {
-          setCurrentStep(`Uploading ${item.descriptor.name}`);
+          setCurrentStep(`Uploading ${[...inFlight].join(', ')}`);
           updateItem(item.id, { status: 'uploading', error: undefined });
           try {
             if (item.creationKey && item.creationAttempted) {
-              const found = await findCreationResult('media', item.creationKey);
+              const found = await findCreationResult('media', item.creationKey, signal);
               if (found) {
                 item.cardId = found.id;
                 item.status = 'created';
@@ -600,7 +657,7 @@ export function BulkImportPage() {
               item.status = 'error';
               item.error = 'Creation has not been confirmed. Attach the original file to retry with the same key.';
               updateItem(item.id, { status: 'error', error: item.error });
-              continue;
+              return;
             }
             item.creationKey ??= globalThis.crypto.randomUUID();
             item.creationAttempted = true;
@@ -612,10 +669,10 @@ export function BulkImportPage() {
               item.error = 'Could not save the recovery marker. Free browser storage before uploading this file.';
               updateItem(item.id, { status: 'error', error: item.error });
               failures++;
-              continue;
+              return;
             }
             const card = await createCard({ type: 'media', image: item.file, title: item.title.trim() || undefined,
-              idempotencyKey: item.creationKey });
+              idempotencyKey: item.creationKey }, signal);
             pendingItemPosts.current.delete(item.id);
             item.cardId = card.id;
             item.status = 'created';
@@ -625,6 +682,13 @@ export function BulkImportPage() {
             }
           } catch (cause) {
             pendingItemPosts.current.delete(item.id);
+            if (signal.aborted && item.creationKey) {
+              item.status = 'error';
+              item.error = 'Cancelled while uploading; the outcome is unknown. Upload / retry will check this creation key before sending the same request again.';
+              updateItem(item.id, { status: 'error', error: item.error });
+              saveDraft(working, workingGroups, catalogSelection, true);
+              return;
+            }
             let recovered = false;
             if (item.creationKey && isUnconfirmedPost(cause)) {
               try {
@@ -645,7 +709,7 @@ export function BulkImportPage() {
               updateItem(item.id, { status: 'error', error: item.error });
               saveDraft(working, workingGroups, catalogSelection, true);
               failures++;
-              continue;
+              return;
             }
             if (!recovered) {
               const needsReview = isUnconfirmedPost(cause);
@@ -656,25 +720,25 @@ export function BulkImportPage() {
               updateItem(item.id, { status: item.status, error: item.error });
               saveDraft(working, workingGroups, catalogSelection, true);
               failures++;
-              continue;
+              return;
             }
           }
         }
-        if (!mounted.current || pauseRequestedRef.current) { paused = true; break; }
+        if (stopRequested()) { paused = true; return; }
         if (hasCatalogAssignment && item.cardId && item.metadataStatus !== 'assigned') {
-          setCurrentStep(`Assigning tags/source to ${item.descriptor.name}`);
+          setCurrentStep(`Assigning tags/source to ${item.descriptor.name} (${inFlight.size} file(s) in progress)`);
           updateItem(item.id, { metadataStatus: 'assigning', metadataError: undefined });
           try {
             for (const tag of plan.tags) {
               if (pauseRequestedRef.current) break;
               if (item.assignedTagIds?.includes(tag.id)) continue;
-              await setCardTag(item.cardId, tag.id);
+              await setCardTag(item.cardId, tag.id, signal);
               item.assignedTagIds = [...(item.assignedTagIds ?? []), tag.id];
               updateItem(item.id, { assignedTagIds: item.assignedTagIds });
               saveDraft(working, workingGroups, catalogSelection, true);
             }
             if (!pauseRequestedRef.current && plan.source && !item.sourceAssigned) {
-              await setCardSource(item.cardId, plan.source.id, plan.originalUrl);
+              await setCardSource(item.cardId, plan.source.id, plan.originalUrl, signal);
               item.sourceAssigned = true;
               updateItem(item.id, { sourceAssigned: true });
               saveDraft(working, workingGroups, catalogSelection, true);
@@ -683,17 +747,30 @@ export function BulkImportPage() {
             item.metadataError = undefined;
             updateItem(item.id, { metadataStatus: item.metadataStatus, metadataError: undefined });
           } catch (cause) {
+            if (signal.aborted) {
+              item.metadataStatus = 'pending';
+              updateItem(item.id, { metadataStatus: 'pending', metadataError: undefined });
+              paused = true;
+              return;
+            }
             item.metadataStatus = 'error';
             item.metadataError = errorMessage(cause);
             updateItem(item.id, { metadataStatus: 'error', metadataError: item.metadataError });
             failures++;
           }
         }
-        if (!mounted.current || pauseRequestedRef.current) { paused = true; break; }
-      }
+        if (stopRequested()) { paused = true; return; }
+      };
+      await Promise.all(Array.from({ length: Math.min(uploadConcurrency, candidates.length) }, async () => {
+        while (cursor < candidates.length) {
+          if (stopRequested()) { paused = true; return; }
+          await processItem(candidates[cursor++]);
+        }
+      }));
+      if (stopRequested()) paused = true;
 
       for (const group of paused ? [] : workingGroups) {
-        if (!mounted.current || pauseRequestedRef.current) { paused = true; break; }
+        if (stopRequested()) { paused = true; break; }
         const members = working.filter((item) => item.groupId === group.id);
         const childCardIds = members.flatMap((item) => item.cardId ? [item.cardId] : []);
         if (members.length === 0) continue;
@@ -802,14 +879,14 @@ export function BulkImportPage() {
             for (const tag of plan.tags) {
               if (pauseRequestedRef.current) break;
               if (group.assignedTagIds?.includes(tag.id)) continue;
-              await setCardTag(group.cardId, tag.id);
+              await setCardTag(group.cardId, tag.id, signal);
               group.assignedTagIds = [...(group.assignedTagIds ?? []), tag.id];
               setGroups((current) => current.map((candidate) => candidate.id === group.id
                 ? { ...candidate, assignedTagIds: group.assignedTagIds } : candidate));
               saveDraft(working, workingGroups, catalogSelection, true);
             }
             if (!pauseRequestedRef.current && plan.source && !group.sourceAssigned) {
-              await setCardSource(group.cardId, plan.source.id, plan.originalUrl);
+              await setCardSource(group.cardId, plan.source.id, plan.originalUrl, signal);
               group.sourceAssigned = true;
               setGroups((current) => current.map((candidate) => candidate.id === group.id
                 ? { ...candidate, sourceAssigned: true } : candidate));
@@ -820,6 +897,13 @@ export function BulkImportPage() {
             setGroups((current) => current.map((candidate) => candidate.id === group.id
               ? { ...candidate, metadataStatus: group.metadataStatus, metadataError: undefined } : candidate));
           } catch (cause) {
+            if (signal.aborted) {
+              group.metadataStatus = 'pending';
+              setGroups((current) => current.map((candidate) => candidate.id === group.id
+                ? { ...candidate, metadataStatus: 'pending', metadataError: undefined } : candidate));
+              paused = true;
+              break;
+            }
             group.metadataStatus = 'error';
             group.metadataError = errorMessage(cause);
             setGroups((current) => current.map((candidate) => candidate.id === group.id
@@ -829,14 +913,72 @@ export function BulkImportPage() {
         }
         if (!mounted.current || pauseRequestedRef.current) { paused = true; break; }
       }
-      setNotice(paused || pauseRequestedRef.current
+      setNotice(cancelRequestedRef.current
+        ? 'Import cancelled. Files whose upload was interrupted have an unknown outcome: Upload / retry checks their creation key before sending anything again. Files not yet started stay queued.'
+        : paused || pauseRequestedRef.current
         ? 'Import paused. Use Upload / retry to continue from the remaining steps.'
         : failures ? `${failures} upload, metadata, or collection step(s) need attention. Retry after reviewing the errors.` : 'Import finished.');
     } finally {
+      abortRef.current = null;
       setCurrentStep(null);
       setIsRunning(false);
       setPauseRequested(false);
+      setCancelRequested(false);
     }
+  }
+
+  async function checkServerDuplicates(working: ImportItem[], signal: AbortSignal, stopRequested: () => boolean) {
+    const eligible = working.filter((item) => !item.cardId && !item.creationKey && item.status !== 'needs-review'
+      && !item.uploadAnyway && (item.file ? isSupported(item.file) : !!item.sha256));
+    const toHash = eligible.filter((item) => item.file && !item.sha256 && !item.hashSkipped);
+    if (toHash.length > 0) {
+      let next = 0;
+      let done = 0;
+      await Promise.all(Array.from({ length: Math.min(hashConcurrency, toHash.length) }, async () => {
+        while (next < toHash.length && !stopRequested()) {
+          const item = toHash[next++];
+          setCurrentStep(`Checking content hash ${++done}/${toHash.length}`);
+          if (item.file!.size > maxHashBytes) {
+            item.hashSkipped = true;
+            updateItem(item.id, { hashSkipped: true });
+            continue;
+          }
+          const sha256 = await tryFullHash(item.file!);
+          if (sha256) {
+            item.sha256 = sha256;
+            updateItem(item.id, { sha256 });
+          }
+        }
+      }));
+    }
+    if (stopRequested()) return;
+    const hashed = eligible.filter((item) => item.sha256);
+    if (hashed.length > 0) {
+      try {
+        setCurrentStep('Checking for duplicates on the server');
+        const matches = await findDuplicatesByHash([...new Set(hashed.map((item) => item.sha256!))], signal);
+        const byHash = new Map(matches.map((match) => [match.sha256, match.cardIds]));
+        let found = 0;
+        for (const item of hashed) {
+          const ids = byHash.get(item.sha256!);
+          item.duplicateCardIds = ids && ids.length > 0 ? ids : undefined;
+          if (item.duplicateCardIds) found++;
+          updateItem(item.id, { duplicateCardIds: item.duplicateCardIds });
+        }
+        saveDraft(working, groupsRef.current, catalogSelection, true);
+        if (found > 0) setNotice(`${found} file(s) already exist in the library and were not uploaded. Use "Upload anyway" on a row to import it regardless.`);
+      } catch (cause) {
+        if (!signal.aborted) setNotice(`Server duplicate check failed (${errorMessage(cause)}). Uploading continues without it.`);
+      }
+    }
+  }
+
+  function requestCancel() {
+    cancelRequestedRef.current = true;
+    setCancelRequested(true);
+    pauseRequestedRef.current = true;
+    setPauseRequested(true);
+    abortRef.current?.abort();
   }
 
   function requestPause() {
@@ -873,11 +1015,12 @@ export function BulkImportPage() {
   const failedFiles = items.filter((item) => !item.cardId && item.status === 'error').length;
   const reviewFiles = items.filter((item) => item.status === 'needs-review').length;
   const pendingFiles = items.length - completedFiles - failedFiles - reviewFiles;
+  const duplicateFiles = items.filter(isBlockedDuplicate).length;
   const hasCatalogAssignment = catalogPlan.current
     ? catalogPlan.current.tags.length > 0 || catalogPlan.current.source !== null
     : catalogSelection.tags.length > 0 || catalogSelection.source !== null;
 
-  const hasWork = items.some((item) => !item.cardId && item.status !== 'needs-review'
+  const hasWork = items.some((item) => !item.cardId && item.status !== 'needs-review' && !isBlockedDuplicate(item)
       && (!!item.creationKey || !!item.file && isSupported(item.file)))
     || items.some((item) => item.cardId && (catalogPlan.current
       ? (catalogPlan.current.tags.length > 0 || catalogPlan.current.source !== null) && item.metadataStatus !== 'assigned'
@@ -922,10 +1065,13 @@ export function BulkImportPage() {
         {isRunning && <Button type="button" variant="outline" disabled={pauseRequested} onClick={requestPause}>
           <Pause className="size-4" />{pauseRequested ? 'Pausing...' : 'Pause'}
         </Button>}
+        {isRunning && <Button type="button" variant="outline" aria-label="Cancel import" disabled={cancelRequested} onClick={requestCancel}>
+          <X className="size-4" />{cancelRequested ? 'Cancelling...' : 'Cancel'}
+        </Button>}
         <span className="text-muted-foreground text-sm" aria-label={`${items.length} total, ${completedFiles} uploaded, ${analyzedFiles} analyzed, ${failedFiles} upload errors, ${analysisFailures} analysis errors, ${reviewFiles} need review, ${pendingFiles} pending`}>
           {completedFiles}/{items.length} uploaded{completedFiles > 0 && ` · ${analyzedFiles}/${completedFiles} analyzed`}
           {failedFiles > 0 && ` · ${failedFiles} upload errors`}{analysisFailures > 0 && ` · ${analysisFailures} analysis errors`}
-          {reviewFiles > 0 && ` · ${reviewFiles} review`}
+          {reviewFiles > 0 && ` · ${reviewFiles} review`}{duplicateFiles > 0 && ` · ${duplicateFiles} duplicate`}
         </span>
       </div>
       {isRunning && <p role="status" className="text-muted-foreground text-sm">Current: {currentStep ?? 'Preparing next step'}{pauseRequested ? ' · pause requested' : ''}</p>}
@@ -989,7 +1135,17 @@ export function BulkImportPage() {
               <Input aria-label={`Title for ${item.descriptor.name}`} value={item.title} placeholder="Card title"
                 disabled={isRunning || !!item.cardId || !!item.creationKey}
                 onChange={(event) => updateItem(item.id, { title: event.target.value })} />
-              <p className="text-muted-foreground text-xs">{(item.descriptor.size / 1024 / 1024).toFixed(1)} MB · {item.status}</p>
+              <p className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="outline">{mediaTypeLabel(item.descriptor)}</Badge>
+                <span>{(item.descriptor.size / 1024 / 1024).toFixed(1)} MB · {item.status}</span>
+              </p>
+              {item.hashSkipped && !item.sha256 && <p className="text-muted-foreground text-xs">File is larger than 1 GiB; it was not checked for server duplicates.</p>}
+              {!!item.duplicateCardIds?.length && !item.cardId && <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span role="status">Duplicate of {item.duplicateCardIds.map((id, index) => <React.Fragment key={id}>{index > 0 && ', '}<a className="text-primary underline" href={`/cards/${id}`}>#{id}</a></React.Fragment>)}</span>
+                {!item.uploadAnyway && <Button type="button" size="sm" variant="outline" disabled={isRunning} aria-label={`Upload ${item.descriptor.name} anyway`}
+                  onClick={() => updateItem(item.id, { uploadAnyway: true })}>Upload anyway</Button>}
+                {item.uploadAnyway && <span className="text-muted-foreground">Will upload anyway.</span>}
+              </div>}
               {!item.file && !item.cardId && <div className="mt-2 text-sm">
                 <p role="status">File missing after reload. Reselect it here. {!item.fingerprint && 'Check that this is the intended file before upload.'}</p>
                 <label className="focus-within:ring-ring mt-1 inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1 focus-within:ring-2">

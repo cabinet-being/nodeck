@@ -50,7 +50,7 @@ public sealed partial class CardRepository
 
                 var assets = await createAssets(mediaId, data.Images[index]);
                 ApplyAssetMetadata(mediaMetadata, assets);
-                await UpdateCardAssetsAsync(connection, transaction, mediaId, assets.PreviewPath, mediaMetadata);
+                await UpdateCardAssetsAsync(connection, transaction, mediaId, assets.PreviewPath, mediaMetadata, assets.ContentSha256);
                 await RefreshImageAnalysisJobAsync(connection, transaction, mediaId, assets.MediaType);
                 await SpeechAnalysisQueueRepository.RefreshAsync(connection, transaction, mediaId,
                     assets.MediaType == "video" && assets.HasAudio);

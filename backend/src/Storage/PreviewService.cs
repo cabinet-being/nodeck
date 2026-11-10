@@ -40,12 +40,13 @@ public sealed partial class PreviewService
         try
         {
             using var slot = await _gate.AcquireAsync();
-            return await DetectImageExtensionAsync(media) switch
+            var assets = await DetectImageExtensionAsync(media) switch
             {
                 ".gif" => await SaveGifAndCreatePreviewAsync(cardId, media),
                 not null => await SaveImageCoreAsync(cardId, media),
                 _ => await SaveVideoAndCreatePreviewAsync(cardId, media),
             };
+            return assets with { ContentSha256 = await HashUploadAsync(media) };
         }
         catch (Exception exception)
         {
@@ -59,7 +60,14 @@ public sealed partial class PreviewService
     public async Task<CardFileAssets> SaveImageAndCreatePreviewAsync(long cardId, IFormFile image)
     {
         using var slot = await _gate.AcquireAsync();
-        return await SaveImageCoreAsync(cardId, image);
+        var assets = await SaveImageCoreAsync(cardId, image);
+        return assets with { ContentSha256 = await HashUploadAsync(image) };
+    }
+
+    private static async Task<string> HashUploadAsync(IFormFile file)
+    {
+        await using var stream = file.OpenReadStream();
+        return Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream)).ToLowerInvariant();
     }
 
     private async Task<CardFileAssets> SaveImageCoreAsync(long cardId, IFormFile image)
@@ -134,6 +142,7 @@ public sealed partial class PreviewService
             {
                 assets = await PrepareVideoReplacementAsync(cardId, media, stagingCardDirectory, stagingPreviewDirectory);
             }
+            assets = assets with { ContentSha256 = await HashUploadAsync(media) };
 
             return new PendingCardFileReplacement(
                 _appDataRoot,

@@ -148,4 +148,26 @@ public sealed class CardDatabaseInitializer
             );
             """);
     }
+
+    public async Task InitializeContentHashAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var hasColumn = await connection.ExecuteScalarAsync<long>(
+            """
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = 'cards' AND column_name = 'content_sha256';
+            """);
+        if (hasColumn == 0)
+            await connection.ExecuteAsync("ALTER TABLE cards ADD COLUMN content_sha256 CHAR(64) NULL;");
+
+        var hasIndex = await connection.ExecuteScalarAsync<long>(
+            """
+            SELECT COUNT(*) FROM information_schema.statistics
+            WHERE table_schema = DATABASE() AND table_name = 'cards' AND index_name = 'idx_cards_content_sha256';
+            """);
+        if (hasIndex == 0)
+            await connection.ExecuteAsync("ALTER TABLE cards ADD INDEX idx_cards_content_sha256 (content_sha256);");
+    }
 }
