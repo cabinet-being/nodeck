@@ -39,8 +39,8 @@ export function ActionBar({
   return (
     <div className="flex flex-wrap items-center gap-1" role="toolbar" aria-label="Card actions">
       <FavoriteToggle cardId={cardId} isFavorite={isFavorite} onChange={onFavoriteChange} />
-      <DailyVote key={cardId} cardId={cardId} />
-      <DeckMembershipControl key={cardId} cardId={cardId} open={deckOpen} onOpenChange={onDeckOpenChange}
+      <DailyVote key={`vote-${cardId}`} cardId={cardId} />
+      <DeckMembershipControl key={`decks-${cardId}`} cardId={cardId} open={deckOpen} onOpenChange={onDeckOpenChange}
         onMembershipChange={onDecksChange} />
       <Menu>
         <MenuTrigger render={<Button type="button" variant="ghost" size="icon" aria-label="More actions" className="ml-auto" />}>

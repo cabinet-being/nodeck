@@ -27,6 +27,7 @@ export function CardBrowser({
   viewStorageKey,
   title,
   renderCaption,
+  renderActions,
   reloadKey = 0,
   onPageLoaded,
   emptyMessage = 'Nothing here yet.',
@@ -40,6 +41,8 @@ export function CardBrowser({
   title?: React.ReactNode;
   /** Optional caption below each card; makes the wall show captions. */
   renderCaption?: (card: Card, index: number) => React.ReactNode;
+  /** Optional round port buttons on each tile. */
+  renderActions?: (card: Card, index: number) => React.ReactNode;
   /** Change to refetch the current page. */
   reloadKey?: number;
   /** Called after each successful page load. */
@@ -212,6 +215,7 @@ export function CardBrowser({
           view={view}
           onNavigate={onNavigate}
           renderCaption={renderCaption ? (index) => renderCaption(cards[index], index) : undefined}
+          renderActions={renderActions ? (index) => renderActions(cards[index], index) : undefined}
         />
       ) : null}
       {!error && (page > 1 || hasNextPage) ? <nav className="flex items-center justify-center gap-3 py-2" aria-label="Pages">

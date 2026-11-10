@@ -1,10 +1,15 @@
 import * as React from 'react';
-import { Heart, Layers3, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Layers3, MoreHorizontal, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 
-import { deleteDeck, listDecks, type DeckSummary } from '@/api/decks';
+import { listDecks, type DeckSummary } from '@/api/decks';
+import { DeckStack } from '@/components/deck-stack';
+import { DeleteDeckDialog } from '@/components/delete-deck-dialog';
+import { EmptyState } from '@/components/empty-state';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Menu, MenuContent, MenuItem, MenuLinkItem, MenuTrigger } from '@/components/ui/menu';
+import { Segmented } from '@/components/ui/segmented';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export function DecksPage({
   onNavigate,
@@ -16,137 +21,112 @@ export function DecksPage({
   const [order, setOrder] = React.useState<'asc' | 'desc'>('desc');
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [retryKey, setRetryKey] = React.useState(0);
   const [deckToDelete, setDeckToDelete] = React.useState<DeckSummary | null>(null);
-  const [isDeleting, setIsDeleting] = React.useState(false);
 
   React.useEffect(() => {
+    let active = true;
     setIsLoading(true);
     setError(null);
 
-    listDecks({
-      search: search || undefined,
-      sort: 'created_at',
-      order,
-    })
-      .then(setDecks)
-      .catch((requestError) => setError(requestError.message))
-      .finally(() => setIsLoading(false));
-  }, [order, search]);
+    listDecks({ search: search || undefined, sort: 'created_at', order })
+      .then((result) => { if (active) setDecks(result); })
+      .catch((requestError) => { if (active) setError(requestError.message); })
+      .finally(() => { if (active) setIsLoading(false); });
 
-  return (
-    <section className="flex flex-col gap-4 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Decks</h1>
-        <a href="/decks/new" onClick={onNavigate} className={buttonVariants()}>
-          <Plus className="size-4" /> Create deck
-        </a>
-      </div>
+    return () => { active = false; };
+  }, [order, search, retryKey]);
 
-      <div className="grid gap-3 md:grid-cols-[1fr_12rem]">
-        <Input
-          value={search}
-          placeholder="Search by ID or title"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <select
-          value={order}
-          onChange={(event) => setOrder(event.target.value as 'asc' | 'desc')}
-          className="border-input bg-background h-9 rounded-lg border px-3 text-sm"
-        >
-          <option value="desc">Newest first</option>
-          <option value="asc">Oldest first</option>
-        </select>
-      </div>
-
-      {error ? <div className="text-destructive text-sm">{error}</div> : null}
-
-      <div className="divide-y overflow-hidden rounded-xl border">
-        {decks.map((deck) => (
-          <div key={deck.id} className="flex min-w-0 items-center gap-3 p-3 hover:bg-muted/30">
-            <a href={`/decks/${deck.id}`} onClick={onNavigate}
-              className="bg-muted text-muted-foreground flex size-12 shrink-0 items-center justify-center rounded-lg"
-              aria-label={`Open ${deck.title}`}>
-              {deck.systemKey === 'favorites' ? <Heart className="size-5" /> : <Layers3 className="size-5" />}
-            </a>
-            <div className="min-w-0 flex-1">
-              <a href={`/decks/${deck.id}`} onClick={onNavigate}
-                className="block truncate text-sm font-medium hover:underline">{deck.title}</a>
-              <span className="text-muted-foreground text-xs">{deck.cardCount} cards</span>
-            </div>
-            <div className="flex shrink-0 justify-end gap-1">
-              {deck.systemKey === 'favorites' ? null : (
-                <>
-                  <a href={`/decks/${deck.id}/edit`} onClick={onNavigate}
-                    className={buttonVariants({ variant: 'ghost', size: 'icon' })}
-                    aria-label={`Edit deck ${deck.id}`}>
-                    <Pencil className="size-4" />
-                  </a>
-                  <Button type="button" variant="ghost" size="icon"
-                    aria-label={`Delete deck ${deck.id}`} onClick={() => setDeckToDelete(deck)}>
-                    <Trash2 className="size-4" />
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        ))}
-        {!isLoading && decks.length === 0 ? (
-          <p className="text-muted-foreground px-3 py-8 text-center text-sm">No decks</p>
-        ) : null}
-      </div>
-
-      <Dialog
-        open={deckToDelete !== null}
-        title="Delete deck"
-        description={
-          deckToDelete
-            ? `Delete deck #${deckToDelete.id} ${deckToDelete.title}? This removes ${deckToDelete.cardCount} membership(s). Deleting this deck will not delete its cards.`
-            : undefined
-        }
-        onOpenChange={(open) => {
-          if (!open && !isDeleting) {
-            setDeckToDelete(null);
-          }
-        }}
-      >
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={isDeleting}
-            onClick={() => setDeckToDelete(null)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={isDeleting || deckToDelete === null}
-            onClick={handleDelete}
-          >
-            {isDeleting ? 'Deleting...' : 'Delete deck'}
-          </Button>
-        </div>
-      </Dialog>
-    </section>
+  const newDeck = (
+    <a href="/decks/new" onClick={onNavigate} className={buttonVariants()}>
+      <Plus className="size-4" /> New deck
+    </a>
   );
 
-  async function handleDelete() {
-    if (!deckToDelete) {
-      return;
-    }
+  return (
+    <section className="flex flex-col gap-5 px-4 py-6 sm:px-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">Decks</h1>
+        {newDeck}
+      </div>
 
-    setIsDeleting(true);
-    setError(null);
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          type="search"
+          value={search}
+          aria-label="Search decks"
+          placeholder="Search decks"
+          className="min-w-0 flex-1 sm:max-w-sm"
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <Segmented
+          ariaLabel="Sort decks"
+          value={order}
+          onValueChange={setOrder}
+          options={[
+            { value: 'desc', label: 'Newest' },
+            { value: 'asc', label: 'Oldest' },
+          ]}
+        />
+      </div>
 
-    try {
-      await deleteDeck(deckToDelete.id);
-      setDecks((current) => current.filter((deck) => deck.id !== deckToDelete.id));
-      setDeckToDelete(null);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to delete deck.');
-    } finally {
-      setIsDeleting(false);
-    }
-  }
+      {error ? (
+        <div className="flex flex-wrap items-center gap-3" role="alert">
+          <p className="text-destructive text-sm">{error}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => setRetryKey((key) => key + 1)}>Try again</Button>
+        </div>
+      ) : null}
+
+      {isLoading ? (
+        <div role="status" aria-label="Loading" className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+          {Array.from({ length: 8 }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
+        </div>
+      ) : null}
+
+      {!isLoading && !error && decks.length === 0 ? (
+        search ? (
+          <EmptyState icon={SearchX} title="No matching decks"
+            action={<Button type="button" variant="outline" size="sm" onClick={() => setSearch('')}>Clear search</Button>} />
+        ) : (
+          <EmptyState icon={Layers3} title="No decks yet" action={newDeck} />
+        )
+      ) : null}
+
+      {!isLoading && decks.length > 0 ? (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+          {decks.map((deck) => (
+            <DeckStack
+              key={deck.id}
+              deck={deck}
+              href={`/decks/${deck.id}`}
+              onNavigate={onNavigate}
+              actions={deck.systemKey === 'favorites' ? null : (
+                <Menu>
+                  <MenuTrigger render={<Button type="button" variant="ghost" size="icon-sm"
+                    aria-label={`Actions for ${deck.title}`} className="bg-surface/90 shadow-1 rounded-full" />}>
+                    <MoreHorizontal />
+                  </MenuTrigger>
+                  <MenuContent>
+                    <MenuLinkItem href={`/decks/${deck.id}/edit`} onClick={onNavigate}><Pencil /> Edit</MenuLinkItem>
+                    <MenuItem onClick={() => setDeckToDelete(deck)} className="text-destructive [&_svg]:text-destructive">
+                      <Trash2 /> Delete
+                    </MenuItem>
+                  </MenuContent>
+                </Menu>
+              )}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      <DeleteDeckDialog
+        deck={deckToDelete}
+        onClose={() => setDeckToDelete(null)}
+        onDeleted={(id) => {
+          setDecks((current) => current.filter((deck) => deck.id !== id));
+          setDeckToDelete(null);
+        }}
+      />
+    </section>
+  );
 }

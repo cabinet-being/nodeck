@@ -59,12 +59,15 @@ export function VisualCardWall({
   density = 'default',
   onNavigate,
   renderCaption,
+  renderActions,
 }: {
   cards: VisualCard[];
   view: VisualCardView;
   density?: VisualCardDensity;
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   renderCaption?: (index: number) => React.ReactNode;
+  /** Extra round port buttons for a tile. */
+  renderActions?: (index: number) => React.ReactNode;
 }) {
   return (
     <div
@@ -83,11 +86,12 @@ export function VisualCardWall({
     >
       {cards.map((card, index) => (
         <CardTile
-          key={renderCaption ? `${card.id}-${index}` : card.id}
+          key={renderCaption || renderActions ? `${card.id}-${index}` : card.id}
           card={card}
           layout={view}
           onNavigate={onNavigate}
           caption={renderCaption ? renderCaption(index) : undefined}
+          actions={renderActions ? renderActions(index) : undefined}
         />
       ))}
     </div>

@@ -1,10 +1,14 @@
 import * as React from 'react';
-import { X } from 'lucide-react';
+import { Heart, Images } from 'lucide-react';
 
-import { resolveApiUrl, removeFavorite } from '@/api/cards';
+import { removeFavorite } from '@/api/cards';
 import { getFavorites, type DeckCard } from '@/api/decks';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { cardLabel } from '@/components/card-tile';
+import { deckCardCountLabel } from '@/components/deck-stack';
+import { EmptyState } from '@/components/empty-state';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useVisualCardView, VisualCardViewToggle, VisualCardWall } from '@/components/visual-card-wall';
 
 export function FavoritesPage({
   onNavigate,
@@ -13,41 +17,79 @@ export function FavoritesPage({
 }) {
   const [cards, setCards] = React.useState<DeckCard[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [retryKey, setRetryKey] = React.useState(0);
   const [removingCardId, setRemovingCardId] = React.useState<number | null>(null);
+  const [view, setView] = useVisualCardView('nodeck.favoritesView');
 
   React.useEffect(() => {
+    let active = true;
     setError(null);
+    setIsLoading(true);
 
     getFavorites()
-      .then((deck) => setCards(deck.cards))
-      .catch((requestError) => setError(requestError.message));
-  }, []);
+      .then((deck) => { if (active) setCards(deck.cards); })
+      .catch((requestError) => { if (active) setError(requestError.message); })
+      .finally(() => { if (active) setIsLoading(false); });
+
+    return () => { active = false; };
+  }, [retryKey]);
 
   return (
-    <section className="flex flex-col gap-4 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Favorites</h1>
-        <div className="text-muted-foreground text-sm">{cards.length} card(s)</div>
+    <section className="flex flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+          <Heart className="text-primary size-5 fill-current" aria-hidden="true" />
+          Favorites
+          {!isLoading && !error ? (
+            <span className="text-muted-foreground text-base font-normal tabular-nums">· {deckCardCountLabel(cards.length)}</span>
+          ) : null}
+        </h1>
+        {cards.length > 0 ? <VisualCardViewToggle view={view} onChange={setView} /> : null}
       </div>
 
-      {error ? <div className="text-destructive text-sm">{error}</div> : null}
+      {error ? (
+        <div className="flex flex-wrap items-center gap-3" role="alert">
+          <p className="text-destructive text-sm">{error}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => setRetryKey((key) => key + 1)}>Try again</Button>
+        </div>
+      ) : null}
 
-      <div className="grid gap-3">
-        {cards.map((card) => (
-          <FavoriteCard
-            key={card.id}
-            card={card}
-            isRemoving={removingCardId === card.id}
-            onNavigate={onNavigate}
-            onRemove={handleRemove}
-          />
-        ))}
-        {cards.length === 0 ? (
-          <div className="text-muted-foreground rounded-lg border p-6 text-center text-sm">
-            No favorite cards
-          </div>
-        ) : null}
-      </div>
+      {isLoading ? (
+        <div role="status" aria-label="Loading" className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-6">
+          {Array.from({ length: 12 }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
+        </div>
+      ) : null}
+
+      {!isLoading && !error && cards.length === 0 ? (
+        <EmptyState icon={Heart} title="No favorites yet"
+          action={<a href="/gallery" onClick={onNavigate} className={buttonVariants({ variant: 'outline' })}><Images className="size-4" /> Browse gallery</a>} />
+      ) : null}
+
+      {!isLoading && cards.length > 0 ? (
+        <VisualCardWall
+          cards={cards}
+          view={view}
+          onNavigate={onNavigate}
+          renderActions={(index) => {
+            const card = cards[index];
+            return (
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                aria-label="Remove from favorites"
+                title={`Remove ${cardLabel(card)} from favorites`}
+                disabled={removingCardId === card.id}
+                className="bg-surface/95 text-primary shadow-1 size-8 rounded-full pointer-coarse:size-11"
+                onClick={(event) => { event.preventDefault(); event.stopPropagation(); void handleRemove(card.id); }}
+              >
+                <Heart className="fill-current" />
+              </Button>
+            );
+          }}
+        />
+      ) : null}
     </section>
   );
 
@@ -64,52 +106,4 @@ export function FavoritesPage({
       setRemovingCardId(null);
     }
   }
-}
-
-function FavoriteCard({
-  card,
-  isRemoving,
-  onNavigate,
-  onRemove,
-}: {
-  card: DeckCard;
-  isRemoving: boolean;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  onRemove: (cardId: number) => void;
-}) {
-  return (
-    <div className="grid gap-3 rounded-lg border p-3 hover:bg-muted/50 md:grid-cols-[auto_1fr_auto]">
-      {card.previewUrl ? (
-        <a href={`/cards/${card.id}`} onClick={onNavigate}>
-          <img
-            src={resolveApiUrl(card.previewUrl)}
-            alt={card.title ?? ''}
-            className="bg-muted size-20 rounded border object-cover"
-            loading="lazy"
-          />
-        </a>
-      ) : (
-        <div className="flex items-start pt-1">
-          <Badge variant="outline">{card.type}</Badge>
-        </div>
-      )}
-      <a href={`/cards/${card.id}`} onClick={onNavigate} className="min-w-0">
-        <div className="mb-1 flex flex-wrap items-center gap-2">
-          <span className="text-muted-foreground text-sm">#{card.id}</span>
-          {card.previewUrl ? <Badge variant="outline">{card.type}</Badge> : null}
-        </div>
-        <div className="truncate font-medium">{card.title ?? card.type}</div>
-      </a>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-label={`Remove card ${card.id} from Favorites`}
-        disabled={isRemoving}
-        onClick={() => onRemove(card.id)}
-      >
-        <X className="size-4" />
-      </Button>
-    </div>
-  );
 }

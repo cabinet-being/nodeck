@@ -1,11 +1,15 @@
 import * as React from 'react';
-import { LoaderCircle, Pencil, X } from 'lucide-react';
+import { Heart, Info, LoaderCircle, MinusCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { type Card } from '@/api/cards';
 import { getDeck, removeCardFromDeck, type DeckDetails } from '@/api/decks';
 import { CardBrowser } from '@/components/card-browser';
+import { cardLabel } from '@/components/card-tile';
+import { deckCardCountLabel } from '@/components/deck-stack';
+import { DeleteDeckDialog } from '@/components/delete-deck-dialog';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
+import { Sheet } from '@/components/ui/sheet';
 
 export function DeckDetailsPage({
   deckId,
@@ -27,6 +31,8 @@ export function DeckDetailsPage({
   const [removingId, setRemovingId] = React.useState<number | null>(null);
   const [removeError, setRemoveError] = React.useState<string | null>(null);
   const [headerRetry, setHeaderRetry] = React.useState(0);
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
   const pageCount = React.useRef(0);
   const currentDeckId = React.useRef(deckId);
   currentDeckId.current = deckId;
@@ -37,6 +43,8 @@ export function DeckDetailsPage({
     let active = true;
     setRemovingId(null);
     setRemoveError(null);
+    setDetailsOpen(false);
+    setDeleteOpen(false);
 
     getDeck(deckId, { includeCards: false })
       .then((deck) => {
@@ -100,113 +108,150 @@ export function DeckDetailsPage({
     }
   }
 
+  const isFavorites = deck.systemKey === 'favorites';
+
   return (
-    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div className="grid min-w-0 gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">{deck.title}</h1>
-            <p className="text-muted-foreground text-sm">{deck.cardCount} card(s)</p>
-          </div>
-          {deck.systemKey === 'favorites' ? null : (
-            <a
-              href={`/decks/${deck.id}/edit`}
-              onClick={onNavigate}
-              className={buttonVariants({ variant: 'outline', size: 'icon' })}
-              aria-label={`Edit ${deck.title}`}
-              title="Edit deck"
-            >
-              <Pencil className="size-4" />
+    <section className="grid gap-5 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="flex min-w-0 items-center gap-2 text-2xl font-semibold tracking-tight">
+          {isFavorites ? <Heart className="text-primary size-5 shrink-0 fill-current" aria-hidden="true" /> : null}
+          <span className="truncate">{deck.title}</span>
+          <span className="text-muted-foreground text-base font-normal whitespace-nowrap tabular-nums">
+            · {deckCardCountLabel(deck.cardCount)}
+          </span>
+        </h1>
+        <div className="flex items-center gap-1">
+          {isFavorites ? null : (
+            <a href={`/decks/${deck.id}/edit`} onClick={onNavigate} className={buttonVariants({ variant: 'outline' })}>
+              <Pencil className="size-4" /> Edit
             </a>
           )}
+          <Menu>
+            <MenuTrigger render={<Button type="button" variant="ghost" size="icon" aria-label="More actions" />}>
+              <MoreHorizontal />
+            </MenuTrigger>
+            <MenuContent>
+              <MenuItem onClick={() => setDetailsOpen(true)}><Info /> Details</MenuItem>
+              {isFavorites ? null : (
+                <MenuItem onClick={() => setDeleteOpen(true)} className="text-destructive [&_svg]:text-destructive">
+                  <Trash2 /> Delete
+                </MenuItem>
+              )}
+            </MenuContent>
+          </Menu>
         </div>
-
-        {removeError ? <p className="text-destructive text-sm" role="alert">{removeError}</p> : null}
-        <CardBrowser
-          scope={{ kind: 'deck', deckId }}
-          basePath={`/decks/${deckId}`}
-          currentSearch={currentSearch}
-          onNavigate={onNavigate}
-          onNavigateTo={onNavigateTo}
-          viewStorageKey="nodeck.deckView"
-          reloadKey={reloadKey}
-          emptyMessage="This deck has no cards yet."
-          onPageLoaded={({ count }) => { pageCount.current = count; }}
-          renderCaption={(card) => (
-            <DeckCardCaption
-              card={card}
-              onNavigate={onNavigate}
-              onRemove={canRemove ? removeCard : undefined}
-              isRemoving={removingId === card.id}
-              isSaving={removingId !== null}
-            />
-          )}
-        />
       </div>
 
-      <aside className="grid content-start gap-4">
-        <details className="rounded-lg border">
-          <summary className="cursor-pointer px-4 py-3 text-sm">Technical details</summary>
-          <div className="grid gap-3 border-t p-3">
-            <JsonPanel title="Properties" value={deck.properties} />
-            <JsonPanel title="Metadata" value={deck.metadata} />
-          </div>
-        </details>
-      </aside>
+      {removeError ? <p className="text-destructive text-sm" role="alert">{removeError}</p> : null}
+      <CardBrowser
+        scope={{ kind: 'deck', deckId }}
+        basePath={`/decks/${deckId}`}
+        currentSearch={currentSearch}
+        onNavigate={onNavigate}
+        onNavigateTo={onNavigateTo}
+        viewStorageKey="nodeck.deckView"
+        reloadKey={reloadKey}
+        emptyMessage="This deck has no cards yet."
+        onPageLoaded={({ count }) => { pageCount.current = count; }}
+        renderActions={canRemove ? (card) => (
+          <RemoveFromDeckButton
+            card={card}
+            isRemoving={removingId === card.id}
+            disabled={removingId !== null}
+            onRemove={removeCard}
+          />
+        ) : undefined}
+      />
+
+      <DeckDetailsSheet deck={deck} open={detailsOpen} onOpenChange={setDetailsOpen} />
+      <DeleteDeckDialog
+        deck={deleteOpen ? deck : null}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={() => { setDeleteOpen(false); onNavigateTo('/decks'); }}
+      />
     </section>
   );
 }
 
-function DeckCardCaption({
+function RemoveFromDeckButton({
   card,
-  onNavigate,
-  onRemove,
   isRemoving,
-  isSaving,
+  disabled,
+  onRemove,
 }: {
   card: Card;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  onRemove?: (cardId: number) => void;
   isRemoving: boolean;
-  isSaving: boolean;
+  disabled: boolean;
+  onRemove: (cardId: number) => void;
 }) {
-  const label = card.title ?? card.type;
-  const membership = card.membershipProperties;
   return (
-    <div className="bg-background/95 flex min-w-0 items-center gap-2 p-2">
-      <a href={`/cards/${card.id}`} onClick={onNavigate} className="block min-w-0 flex-1 hover:underline" aria-label={`Open ${label}`}>
-        <div className="text-muted-foreground truncate text-xs">
-          {card.deckPosition != null ? `#${card.deckPosition + 1} · ` : ''}{card.type} · ID {card.id}
-        </div>
-        <div className="truncate text-sm font-medium" title={label}>{label}</div>
-      </a>
-      {membership && Object.keys(membership).length > 0 ? (
-        <details className="text-muted-foreground text-xs">
-          <summary className="cursor-pointer" aria-label={`Membership properties for ${label}`}>Details</summary>
-          <dl className="mt-2 space-y-1 break-words">
-            {Object.entries(membership).map(([key, value]) => (
-              <div key={key}>
-                <dt className="inline font-medium">{key}: </dt>
-                <dd className="inline">{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      ) : null}
-      {onRemove ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          disabled={isSaving}
-          aria-label={`Remove ${label} from deck`}
-          title="Remove from deck"
-          onClick={() => onRemove(card.id)}
-        >
-          {isRemoving ? <LoaderCircle className="size-4 animate-spin" /> : <X className="size-4" />}
-        </Button>
-      ) : null}
-    </div>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      disabled={disabled}
+      aria-label="Remove from deck"
+      title={`Remove ${cardLabel(card)} from deck`}
+      className="bg-surface/95 text-foreground shadow-1 size-8 rounded-full pointer-coarse:size-11"
+      onClick={(event) => { event.preventDefault(); event.stopPropagation(); onRemove(card.id); }}
+    >
+      {isRemoving ? <LoaderCircle className="animate-spin" /> : <MinusCircle />}
+    </Button>
+  );
+}
+
+function DeckDetailsSheet({
+  deck,
+  open,
+  onOpenChange,
+}: {
+  deck: DeckDetails;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [members, setMembers] = React.useState<DeckDetails['cards'] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const deckId = deck.id;
+
+  React.useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setMembers(null);
+    setError(null);
+    getDeck(deckId)
+      .then((full) => { if (active) setMembers(full.cards); })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Unable to load details.'); });
+    return () => { active = false; };
+  }, [open, deckId]);
+
+  const withProperties = (members ?? []).filter(
+    (card) => card.membershipProperties && Object.keys(card.membershipProperties).length > 0
+  );
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange} title="Details" side="right">
+      <JsonPanel title="Properties" value={deck.properties} />
+      <JsonPanel title="Metadata" value={deck.metadata} />
+      <div className="grid gap-2">
+        <h3 className="text-sm font-medium">Card properties in this deck</h3>
+        {error ? <p className="text-destructive text-sm" role="alert">{error}</p> : null}
+        {!members && !error ? <p className="text-muted-foreground text-sm">Loading...</p> : null}
+        {members && withProperties.length === 0 ? <p className="text-muted-foreground text-sm">None</p> : null}
+        {withProperties.map((card) => (
+          <div key={card.id} className="bg-muted/50 rounded-lg p-3 text-xs">
+            <div className="mb-1 truncate text-sm font-medium">{cardLabel(card)}</div>
+            <dl className="space-y-1 break-words">
+              {Object.entries(card.membershipProperties ?? {}).map(([key, value]) => (
+                <div key={key}>
+                  <dt className="inline font-medium">{key}: </dt>
+                  <dd className="inline">{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+    </Sheet>
   );
 }
 
@@ -218,15 +263,11 @@ function JsonPanel({
   value: Record<string, unknown> | null;
 }) {
   return (
-    <UiCard>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <pre className="bg-muted/50 max-h-72 overflow-auto rounded-lg p-3 text-xs">
-          {JSON.stringify(value ?? {}, null, 2)}
-        </pre>
-      </CardContent>
-    </UiCard>
+    <div className="grid gap-2">
+      <h3 className="text-sm font-medium">{title}</h3>
+      <pre className="bg-muted/50 max-h-60 overflow-auto rounded-lg p-3 text-xs">
+        {JSON.stringify(value ?? {}, null, 2)}
+      </pre>
+    </div>
   );
 }
