@@ -54,9 +54,12 @@ public static class DeckEndpoints
         return Results.Ok(decks);
     }
 
-    private static async Task<IResult> GetDeckAsync(DeckRepository repository, long id)
+    private static async Task<IResult> GetDeckAsync(
+        DeckRepository repository,
+        long id,
+        bool? include_cards)
     {
-        var deck = await repository.GetByIdAsync(id);
+        var deck = await repository.GetByIdAsync(id, include_cards ?? true);
 
         return deck is null ? Results.NotFound(new { error = "Deck not found." }) : Results.Ok(deck);
     }

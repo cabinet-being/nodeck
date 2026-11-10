@@ -280,7 +280,8 @@ public static class CardEndpoints
         string? sort,
         string? order,
         int? limit,
-        int? offset)
+        int? offset,
+        string? deck_id)
     {
         if (!TryReadTypes(type, types, out var requestedTypes, out var typeError))
         {
@@ -289,19 +290,41 @@ public static class CardEndpoints
         if (limit is < 1 or > 200 || offset < 0)
             return Results.BadRequest(new { error = "limit must be 1–200 and offset must be nonnegative." });
 
-        var cards = await repository.ListAsync(
-            requestedTypes,
-            mediaType ?? media_type,
-            search,
-            IsTruthy(exclude_contained_media),
-            ParseLongList(tags),
-            ParseLongOrNull(source),
-            ParseLongList(catalog_tags),
-            ParseLongOrNull(catalog_source),
-            sort ?? "created_at",
-            order ?? "desc",
-            limit ?? 200,
-            offset ?? 0);
+        long? deckId = null;
+        if (deck_id is not null)
+        {
+            if (!long.TryParse(deck_id, out var parsedDeckId) || parsedDeckId < 1)
+                return Results.BadRequest(new { error = "deck_id must be a positive integer." });
+            deckId = parsedDeckId;
+        }
+        var effectiveSort = string.IsNullOrWhiteSpace(sort)
+            ? (deckId is null ? "created_at" : "position")
+            : sort;
+        if (deckId is null && string.Equals(effectiveSort, "position", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { error = "sort=position requires deck_id." });
+
+        IReadOnlyList<CardSummary> cards;
+        try
+        {
+            cards = await repository.ListAsync(new CardListQuery(
+                requestedTypes,
+                mediaType ?? media_type,
+                search,
+                IsTruthy(exclude_contained_media),
+                ParseLongList(tags),
+                ParseLongOrNull(source),
+                ParseLongList(catalog_tags),
+                ParseLongOrNull(catalog_source),
+                effectiveSort,
+                order ?? "desc",
+                limit ?? 200,
+                offset ?? 0,
+                deckId));
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "Deck not found." });
+        }
 
         return Results.Ok(cards);
     }

@@ -90,7 +90,7 @@ public sealed class DeckRepository
         return rows.Select(ToSummary).ToList();
     }
 
-    public async Task<DeckDetails?> GetByIdAsync(long id)
+    public async Task<DeckDetails?> GetByIdAsync(long id, bool includeCards = true)
     {
         await using var connection = new MySqlConnection(_connectionString);
 
@@ -112,9 +112,14 @@ public sealed class DeckRepository
             return null;
         }
 
-        var cards = await GetDeckCardsAsync(connection, id);
+        if (includeCards)
+            return ToDetails(deck, await GetDeckCardsAsync(connection, id));
 
-        return ToDetails(deck, cards);
+        var cardCount = await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM deck_cards WHERE deck_id = @Id;",
+            new { Id = id });
+
+        return ToDetails(deck, []) with { CardCount = cardCount };
     }
 
     public async Task<IReadOnlyList<DeckSummary>> GetCardDecksAsync(long cardId)

@@ -16,7 +16,10 @@ public sealed record DeckDetails(
     JsonNode? Properties,
     JsonNode Metadata,
     string? SystemKey,
-    IReadOnlyList<DeckCardResponse> Cards);
+    IReadOnlyList<DeckCardResponse> Cards)
+{
+    public long CardCount { get; init; } = Cards.Count;
+}
 
 public sealed record DeckCardResponse(
     long Id,

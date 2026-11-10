@@ -7,7 +7,7 @@ namespace MyApp.Api.Cards;
 
 public sealed partial class CardRepository
 {
-    public async Task<IReadOnlyList<CardSummary>> ListAsync(
+    public Task<IReadOnlyList<CardSummary>> ListAsync(
         IReadOnlyList<string> types,
         string? mediaType,
         string? search,
@@ -19,8 +19,18 @@ public sealed partial class CardRepository
         string sort,
         string order,
         int limit = 200,
-        int offset = 0)
+        int offset = 0) =>
+        ListAsync(new CardListQuery(
+            types, mediaType, search, excludeContainedMedia, tagIds, sourceId,
+            catalogTagIds, catalogSourceId, sort, order, limit, offset));
+
+    public async Task<IReadOnlyList<CardSummary>> ListAsync(CardListQuery query)
     {
+        var (types, mediaType, search, excludeContainedMedia, tagIds, sourceId,
+            catalogTagIds, catalogSourceId, sort, order, limit, offset, deckId) = query;
+        var positionSort = string.Equals(sort, "position", StringComparison.OrdinalIgnoreCase);
+        if (positionSort && deckId is null)
+            throw new ArgumentException("sort=position requires deck_id.", nameof(query));
         if (limit is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(limit));
         if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
         await using var connection = new MySqlConnection(_connectionString);
@@ -28,15 +38,23 @@ public sealed partial class CardRepository
         var conditions = new List<string>();
         var parameters = new DynamicParameters();
 
+        if (deckId is not null)
+        {
+            var deckExists = await connection.ExecuteScalarAsync<long>(
+                "SELECT COUNT(*) FROM decks WHERE id = @DeckId;", new { DeckId = deckId.Value });
+            if (deckExists == 0) throw new KeyNotFoundException("Deck not found.");
+            parameters.Add("DeckId", deckId.Value);
+        }
+
         if (types.Count > 0)
         {
-            conditions.Add("type IN @Types");
+            conditions.Add("cards.type IN @Types");
             parameters.Add("Types", types);
         }
 
         if (!string.IsNullOrWhiteSpace(mediaType))
         {
-            conditions.Add("JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.media_type')) = @MediaType");
+            conditions.Add("JSON_UNQUOTE(JSON_EXTRACT(cards.metadata, '$.media_type')) = @MediaType");
             parameters.Add("MediaType", mediaType);
         }
 
@@ -149,28 +167,58 @@ public sealed partial class CardRepository
             ? "ASC"
             : "DESC";
         var orderColumn = string.Equals(sort, "created_at", StringComparison.OrdinalIgnoreCase)
-            ? "created_at"
-            : "id";
+            ? "cards.created_at"
+            : "cards.id";
+        var orderBy = positionSort
+            ? "dc.position ASC, cards.id ASC"
+            : $"{orderColumn} {orderDirection}, cards.id {orderDirection}";
+        var deckJoin = deckId is null
+            ? ""
+            : "JOIN deck_cards dc ON dc.card_id = cards.id AND dc.deck_id = @DeckId";
+        var deckColumns = deckId is null
+            ? "NULL AS DeckPosition, NULL AS MembershipProperties"
+            : "dc.position AS DeckPosition, dc.properties AS MembershipProperties";
         parameters.Add("Limit", limit);
         parameters.Add("Offset", offset);
 
-        var rows = await connection.QueryAsync<DbCard>(
+        var rows = await connection.QueryAsync<DbListCard>(
             $"""
             SELECT
-                id AS {nameof(DbCard.Id)},
-                type AS {nameof(DbCard.Type)},
-                title AS {nameof(DbCard.Title)},
-                preview AS {nameof(DbCard.Preview)},
-                properties AS {nameof(DbCard.Properties)},
-                metadata AS {nameof(DbCard.Metadata)},
-                {FavoriteSelectSql("cards.id")} AS {nameof(DbCard.IsFavorite)}
+                cards.id AS {nameof(DbListCard.Id)},
+                cards.type AS {nameof(DbListCard.Type)},
+                cards.title AS {nameof(DbListCard.Title)},
+                cards.preview AS {nameof(DbListCard.Preview)},
+                cards.properties AS {nameof(DbListCard.Properties)},
+                cards.metadata AS {nameof(DbListCard.Metadata)},
+                {FavoriteSelectSql("cards.id")} AS {nameof(DbListCard.IsFavorite)},
+                {deckColumns}
             FROM cards
+            {deckJoin}
             {where}
-            ORDER BY {orderColumn} {orderDirection}, id {orderDirection}
+            ORDER BY {orderBy}
             LIMIT @Limit OFFSET @Offset;
             """,
             parameters);
 
-        return rows.Select(ToSummary).ToList();
+        return rows.Select(row => ToSummary(new DbCard(
+                row.Id, row.Type, row.Title, row.Preview, row.Properties, row.Metadata, row.IsFavorite))
+            with
+            {
+                DeckPosition = row.DeckPosition,
+                MembershipProperties = deckId is null ? null : CardMetadata.ParseOptionalJson(row.MembershipProperties),
+            }).ToList();
     }
+}
+
+internal sealed class DbListCard
+{
+    public long Id { get; set; }
+    public string Type { get; set; } = "";
+    public string? Title { get; set; }
+    public string? Preview { get; set; }
+    public string? Properties { get; set; }
+    public string Metadata { get; set; } = "{}";
+    public long IsFavorite { get; set; }
+    public int? DeckPosition { get; set; }
+    public string? MembershipProperties { get; set; }
 }

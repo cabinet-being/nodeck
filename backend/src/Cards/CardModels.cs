@@ -14,6 +14,8 @@ public sealed record CardSummary(
 {
     public string? PlaybackUrl { get; init; }
     public string? PosterUrl { get; init; }
+    public int? DeckPosition { get; init; }
+    public JsonNode? MembershipProperties { get; init; }
 }
 
 public sealed record CardDetails(
