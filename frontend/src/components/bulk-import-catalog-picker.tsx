@@ -1,7 +1,9 @@
 import * as React from 'react';
-import { ChevronDown, Tags, X } from 'lucide-react';
+import { ChevronDown, Tags } from 'lucide-react';
 
 import { listSources, listTags, type Source, type Tag } from '@/api/catalog';
+import { InfoHint } from '@/components/form-layout';
+import { NodeChip } from '@/components/node-chip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -39,48 +41,45 @@ export function BulkImportCatalogPicker({ selection, onChange, locked }: {
     return () => { active = false; };
   }, [open, locked, sourceSearch]);
 
-  return <section className="rounded-xl border p-4">
-    <Button type="button" variant="ghost" size="sm" aria-expanded={open} aria-controls="import-catalog-options"
-      onClick={() => setOpen((current) => !current)}>
-      <Tags className="size-4" /> Tags & source <ChevronDown className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`} />
-    </Button>
-    <p className="text-muted-foreground mt-1 text-xs">
-      {selection.tags.length} tags{selection.source ? ` · ${selection.source.name}` : ''}{locked && ' · locked for this import'}
-    </p>
-    {open && <div id="import-catalog-options" className="mt-3 grid gap-3 sm:grid-cols-2">
-      <p className="text-muted-foreground text-xs sm:col-span-2">Applied to every imported card and group.</p>
+  return <section className="grid min-w-0 flex-1 gap-2">
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="flex items-center text-sm font-medium">Apply to all
+        <InfoHint label="Applied to every imported card and group." />
+      </span>
+      {selection.tags.map((tag) => <NodeChip key={tag.id} kind="tag" label={tag.name} category={tag.category} origin={tag.origin}
+        onRemove={locked ? undefined : () => onChange({ ...selection, tags: selection.tags.filter((candidate) => candidate.id !== tag.id) })}
+        removeLabel={`Remove import tag ${tag.name}`} />)}
+      {selection.source && <NodeChip kind="source" label={selection.source.name}
+        onRemove={locked ? undefined : () => onChange({ ...selection, source: null, originalUrl: '' })}
+        removeLabel={`Remove import source ${selection.source.name}`} />}
+      <Button type="button" variant="outline" size="sm" aria-expanded={open} aria-controls="import-catalog-options"
+        onClick={() => setOpen((current) => !current)}>
+        <Tags className="size-4" /> {selection.tags.length === 0 && !selection.source ? 'Add tags or source' : 'Edit'}
+        <ChevronDown className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </Button>
+      {locked && <span className="text-muted-foreground text-xs">Locked for this import</span>}
+    </div>
+    {open && <div id="import-catalog-options" className="bg-surface grid gap-3 rounded-2xl border p-3 sm:grid-cols-2">
       <div className="grid content-start gap-2">
-        <Input type="search" aria-label="Find import tag" placeholder="Search existing tags by name"
+        <Input type="search" aria-label="Find import tag" placeholder="Search tags"
           value={tagSearch} disabled={locked} onChange={(event) => { setTagSearch(event.target.value); setTagChoices([]); }} />
-        <div className="flex flex-wrap gap-1">
-          {selection.tags.map((tag) => <Button key={tag.id} type="button" variant="outline" size="sm"
-            disabled={locked} aria-label={`Remove import tag ${tag.name}`}
-            onClick={() => onChange({ ...selection, tags: selection.tags.filter((candidate) => candidate.id !== tag.id) })}>
-            {tag.name} <X className="size-3" />
-          </Button>)}
-        </div>
         {tagSearch.trim() && <div className="grid max-h-36 gap-1 overflow-auto">
           {tagChoices.filter((tag) => !selection.tags.some((selected) => selected.id === tag.id))
             .map((tag) => <Button key={tag.id} type="button" variant="ghost" size="sm"
               className="justify-start" disabled={locked}
               onClick={() => { onChange({ ...selection, tags: [...selection.tags, tag] }); setTagSearch(''); }}>
-              {tag.name}{tag.nameConflict ? ' · legacy duplicate' : ''}
+              {tag.name}{tag.nameConflict ? ' · duplicate name' : ''}
             </Button>)}
         </div>}
       </div>
       <div className="grid content-start gap-2">
-        <Input type="search" aria-label="Find import source" placeholder="Search existing sources by name"
+        <Input type="search" aria-label="Find import source" placeholder="Search sources"
           value={sourceSearch} disabled={locked} onChange={(event) => { setSourceSearch(event.target.value); setSourceChoices([]); }} />
-        {selection.source && <Button type="button" variant="outline" size="sm" disabled={locked}
-          className="justify-start" aria-label={`Remove import source ${selection.source.name}`}
-          onClick={() => onChange({ ...selection, source: null, originalUrl: '' })}>
-          {selection.source.name} <X className="size-3" />
-        </Button>}
         {sourceSearch.trim() && <div className="grid max-h-36 gap-1 overflow-auto">
           {sourceChoices.map((source) => <Button key={source.id} type="button" variant="ghost" size="sm"
             className="justify-start" disabled={locked}
             onClick={() => { onChange({ ...selection, source }); setSourceSearch(''); }}>
-            {source.name}{source.nameConflict ? ' · legacy duplicate' : ''}
+            {source.name}{source.nameConflict ? ' · duplicate name' : ''}
           </Button>)}
         </div>}
         {selection.source && <Input aria-label="Original URL for import source" placeholder="Original URL (optional)"

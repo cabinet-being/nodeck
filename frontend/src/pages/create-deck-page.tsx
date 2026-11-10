@@ -8,6 +8,7 @@ import {
   toRecord,
   type DeckFormValue,
 } from '@/components/deck-form';
+import { FormPage } from '@/components/form-layout';
 
 const initialValue: DeckFormValue = {
   title: '',
@@ -58,8 +59,7 @@ export function CreateDeckPage({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Create Deck</h1>
+    <FormPage title="Create deck">
       <DeckForm
         value={value}
         availableCards={availableCards}
@@ -71,6 +71,6 @@ export function CreateDeckPage({
         onSubmit={handleSubmit}
         onCancel={onCancel}
       />
-    </section>
+    </FormPage>
   );
 }

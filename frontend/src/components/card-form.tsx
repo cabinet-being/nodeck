@@ -3,8 +3,9 @@ import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2, Upload } from 'lucide-r
 
 import { cardTypes, relationTypes, type Card, type CreateRelationInput } from '@/api/cards';
 import { Button } from '@/components/ui/button';
-import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Advanced, FormActions, FormSection, relationLabel } from '@/components/form-layout';
 import { Input } from '@/components/ui/input';
+import { Segmented } from '@/components/ui/segmented';
 
 export type KeyValueRow = {
   key: string;
@@ -42,6 +43,7 @@ export function CardForm({
   typeLocked = false,
   onValueChange,
   onSubmit,
+  onCancel,
   incomingRelations,
 }: {
   value: CardFormValue;
@@ -53,6 +55,7 @@ export function CardForm({
   typeLocked?: boolean;
   onValueChange: (value: CardFormValue) => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCancel?: () => void;
   incomingRelations?: React.ReactNode;
 }) {
   const isMultiImageCard = !typeLocked && (value.type === 'comic' || value.type === 'set');
@@ -63,33 +66,23 @@ export function CardForm({
 
   return (
     <form onSubmit={onSubmit} className="grid gap-4">
-      <UiCard>
-        <CardContent className="grid gap-4">
-          <label className="grid gap-2 text-sm font-medium">
+      <FormSection>
+          <div className="grid gap-2 text-sm font-medium">
             Type
-            <select
-              value={value.type}
-              disabled={typeLocked}
-              onChange={(event) =>
-                onValueChange({
-                  ...value,
-                  type: event.target.value,
-                  image: undefined,
-                  images: [],
-                })
-              }
-              className="border-input bg-background h-9 rounded-lg border px-3 text-sm disabled:opacity-70"
-            >
-              {cardTypes.map((cardType) => (
-                <option key={cardType} value={cardType}>
-                  {cardType}
-                </option>
-              ))}
-              {typeLocked && !cardTypes.some((cardType) => cardType === value.type) ? (
-                <option value={value.type}>{value.type} (legacy)</option>
-              ) : null}
-            </select>
-          </label>
+            {typeLocked ? (
+              <span className="text-muted-foreground font-normal capitalize">{value.type}</span>
+            ) : (
+              <Segmented
+                ariaLabel="Card type"
+                value={value.type}
+                onValueChange={(type) => onValueChange({ ...value, type, image: undefined, images: [] })}
+                options={cardTypes.map((cardType) => ({
+                  value: cardType,
+                  label: <span className="capitalize">{cardType}</span>,
+                }))}
+              />
+            )}
+          </div>
 
           <label className="grid gap-2 text-sm font-medium">
             Title
@@ -219,24 +212,20 @@ export function CardForm({
               ) : null}
             </div>
           ) : null}
+      </FormSection>
 
-        </CardContent>
-      </UiCard>
-
-      <details className="rounded-xl border p-4" open={value.properties.length > 0 ? true : undefined}>
-        <summary className="cursor-pointer text-sm font-medium">Properties {value.properties.length > 0 && `(${value.properties.length})`}</summary>
-        <div className="mt-4">
+      <Advanced summary={`Advanced${value.properties.length > 0 ? ` (${value.properties.length} properties)` : ''}`}
+        defaultOpen={value.properties.length > 0}>
+        <div className="grid gap-2 text-sm font-medium">
+          Properties
           <KeyValueEditor
             rows={value.properties}
             onRowsChange={(properties) => onValueChange({ ...value, properties })}
           />
         </div>
-      </details>
+      </Advanced>
 
-      <UiCard>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle>Outgoing relations</CardTitle>
+      <FormSection title="Related cards" action={
             <Button
               type="button"
               variant="outline"
@@ -253,9 +242,7 @@ export function CardForm({
               <Plus className="size-4" />
               Add relation
             </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-4">
+      }>
           {value.relations.map((relation, index) => isContentCard && relation.relationType !== 'related_to' ? null : (
             <div key={index} className="grid gap-3 rounded-lg border p-3">
               <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
@@ -267,14 +254,14 @@ export function CardForm({
                       toCardId: event.target.value,
                     })
                   }
-                  className="border-input bg-background h-9 rounded-lg border px-3 text-sm"
+                  aria-label="Related card" className="border-input bg-background h-9 rounded-lg border px-3 text-sm pointer-coarse:h-11"
                 >
-                  <option value="">Target card</option>
+                  <option value="">Choose a card</option>
                   {availableCards
                     .filter((card) => String(card.id) !== relation.toCardId || relation.toCardId)
                     .map((card) => (
                       <option key={card.id} value={card.id}>
-                        #{card.id} {card.title ?? card.type}
+                        {card.title || `Untitled ${card.type}`}
                       </option>
                     ))}
                 </select>
@@ -287,11 +274,11 @@ export function CardForm({
                       relationType: event.target.value,
                     })
                   }
-                  className="border-input bg-background h-9 rounded-lg border px-3 text-sm"
+                  aria-label="Relation kind" className="border-input bg-background h-9 rounded-lg border px-3 text-sm pointer-coarse:h-11"
                 >
                   {(isContentCard ? ['related_to'] : relationTypes).map((relationType) => (
                     <option key={relationType} value={relationType}>
-                      {relationType}
+                      {relationLabel(relationType)}
                     </option>
                   ))}
                 </select>
@@ -324,18 +311,18 @@ export function CardForm({
               />
             </div>
           ))}
-        </CardContent>
-      </UiCard>
+      </FormSection>
 
       {incomingRelations}
 
-      {error ? <div className="text-destructive text-sm">{error}</div> : null}
-
-      <div className="flex justify-end">
+      <FormActions error={error}>
+        {onCancel ? (
+          <Button type="button" variant="outline" disabled={isSubmitting} onClick={onCancel}>Cancel</Button>
+        ) : null}
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? submittingLabel : submitLabel}
         </Button>
-      </div>
+      </FormActions>
     </form>
   );
 

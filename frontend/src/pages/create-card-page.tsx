@@ -9,8 +9,10 @@ import {
   type CardFormValue,
 } from '@/components/card-form';
 import { ExistingMediaPicker } from '@/components/existing-media-picker';
+import { FormActions, FormPage, FormSection } from '@/components/form-layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Segmented } from '@/components/ui/segmented';
 
 const initialValue: CardFormValue = {
   type: 'media',
@@ -94,43 +96,53 @@ export function CreateCardPage({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Create card</h1>
-      </div>
-
-      <div className="flex gap-2" role="group" aria-label="Collection creation method">
-        <Button type="button" variant={useExisting ? 'outline' : 'secondary'} aria-pressed={!useExisting} onClick={() => { setUseExisting(false); setError(null); }}><Upload className="size-4" /> Upload</Button>
-        <Button type="button" variant={useExisting ? 'secondary' : 'outline'} aria-pressed={useExisting} onClick={() => { setUseExisting(true); setError(null); }}><Layers3 className="size-4" /> Group existing</Button>
-      </div>
+    <FormPage title="Create card">
+      <Segmented
+        ariaLabel="Creation method"
+        value={useExisting ? 'existing' : 'upload'}
+        onValueChange={(mode) => { setUseExisting(mode === 'existing'); setError(null); }}
+        options={[
+          { value: 'upload', label: 'Upload', icon: <Upload /> },
+          { value: 'existing', label: 'Group existing', icon: <Layers3 /> },
+        ]}
+        className="justify-self-start self-start"
+      />
 
       {useExisting ? (
         <form onSubmit={handleExistingSubmit} className="grid gap-4">
-          <label className="grid gap-2 text-sm font-medium">Type
-            <select className="border-input bg-background h-9 rounded-lg border px-3" value={collectionType} onChange={(event) => setCollectionType(event.target.value as 'comic' | 'set')}>
-              <option value="comic">Comic</option><option value="set">Set</option>
-            </select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium">Title
-            <Input value={collectionTitle} onChange={(event) => setCollectionTitle(event.target.value)} />
-          </label>
+          <FormSection>
+            <div className="grid gap-2 text-sm font-medium">Type
+              <Segmented
+                ariaLabel="Collection type"
+                value={collectionType}
+                onValueChange={setCollectionType}
+                options={[{ value: 'comic', label: 'Comic' }, { value: 'set', label: 'Set' }]}
+                className="justify-self-start"
+              />
+            </div>
+            <label className="grid gap-2 text-sm font-medium">Title
+              <Input value={collectionTitle} onChange={(event) => setCollectionTitle(event.target.value)} />
+            </label>
+          </FormSection>
           <ExistingMediaPicker selected={selectedMedia} onChange={setSelectedMedia} disabled={isSubmitting} />
-          {error ? <p className="text-destructive text-sm">{error}</p> : null}
-          <Button type="submit" disabled={isSubmitting || selectedMedia.length < 2}><Plus className="size-4" />{isSubmitting ? 'Creating...' : 'Create collection'}</Button>
+          <FormActions error={error}>
+            <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => onCreated('/gallery')}>Cancel</Button>
+            <Button type="submit" disabled={isSubmitting || selectedMedia.length < 2}><Plus className="size-4" />{isSubmitting ? 'Creating...' : 'Create collection'}</Button>
+          </FormActions>
         </form>
       ) : (
-
-      <CardForm
-        value={value}
-        availableCards={availableCards}
-        isSubmitting={isSubmitting}
-        submitLabel="Create card"
-        submittingLabel="Creating..."
-        error={error}
-        onValueChange={setValue}
-        onSubmit={handleSubmit}
-      />
+        <CardForm
+          value={value}
+          availableCards={availableCards}
+          isSubmitting={isSubmitting}
+          submitLabel="Create card"
+          submittingLabel="Creating..."
+          error={error}
+          onValueChange={setValue}
+          onSubmit={handleSubmit}
+          onCancel={() => onCreated('/gallery')}
+        />
       )}
-    </section>
+    </FormPage>
   );
 }

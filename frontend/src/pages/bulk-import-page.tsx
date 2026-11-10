@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowDown, ArrowUp, CircleHelp, Pause, X, Plus, RotateCw, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, Clock, CircleHelp, Copy, FileQuestion, Loader2, MoreHorizontal, Pause, X, XCircle, Plus, RotateCw, Trash2, Upload } from 'lucide-react';
 
 import { CardHttpError, createCard, createCollectionFromCards, getCard, getCardAnalysis, getCardCreationRequest, findDuplicatesByHash, updateCollectionChildren, type CardAnalysis, type Card } from '@/api/cards';
 import { setCardSource, setCardTag } from '@/api/catalog';
@@ -7,6 +7,9 @@ import { BulkImportCatalogPicker, type BulkImportCatalogSelection } from '@/comp
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Segmented } from '@/components/ui/segmented';
+import { cn } from '@/lib/utils';
 
 type ItemStatus = 'queued' | 'uploading' | 'created' | 'error' | 'needs-review';
 type MetadataStatus = 'pending' | 'assigning' | 'assigned' | 'error';
@@ -252,6 +255,18 @@ function hasSyncedChildren(group: ImportGroup, childCardIds: number[]) {
     && childCardIds.every((cardId, index) => group.syncedChildCardIds?.[index] === cardId);
 }
 
+type StatusPill = { label: string; icon: React.ComponentType<{ className?: string }>; tone: string };
+
+function statusPillOf(item: ImportItem): StatusPill {
+  if (item.cardId) return { label: 'Uploaded', icon: CheckCircle2, tone: 'bg-tag-character-soft text-tag-character' };
+  if (item.status === 'uploading') return { label: 'Uploading', icon: Loader2, tone: 'bg-primary/10 text-primary' };
+  if (item.status === 'needs-review') return { label: 'Needs review', icon: AlertTriangle, tone: 'bg-tag-meta-soft text-tag-meta' };
+  if (item.status === 'error') return { label: 'Failed', icon: XCircle, tone: 'bg-destructive/10 text-destructive' };
+  if (isBlockedDuplicate(item)) return { label: 'Duplicate', icon: Copy, tone: 'bg-tag-meta-soft text-tag-meta' };
+  if (!item.file) return { label: 'File missing', icon: FileQuestion, tone: 'bg-tag-meta-soft text-tag-meta' };
+  return { label: 'Queued', icon: Clock, tone: 'bg-muted text-muted-foreground' };
+}
+
 function parseCardId(value: string): number | null {
   if (!/^[1-9]\d*$/.test(value.trim())) return null;
   const id = Number(value.trim());
@@ -478,9 +493,9 @@ export function BulkImportPage() {
       : `Reattached ${item.descriptor.name} manually. Fingerprint verification was unavailable; check this file before uploading.`);
   }
 
-  function addGroup() {
+  function addGroup(type: 'comic' | 'set' = 'comic') {
     draftEnabled.current = true;
-    setGroups((current) => [...current, { id: nextId.current++, type: 'comic', title: '' }]);
+    setGroups((current) => [...current, { id: nextId.current++, type, title: '' }]);
   }
 
   function updateItem(id: number, patch: Partial<ImportItem>) {
@@ -514,7 +529,7 @@ export function BulkImportPage() {
       if (!saveDraft(nextItems, groupsRef.current)) throw new Error('Could not save the reconciled draft. Free browser storage and try again.');
       itemsRef.current = nextItems;
       setItems(nextItems);
-      setNotice(`Media #${cardId} linked to ${item.descriptor.name}. Name and size match; these checks do not prove full file identity. Choose Upload / retry to continue.`);
+      setNotice(`Media #${cardId} linked to ${item.descriptor.name}. Name and size match; these checks do not prove full file identity. Press the main button to continue.`);
     } catch (cause) {
       setReviewErrors((current) => ({ ...current, [key]: errorMessage(cause) }));
     } finally {
@@ -556,7 +571,7 @@ export function BulkImportPage() {
       if (!saveDraft(itemsRef.current, nextGroups)) throw new Error('Could not save the reconciled draft. Free browser storage and try again.');
       groupsRef.current = nextGroups;
       setGroups(nextGroups);
-      setNotice(`${group.type} #${cardId} linked after checking its ordered child cards. Choose Upload / retry to continue.`);
+      setNotice(`${group.type} #${cardId} linked after checking its ordered child cards. Press the main button to continue.`);
     } catch (cause) {
       setReviewErrors((current) => ({ ...current, [key]: errorMessage(cause) }));
     } finally {
@@ -686,7 +701,7 @@ export function BulkImportPage() {
             pendingItemPosts.current.delete(item.id);
             if (signal.aborted && item.creationKey) {
               item.status = 'error';
-              item.error = 'Cancelled while uploading; the outcome is unknown. Upload / retry will check this creation key before sending the same request again.';
+              item.error = 'Cancelled while uploading; the outcome is unknown. Retrying will check this creation key before sending the same request again.';
               updateItem(item.id, { status: 'error', error: item.error });
               saveDraft(working, workingGroups, catalogSelection, true);
               return;
@@ -916,9 +931,9 @@ export function BulkImportPage() {
         if (!mounted.current || pauseRequestedRef.current) { paused = true; break; }
       }
       setNotice(cancelRequestedRef.current
-        ? 'Import cancelled. Files whose upload was interrupted have an unknown outcome: Upload / retry checks their creation key before sending anything again. Files not yet started stay queued.'
+        ? 'Import cancelled. Files whose upload was interrupted have an unknown outcome: Retrying checks their creation key before sending anything again. Files not yet started stay queued.'
         : paused || pauseRequestedRef.current
-        ? 'Import paused. Use Upload / retry to continue from the remaining steps.'
+        ? 'Import paused. Press the main button to continue from the remaining steps.'
         : failures ? `${failures} upload, metadata, or collection step(s) need attention. Retry after reviewing the errors.` : 'Import finished.');
     } finally {
       abortRef.current = null;
@@ -1048,64 +1063,109 @@ export function BulkImportPage() {
         || (hasCatalogAssignment && group.metadataStatus !== 'assigned'));
     });
 
+  const pendingUploads = items.filter((item) => !item.cardId && item.status !== 'needs-review' && !isBlockedDuplicate(item)
+    && (!!item.creationKey || !!item.file && isSupported(item.file))).length;
+  const primaryLabel = isRunning ? 'Importing...' : isPreparingFiles ? 'Checking files...'
+    : failedFiles > 0 ? 'Retry failed'
+    : completedFiles > 0 && pendingUploads > 0 ? 'Resume'
+    : pendingUploads > 0 ? `Upload ${pendingUploads} ${pendingUploads === 1 ? 'file' : 'files'}`
+    : items.length === 0 ? 'Upload files'
+    : 'Finish import';
+  const primaryDisabled = isRunning || isPreparingFiles || !!reconciling || !hasWork;
+  const progress = items.length > 0 ? Math.round((completedFiles / items.length) * 100) : 0;
+  const primaryButton = (className?: string) => (
+    <Button type="button" className={className} disabled={primaryDisabled} onClick={runImport}>
+      {isRunning || isPreparingFiles ? <Loader2 className="animate-spin" /> : <Upload />}{primaryLabel}
+    </Button>
+  );
+  const runControls = isRunning ? <>
+    <Button type="button" variant="outline" disabled={pauseRequested} onClick={requestPause}>
+      <Pause className="size-4" />{pauseRequested ? 'Pausing...' : 'Pause'}
+    </Button>
+    <Button type="button" variant="outline" aria-label="Cancel import" disabled={cancelRequested} onClick={requestCancel}>
+      <X className="size-4" />{cancelRequested ? 'Cancelling...' : 'Cancel'}
+    </Button>
+  </> : null;
+
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Bulk import</h1>
-        <details className="text-muted-foreground text-sm">
-          <summary className="flex cursor-pointer items-center gap-1"><CircleHelp className="size-4" /> How it works</summary>
-          <p className="mt-2 max-w-md">Files upload individually. Add comics or sets after upload. Queue details are saved in this browser; after a reload, reselect any missing files. Matching checks the name, size, modified time, type and a sample of the first and last 64 KiB, not the whole file.</p>
-        </details>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <h1 className="text-2xl font-semibold">Import</h1>
+          <Popover>
+            <PopoverTrigger render={<Button type="button" variant="ghost" size="icon" aria-label="How importing works" />}>
+              <CircleHelp />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="max-w-sm text-sm">
+              Files upload individually. Add comics or sets after upload. Queue details are saved in this browser; after a reload, reselect any missing files. Matching checks the name, size, modified time, type and a sample of the first and last 64 KiB, not the whole file.
+            </PopoverContent>
+          </Popover>
+        </div>
+        <div className="hidden items-center gap-2 md:flex">
+          {runControls}
+          <Button type="button" variant="ghost" size="icon" aria-label="Clear local draft" title="Clear local draft" disabled={isRunning || isPreparingFiles} onClick={clearLocalDraft}><Trash2 className="size-4" /></Button>
+          {primaryButton()}
+        </div>
       </div>
 
       <div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setIsDragging(false); }}
         onDrop={(event) => { event.preventDefault(); setIsDragging(false); void addFiles(event.dataTransfer.files); }}
-        className={`rounded-xl border-2 border-dashed p-6 text-center ${isDragging ? 'border-primary bg-accent' : 'border-border'}`}>
-        <Upload className="text-muted-foreground mx-auto mb-2 size-6" aria-hidden="true" />
-        <p className="mb-3 text-sm font-medium">Drop files here</p>
-        <label className="focus-within:ring-ring inline-flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium hover:bg-accent focus-within:ring-2">
-          <Plus className="size-4" aria-hidden="true" /> Browse files
+        className={cn('bg-surface/60 rounded-3xl border-2 border-dashed p-8 text-center transition-colors duration-[var(--dur-base)] focus-within:ring-3 focus-within:ring-ring/50 sm:p-12',
+          isDragging ? 'border-primary bg-primary/5' : 'border-border')}>
+        <label className="mx-auto flex w-fit cursor-pointer flex-col items-center gap-3">
+          <span className="bg-muted text-muted-foreground flex size-14 items-center justify-center rounded-full border border-dashed">
+            <Upload className="size-6" aria-hidden="true" />
+          </span>
+          <span className="text-base font-medium">Drop files or browse</span>
+          <span className="text-muted-foreground text-xs">Images, GIFs and videos</span>
           <input className="sr-only" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
             disabled={isRunning || isPreparingFiles} onChange={(event) => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }} />
         </label>
       </div>
 
-      <BulkImportCatalogPicker selection={catalogSelection} onChange={(selection) => { draftEnabled.current = true; setCatalogSelection(selection); }} locked={selectionLocked} />
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="outline" disabled={isRunning} onClick={addGroup}><Plus className="size-4" /> Add group</Button>
-        <Button type="button" disabled={isRunning || isPreparingFiles || !!reconciling || !hasWork} onClick={runImport}><Upload className="size-4" />{isRunning ? 'Importing...' : isPreparingFiles ? 'Checking files...' : 'Upload / retry'}</Button>
-        <Button type="button" variant="ghost" size="icon" aria-label="Clear local draft" title="Clear local draft" disabled={isRunning || isPreparingFiles} onClick={clearLocalDraft}><Trash2 className="size-4" /></Button>
-        {isRunning && <Button type="button" variant="outline" disabled={pauseRequested} onClick={requestPause}>
-          <Pause className="size-4" />{pauseRequested ? 'Pausing...' : 'Pause'}
-        </Button>}
-        {isRunning && <Button type="button" variant="outline" aria-label="Cancel import" disabled={cancelRequested} onClick={requestCancel}>
-          <X className="size-4" />{cancelRequested ? 'Cancelling...' : 'Cancel'}
-        </Button>}
-        <span className="text-muted-foreground text-sm" aria-label={`${items.length} total, ${completedFiles} uploaded, ${analyzedFiles} analyzed, ${failedFiles} upload errors, ${analysisFailures} analysis errors, ${reviewFiles} need review, ${pendingFiles} pending`}>
-          {completedFiles}/{items.length} uploaded{completedFiles > 0 && ` · ${analyzedFiles}/${completedFiles} analyzed`}
-          {failedFiles > 0 && ` · ${failedFiles} upload errors`}{analysisFailures > 0 && ` · ${analysisFailures} analysis errors`}
-          {reviewFiles > 0 && ` · ${reviewFiles} review`}{duplicateFiles > 0 && ` · ${duplicateFiles} duplicate`}
-        </span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <BulkImportCatalogPicker selection={catalogSelection} onChange={(selection) => { draftEnabled.current = true; setCatalogSelection(selection); }} locked={selectionLocked} />
+        <div className="flex items-center gap-2" role="group" aria-label="Add group">
+          <Button type="button" variant="secondary" disabled={isRunning} onClick={() => addGroup('comic')}><Plus /> Comic</Button>
+          <Button type="button" variant="secondary" disabled={isRunning} onClick={() => addGroup('set')}><Plus /> Set</Button>
+        </div>
       </div>
+
+      {items.length > 0 && <div className="grid gap-2">
+        <div role="progressbar" aria-label="Upload progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}
+          className="bg-muted h-2 overflow-hidden rounded-full">
+          <div className="bg-primary h-full rounded-full transition-[width] duration-[var(--dur-base)]" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="text-muted-foreground text-sm" aria-label={`${items.length} total, ${completedFiles} uploaded, ${analyzedFiles} analyzed, ${failedFiles} upload errors, ${analysisFailures} analysis errors, ${reviewFiles} need review, ${pendingFiles} pending`}>
+          {completedFiles} of {items.length} uploaded{completedFiles > 0 && ` · ${analyzedFiles} of ${completedFiles} analyzed`}
+          {failedFiles > 0 && ` · ${failedFiles} failed`}{analysisFailures > 0 && ` · ${analysisFailures} analysis errors`}
+          {reviewFiles > 0 && ` · ${reviewFiles} need review`}{duplicateFiles > 0 && ` · ${duplicateFiles} duplicate`}
+        </p>
+      </div>}
       {isRunning && <p role="status" className="text-muted-foreground text-sm">Current: {currentStep ?? 'Preparing next step'}{pauseRequested ? ' · pause requested' : ''}</p>}
       {notice && <p role="status" className="text-sm">{notice}</p>}
       {persistenceWarning && <p role="alert" className="text-destructive text-sm">{persistenceWarning}</p>}
 
       {groups.length > 0 && <div className="grid gap-3 sm:grid-cols-2">
-        {groups.map((group) => <div key={group.id} className="rounded-xl border p-4">
+        {groups.map((group) => {
+          const groupLocked = isRunning || !!group.cardId || !!group.creationKey;
+          return <div key={group.id} className="bg-surface rounded-2xl border p-4">
           <div className="mb-3 flex items-center gap-2">
-            <select aria-label={`Group ${group.id} type`} className="border-input bg-background h-9 rounded-lg border px-2" value={group.type}
-              disabled={isRunning || !!group.cardId || !!group.creationKey} onChange={(event) => setGroups((current) => current.map((candidate) => candidate.id === group.id ? { ...candidate, type: event.target.value as 'comic' | 'set' } : candidate))}>
-              <option value="comic">Comic</option><option value="set">Set</option>
-            </select>
-            <Input aria-label={`Group ${group.id} title`} placeholder="Group title" value={group.title} disabled={isRunning || !!group.cardId || !!group.creationKey}
+            {groupLocked ? <Badge variant="outline" className="capitalize">{group.type}</Badge> : <Segmented
+              ariaLabel={`Group ${group.id} type`} value={group.type}
+              onValueChange={(type) => setGroups((current) => current.map((candidate) => candidate.id === group.id ? { ...candidate, type } : candidate))}
+              options={[{ value: 'comic', label: 'Comic' }, { value: 'set', label: 'Set' }]} />}
+            <Input aria-label={`Group ${group.id} title`} placeholder="Group title" value={group.title} disabled={groupLocked}
               onChange={(event) => setGroups((current) => current.map((candidate) => candidate.id === group.id ? { ...candidate, title: event.target.value } : candidate))} />
+            {!group.cardId && !group.creationKey && !isRunning && <Button type="button" variant="ghost" size="icon" aria-label={`Remove ${group.type} group ${group.title || group.id}`} title="Remove group" onClick={() => {
+              setItems((current) => current.map((item) => item.groupId === group.id ? { ...item, groupId: null } : item));
+              setGroups((current) => current.filter((candidate) => candidate.id !== group.id));
+            }}><Trash2 className="size-4" /></Button>}
           </div>
           <p className="text-muted-foreground text-xs">{items.filter((item) => item.groupId === group.id).length} files · order follows the queue below</p>
-          {group.cardId && <a className="text-primary text-sm underline" href={`/cards/${group.cardId}`}>Open {group.type} #{group.cardId}</a>}
-          {group.needsSync && <p className="text-muted-foreground text-sm">Order changed. Run Upload / retry to save it.</p>}
+          {group.cardId && <a className="text-primary text-sm underline" href={`/cards/${group.cardId}`}>Open {group.type}</a>}
+          {group.needsSync && <p className="text-muted-foreground text-sm">Order changed. Press the main button to save it.</p>}
           {group.error && <p role="alert" className="text-destructive text-sm">{group.error}</p>}
           {group.needsReview && <div className="flex flex-wrap items-center gap-2 text-sm">
             <a className="text-primary underline" href="/gallery">Check gallery</a>
@@ -1119,106 +1179,127 @@ export function BulkImportPage() {
                 ? { ...candidate, needsReview: false, error: undefined } : candidate))}>
               Retry group POST anyway
             </Button>
-            <span className="text-muted-foreground">This may create a duplicate group. Then choose Upload / retry.</span>
+            <span className="text-muted-foreground">This may create a duplicate group. Then press the main button.</span>
             {reviewErrors[`group-${group.id}`] && <p role="alert" className="w-full text-destructive">{reviewErrors[`group-${group.id}`]}</p>}
           </div>}
           {group.cardId && hasCatalogAssignment && <p className="text-muted-foreground text-xs">Tags/source: {group.metadataStatus ?? 'pending'}</p>}
           {group.metadataError && <p role="alert" className="text-destructive text-sm">Could not assign tags/source: {group.metadataError}</p>}
-          {!group.cardId && !group.creationKey && !isRunning && <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${group.type} group ${group.title || group.id}`} title="Remove group" onClick={() => {
-            setItems((current) => current.map((item) => item.groupId === group.id ? { ...item, groupId: null } : item));
-            setGroups((current) => current.filter((candidate) => candidate.id !== group.id));
-          }}><Trash2 className="size-4" /></Button>}
-        </div>)}
+        </div>;
+        })}
       </div>}
 
-      <div className="grid gap-3">
-        {items.length === 0 && <p className="text-muted-foreground text-sm">No files selected.</p>}
+      <div className="grid gap-2">
+        {items.length === 0 && <p className="text-muted-foreground text-center text-sm">No files selected</p>}
         {items.map((item) => {
           const group = groups.find((candidate) => candidate.id === item.groupId);
           const groupItems = items.filter((candidate) => candidate.groupId === item.groupId);
           const position = groupItems.findIndex((candidate) => candidate.id === item.id);
           const locked = !!group?.cardId && !!item.cardId;
-          return <article key={item.id} className="flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center [content-visibility:auto] [contain-intrinsic-size:auto_120px]">
-            <div className="bg-muted flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg">
-              {!item.previewUrl ? <span className="text-muted-foreground text-xs">No file</span>
-                : item.descriptor.type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(item.descriptor.name)
-                  ? <video className="size-full object-cover" src={item.previewUrl} muted playsInline preload="none" />
-                  : <img className="size-full object-cover" src={item.previewUrl} alt="" loading="lazy" decoding="async" />}
+          const pill = statusPillOf(item);
+          const PillIcon = pill.icon;
+          const groupBusy = !!group?.creationKey && !group.cardId;
+          return <article key={item.id} className="bg-surface flex flex-col gap-2 rounded-2xl border p-3 [content-visibility:auto] [contain-intrinsic-size:auto_96px]">
+            <div className="flex items-center gap-3">
+              <div className="bg-muted flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl">
+                {!item.previewUrl ? <span className="text-muted-foreground text-[10px]">No file</span>
+                  : item.descriptor.type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(item.descriptor.name)
+                    ? <video className="size-full object-cover" src={item.previewUrl} muted playsInline preload="none" />
+                    : <img className="size-full object-cover" src={item.previewUrl} alt="" loading="lazy" decoding="async" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium" title={item.descriptor.name}>{item.descriptor.name}</p>
+                <p className="text-muted-foreground flex flex-wrap items-center gap-x-2 text-xs">
+                  <span>{mediaTypeLabel(item.descriptor)} · {(item.descriptor.size / 1024 / 1024).toFixed(1)} MB</span>
+                  {group && <span className="truncate">{group.title || `${group.type} group`}</span>}
+                </p>
+              </div>
+              <span className={cn('inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium', pill.tone)}>
+                <PillIcon className={cn('size-3.5', item.status === 'uploading' && !item.cardId && 'animate-spin')} aria-hidden="true" />{pill.label}
+              </span>
+              <Popover>
+                <PopoverTrigger render={<Button type="button" variant="ghost" size="icon" aria-label={`Options for ${item.descriptor.name}`} />}>
+                  <MoreHorizontal />
+                </PopoverTrigger>
+                <PopoverContent className="grid w-72 max-w-[calc(100vw-2rem)] gap-3 text-sm">
+                  <label className="grid gap-1 text-xs font-medium">Title
+                    <Input aria-label={`Title for ${item.descriptor.name}`} value={item.title} placeholder="Card title"
+                      disabled={isRunning || !!item.cardId || !!item.creationKey}
+                      onChange={(event) => updateItem(item.id, { title: event.target.value })} />
+                  </label>
+                  <div className="grid gap-1" role="group" aria-label={`Group for ${item.descriptor.name}`}>
+                    <span className="text-xs font-medium">Group</span>
+                    {[{ id: null as number | null, label: 'Standalone' },
+                      ...groups.filter((candidate) => (!candidate.cardId && !candidate.creationKey) || candidate.id === item.groupId)
+                        .map((candidate) => ({ id: candidate.id as number | null, label: candidate.title || `${candidate.type} group ${candidate.id}` }))]
+                      .map((option) => <Button key={option.id ?? 'none'} type="button" size="sm"
+                        variant={(item.groupId ?? null) === option.id ? 'secondary' : 'ghost'} className="justify-start"
+                        aria-pressed={(item.groupId ?? null) === option.id}
+                        disabled={isRunning || locked || groupBusy}
+                        onClick={() => updateItem(item.id, { groupId: option.id })}>{option.label}</Button>)}
+                  </div>
+                  {item.groupId != null && <div className="flex gap-2">
+                    <Button type="button" size="sm" variant="outline" aria-label={`Move ${item.descriptor.name} up`} disabled={isRunning || groupBusy || position === 0} onClick={() => moveItem(item.id, -1)}><ArrowUp className="size-4" /> Up</Button>
+                    <Button type="button" size="sm" variant="outline" aria-label={`Move ${item.descriptor.name} down`} disabled={isRunning || groupBusy || position === groupItems.length - 1} onClick={() => moveItem(item.id, 1)}><ArrowDown className="size-4" /> Down</Button>
+                  </div>}
+                  {item.cardId && <div className="grid gap-1 text-xs">
+                    <a className="text-primary text-sm underline" href={`/cards/${item.cardId}`}>Open card</a>
+                    {hasCatalogAssignment && <p className="text-muted-foreground">Tags/source: {item.metadataStatus ?? 'pending'}</p>}
+                    <p className="text-muted-foreground">Analysis: {item.analysis === null ? 'not queued' : item.analysis?.state ?? 'checking'}
+                      {item.analysis && ` · ${item.analysis.attempts} attempt(s)${item.analysis.availableAtUtc && item.analysis.state === 'pending' ? ` · next attempt ${new Date(item.analysis.availableAtUtc).toLocaleString()}` : ''}`}</p>
+                    <Button type="button" size="sm" variant="outline" className="justify-self-start" aria-label={`Refresh analysis for ${item.descriptor.name}`} onClick={() => void checkAnalysis(item)}><RotateCw className="size-4" /> Refresh analysis</Button>
+                  </div>}
+                  {item.sha256 && <p className="text-muted-foreground break-all text-xs">SHA-256 {item.sha256}</p>}
+                  {item.hashSkipped && !item.sha256 && <p className="text-muted-foreground text-xs">File is larger than 1 GiB; it was not checked for server duplicates.</p>}
+                  {item.possibleDuplicate && <p className="text-muted-foreground text-xs">Possible duplicate selection: same name, size, and modified time as another queued file. Review it before uploading.</p>}
+                  {item.fingerprintUnavailable && <p className="text-destructive text-xs">Sampled fingerprint could not be calculated. This file can upload now; after reload, attach it manually and check that it is the intended file.</p>}
+                  {!item.cardId && <Button type="button" size="sm" variant="destructive" className="justify-self-start" aria-label={`Remove ${item.descriptor.name}`} disabled={isRunning || !!item.creationKey || groupBusy} onClick={() => removeItem(item)}><Trash2 className="size-4" /> Remove file</Button>}
+                </PopoverContent>
+              </Popover>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium" title={item.descriptor.name}>{item.descriptor.name}</p>
-              <Input aria-label={`Title for ${item.descriptor.name}`} value={item.title} placeholder="Card title"
-                disabled={isRunning || !!item.cardId || !!item.creationKey}
-                onChange={(event) => updateItem(item.id, { title: event.target.value })} />
-              <p className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
-                <Badge variant="outline">{mediaTypeLabel(item.descriptor)}</Badge>
-                <span>{(item.descriptor.size / 1024 / 1024).toFixed(1)} MB · {item.status}</span>
-              </p>
-              {item.hashSkipped && !item.sha256 && <p className="text-muted-foreground text-xs">File is larger than 1 GiB; it was not checked for server duplicates.</p>}
-              {!!item.duplicateCardIds?.length && !item.cardId && <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span role="status">Duplicate of {item.duplicateCardIds.map((id, index) => <React.Fragment key={id}>{index > 0 && ', '}<a className="text-primary underline" href={`/cards/${id}`}>#{id}</a></React.Fragment>)}</span>
-                {!item.uploadAnyway && <Button type="button" size="sm" variant="outline" disabled={isRunning} aria-label={`Upload ${item.descriptor.name} anyway`}
-                  onClick={() => updateItem(item.id, { uploadAnyway: true })}>Upload anyway</Button>}
-                {item.uploadAnyway && <span className="text-muted-foreground">Will upload anyway.</span>}
-              </div>}
-              {!!item.duplicateOfName && !item.duplicateCardIds?.length && !item.cardId && <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span role="status">Same content as {item.duplicateOfName} in this batch</span>
-                {!item.uploadAnyway && <Button type="button" size="sm" variant="outline" disabled={isRunning} aria-label={`Upload ${item.descriptor.name} anyway`}
-                  onClick={() => updateItem(item.id, { uploadAnyway: true })}>Upload anyway</Button>}
-                {item.uploadAnyway && <span className="text-muted-foreground">Will upload anyway.</span>}
-              </div>}
-              {!item.file && !item.cardId && <div className="mt-2 text-sm">
-                <p role="status">File missing after reload. Reselect it here. {!item.fingerprint && 'Check that this is the intended file before upload.'}</p>
-                <label className="focus-within:ring-ring mt-1 inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1 focus-within:ring-2">
-                  <Upload className="size-4" /> Attach file
-                  <input className="sr-only" type="file" disabled={isRunning || isPreparingFiles} aria-label={`Attach file for ${item.descriptor.name}`}
-                    onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachFile(item, file); event.target.value = ''; }} />
-                </label>
-              </div>}
-              {item.fingerprintUnavailable && <p role="alert" className="text-destructive text-xs">Sampled fingerprint could not be calculated. This file can upload now; after reload, attach it manually and check that it is the intended file.</p>}
-              {item.possibleDuplicate && <p className="text-muted-foreground text-xs">Possible duplicate selection: same name, size, and modified time as another queued file. Review it before uploading.</p>}
-              {item.error && <p role="alert" className="text-destructive text-sm">{item.error}</p>}
-              {item.status === 'needs-review' && <div className="flex flex-wrap items-center gap-2 text-sm">
-                <a className="text-primary underline" href="/gallery">Check gallery</a>
-                <Input aria-label={`Existing card ID for ${item.descriptor.name}`} className="w-40" inputMode="numeric" placeholder="Existing media ID"
-                  value={mediaReviewIds[item.id] ?? ''} disabled={isRunning || !!reconciling}
-                  onChange={(event) => setMediaReviewIds((current) => ({ ...current, [item.id]: event.target.value }))} />
-                <Button type="button" size="sm" variant="outline" disabled={isRunning || !!reconciling}
-                  onClick={() => void reconcileMedia(item.id)}>{reconciling === `media-${item.id}` ? 'Checking...' : 'Verify existing media'}</Button>
-                <Button type="button" size="sm" variant="outline" disabled={isRunning || !!reconciling} onClick={() => updateItem(item.id, { status: 'queued', error: undefined })}>
-                  Retry media POST anyway
-                </Button>
-                <span className="text-muted-foreground">This may create a duplicate card. Then choose Upload / retry.</span>
-                {reviewErrors[`media-${item.id}`] && <p role="alert" className="w-full text-destructive">{reviewErrors[`media-${item.id}`]}</p>}
-              </div>}
-              {item.cardId && <>
-                <a className="text-primary text-sm underline" href={`/cards/${item.cardId}`}>Open media #{item.cardId}</a>
-                {hasCatalogAssignment && <p className="text-muted-foreground text-xs">Tags/source: {item.metadataStatus ?? 'pending'}</p>}
-                {item.metadataError && <p role="alert" className="text-destructive text-sm">Could not assign tags/source: {item.metadataError}</p>}
-                <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">Analysis: {item.analysis === null ? 'not queued' : item.analysis?.state ?? 'checking'}</summary>
-                  {item.analysis && <p>{item.analysis.attempts} attempt(s){item.analysis.availableAtUtc && item.analysis.state === 'pending' && ` · next attempt ${new Date(item.analysis.availableAtUtc).toLocaleString()}`}</p>}
-                </details>
-                {item.analysis?.lastError && <p className="text-destructive text-xs">Analysis error: {item.analysis.lastError}</p>}
-                {item.analysisError && <p role="alert" className="text-destructive text-xs">Could not check analysis: {item.analysisError}</p>}
-                <Button type="button" size="icon-sm" variant="ghost" aria-label={`Refresh analysis for ${item.descriptor.name}`} title="Refresh analysis" onClick={() => void checkAnalysis(item)}><RotateCw className="size-4" /></Button>
-              </>}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <select aria-label={`Assign ${item.descriptor.name}`} value={item.groupId ?? ''} disabled={isRunning || locked || !!group?.creationKey && !group.cardId}
-                className="border-input bg-background h-9 rounded-lg border px-2 text-sm"
-                onChange={(event) => updateItem(item.id, { groupId: event.target.value ? Number(event.target.value) : null })}>
-                <option value="">Standalone</option>
-                {groups.filter((candidate) => (!candidate.cardId && !candidate.creationKey) || candidate.id === item.groupId).map((candidate) =>
-                  <option key={candidate.id} value={candidate.id}>{candidate.title || `${candidate.type} group ${candidate.id}`}</option>)}
-              </select>
-              {item.groupId != null && <>
-                <Button type="button" size="icon-sm" variant="outline" aria-label={`Move ${item.descriptor.name} up`} title="Move up" disabled={isRunning || !!group?.creationKey && !group.cardId || position === 0} onClick={() => moveItem(item.id, -1)}><ArrowUp className="size-4" /></Button>
-                <Button type="button" size="icon-sm" variant="outline" aria-label={`Move ${item.descriptor.name} down`} title="Move down" disabled={isRunning || !!group?.creationKey && !group.cardId || position === groupItems.length - 1} onClick={() => moveItem(item.id, 1)}><ArrowDown className="size-4" /></Button>
-              </>}
-              {!item.cardId && <Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove ${item.descriptor.name}`} title="Remove file" disabled={isRunning || !!item.creationKey || !!group?.creationKey && !group.cardId} onClick={() => removeItem(item)}><Trash2 className="size-4" /></Button>}
-            </div>
+            {!!item.duplicateCardIds?.length && !item.cardId && <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span role="status">Already in the library: {item.duplicateCardIds.map((id, index) => <React.Fragment key={id}>{index > 0 && ', '}<a className="text-primary underline" href={`/cards/${id}`}>view match{item.duplicateCardIds!.length > 1 ? ` ${index + 1}` : ''}</a></React.Fragment>)}</span>
+              {!item.uploadAnyway && <Button type="button" size="sm" variant="outline" disabled={isRunning} aria-label={`Upload ${item.descriptor.name} anyway`}
+                onClick={() => updateItem(item.id, { uploadAnyway: true })}>Upload anyway</Button>}
+              {item.uploadAnyway && <span className="text-muted-foreground">Will upload anyway.</span>}
+            </div>}
+            {!!item.duplicateOfName && !item.duplicateCardIds?.length && !item.cardId && <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span role="status">Same content as {item.duplicateOfName} in this batch</span>
+              {!item.uploadAnyway && <Button type="button" size="sm" variant="outline" disabled={isRunning} aria-label={`Upload ${item.descriptor.name} anyway`}
+                onClick={() => updateItem(item.id, { uploadAnyway: true })}>Upload anyway</Button>}
+              {item.uploadAnyway && <span className="text-muted-foreground">Will upload anyway.</span>}
+            </div>}
+            {!item.file && !item.cardId && <div className="text-sm">
+              <p role="status">File missing after reload. Reselect it here. {!item.fingerprint && 'Check that this is the intended file before upload.'}</p>
+              <label className="focus-within:ring-ring mt-1 inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-lg border px-3 py-1 focus-within:ring-2 pointer-coarse:min-h-11">
+                <Upload className="size-4" /> Attach file
+                <input className="sr-only" type="file" disabled={isRunning || isPreparingFiles} aria-label={`Attach file for ${item.descriptor.name}`}
+                  onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachFile(item, file); event.target.value = ''; }} />
+              </label>
+            </div>}
+            {item.error && <p role="alert" className="text-destructive text-sm">{item.error}</p>}
+            {item.status === 'needs-review' && <div className="flex flex-wrap items-center gap-2 text-sm">
+              <a className="text-primary underline" href="/gallery">Check gallery</a>
+              <Input aria-label={`Existing card ID for ${item.descriptor.name}`} className="w-40" inputMode="numeric" placeholder="Existing media ID"
+                value={mediaReviewIds[item.id] ?? ''} disabled={isRunning || !!reconciling}
+                onChange={(event) => setMediaReviewIds((current) => ({ ...current, [item.id]: event.target.value }))} />
+              <Button type="button" size="sm" variant="outline" disabled={isRunning || !!reconciling}
+                onClick={() => void reconcileMedia(item.id)}>{reconciling === `media-${item.id}` ? 'Checking...' : 'Verify existing media'}</Button>
+              <Button type="button" size="sm" variant="outline" disabled={isRunning || !!reconciling} onClick={() => updateItem(item.id, { status: 'queued', error: undefined })}>
+                Retry media POST anyway
+              </Button>
+              <span className="text-muted-foreground">This may create a duplicate card. Then press the main button.</span>
+              {reviewErrors[`media-${item.id}`] && <p role="alert" className="w-full text-destructive">{reviewErrors[`media-${item.id}`]}</p>}
+            </div>}
+            {item.cardId && item.metadataError && <p role="alert" className="text-destructive text-sm">Could not assign tags/source: {item.metadataError}</p>}
+            {item.cardId && item.analysis?.lastError && <p className="text-destructive text-xs">Analysis error: {item.analysis.lastError}</p>}
+            {item.cardId && item.analysisError && <p role="alert" className="text-destructive text-xs">Could not check analysis: {item.analysisError}</p>}
           </article>;
         })}
+      </div>
+
+      <div className="bg-background/90 sticky bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-30 -mx-4 -mb-4 flex gap-2 border-t px-4 py-3 backdrop-blur-md md:hidden">
+        {runControls}
+        {primaryButton('h-11 flex-1')}
       </div>
     </section>
   );

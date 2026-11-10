@@ -9,8 +9,8 @@ import {
   toRelationInputs,
   type CardFormValue,
 } from '@/components/card-form';
+import { FormPage, FormSection, relationLabel } from '@/components/form-layout';
 import { Badge } from '@/components/ui/badge';
-import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ExistingMediaPicker } from '@/components/existing-media-picker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -104,7 +104,7 @@ export function EditCardPage({
   }
 
   if (isLoading) {
-    return <section className="p-6 text-sm text-muted-foreground">Loading...</section>;
+    return <section role="status" className="text-muted-foreground p-6 text-sm">Loading...</section>;
   }
 
   if (!value || !card) {
@@ -112,11 +112,7 @@ export function EditCardPage({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Edit Card #{card.id}</h1>
-      </div>
-
+    <FormPage title="Edit card">
       <CardForm
         value={value}
         availableCards={availableCards}
@@ -127,6 +123,7 @@ export function EditCardPage({
         typeLocked
         onValueChange={setValue}
         onSubmit={handleSubmit}
+        onCancel={() => onSaved(`/cards/${card.id}`)}
         incomingRelations={
           <>
             {card.type === 'media' ? <CurrentMediaInfo card={card} /> : null}
@@ -138,10 +135,7 @@ export function EditCardPage({
         }
       />
       {card.type === 'comic' || card.type === 'set' ? (
-        <UiCard>
-          <CardHeader><CardTitle>Collection contents</CardTitle></CardHeader>
-          <CardContent className="grid gap-4">
-            <p className="text-muted-foreground text-sm">Add, remove, or reorder existing media. Removed media remain in the library.</p>
+        <FormSection title="Collection contents" hint="Add, remove or reorder media. Removed media stays in the library.">
             <ExistingMediaPicker selected={selectedMedia} onChange={(cards) => { setSelectedMedia(cards); setChildrenMessage(null); }} disabled={isSavingChildren} />
             {childrenMessage ? <p className="text-sm" role="status">{childrenMessage}</p> : null}
             <Button type="button" disabled={isSavingChildren} onClick={saveChildren}>
@@ -150,10 +144,9 @@ export function EditCardPage({
             {(card.containedCards ?? []).length > 0 ? (
               <MoveChildren card={card} onMoved={reloadCard} />
             ) : null}
-          </CardContent>
-        </UiCard>
+        </FormSection>
       ) : null}
-    </section>
+    </FormPage>
   );
 
   async function reloadCard() {
@@ -220,7 +213,7 @@ function MoveChildren({ card, onMoved }: { card: Card; onMoved: () => Promise<vo
     try {
       await moveCardChild(card.id, movingId, targetId, parsedPosition);
       setMovingId(null);
-      setMessage(`Moved #${movingId} to #${targetId}.`);
+      setMessage('Item moved.');
       await onMoved();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to move the item.');
@@ -236,8 +229,8 @@ function MoveChildren({ card, onMoved }: { card: Card; onMoved: () => Promise<vo
       {children.map((child) => (
         <div key={child.id} className="grid gap-2 rounded-lg border px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span>#{child.id}{child.title ? ` ${child.title}` : ''}</span>
-            <Button type="button" size="sm" variant="outline" aria-label={`Move #${child.id} to another collection`}
+            <span>{child.title || `Untitled ${child.type}`}</span>
+            <Button type="button" size="sm" variant="outline" aria-label={`Move ${child.title || child.type} to another collection`}
               disabled={isBusy} onClick={() => (movingId === child.id ? setMovingId(null) : open(child.id))}>
               {movingId === child.id ? 'Close' : 'Move to...'}
             </Button>
@@ -252,7 +245,7 @@ function MoveChildren({ card, onMoved }: { card: Card; onMoved: () => Promise<vo
                   <button key={target.id} type="button" role="option" aria-selected={targetId === target.id}
                     className={`rounded border px-2 py-1 text-left ${targetId === target.id ? 'border-primary bg-accent' : ''}`}
                     onClick={() => setTargetId(target.id)}>
-                    <Badge variant="outline">{target.type}</Badge> #{target.id}{target.title ? ` ${target.title}` : ''}
+                    <Badge variant="outline">{target.type}</Badge> {target.title || `Untitled ${target.type}`}
                   </button>
                 ))}
               </div>
@@ -328,9 +321,8 @@ function PreviewStartControl({ card, onUpdated }: { card: Card; onUpdated: (card
   }
 
   return (
-    <UiCard>
-      <CardHeader><CardTitle>Preview start</CardTitle></CardHeader>
-      <CardContent className="grid gap-4 text-sm">
+    <FormSection title="Preview start">
+      <div className="grid gap-4 text-sm">
         <div className="flex flex-wrap gap-4">
           {posterUrl ? (
             <div className="grid gap-1">
@@ -381,8 +373,8 @@ function PreviewStartControl({ card, onUpdated }: { card: Card; onUpdated: (card
             Reset to automatic
           </Button>
         </div>
-      </CardContent>
-    </UiCard>
+      </div>
+    </FormSection>
   );
 }
 
@@ -392,11 +384,8 @@ function versionedUrl(url: string, version: number) {
 
 function CurrentMediaInfo({ card }: { card: Card }) {
   return (
-    <UiCard>
-      <CardHeader>
-        <CardTitle>Current media</CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-2 text-sm">
+    <FormSection title="Current media">
+      <div className="grid gap-2 text-sm">
         <div className="flex flex-wrap gap-2">
           <Badge variant="outline">{String(card.metadata.media_type ?? 'unknown')}</Badge>
           <span className="text-muted-foreground">
@@ -409,8 +398,8 @@ function CurrentMediaInfo({ card }: { card: Card }) {
             ? ` - ${Math.round(card.metadata.file_size / 1024)} KB`
             : ''}
         </div>
-      </CardContent>
-    </UiCard>
+      </div>
+    </FormSection>
   );
 }
 
@@ -418,11 +407,8 @@ function IncomingRelations({ card }: { card: Card }) {
   const incomingRelations = card.incomingRelations ?? [];
 
   return (
-    <UiCard>
-      <CardHeader>
-        <CardTitle>Incoming relations</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <FormSection title="Linked from">
+      <div>
         {incomingRelations.length > 0 ? (
           <div className="grid gap-2 text-sm">
             {incomingRelations.map((relation) => (
@@ -430,16 +416,15 @@ function IncomingRelations({ card }: { card: Card }) {
                 key={relation.id}
                 className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
               >
-                <span className="font-medium">#{relation.fromCardId}</span>
-                <Badge variant="outline">{relation.relationType}</Badge>
-                <span className="text-muted-foreground">to #{relation.toCardId}</span>
+                <span className="font-medium">Card {relation.fromCardId}</span>
+                <Badge variant="outline">{relationLabel(relation.relationType)}</Badge>
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-muted-foreground text-sm">No incoming relations</div>
+          <div className="text-muted-foreground text-sm">No cards link here</div>
         )}
-      </CardContent>
-    </UiCard>
+      </div>
+    </FormSection>
   );
 }

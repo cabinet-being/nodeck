@@ -9,6 +9,7 @@ import {
   toRecord,
   type DeckFormValue,
 } from '@/components/deck-form';
+import { FormPage } from '@/components/form-layout';
 
 export function EditDeckPage({
   deckId,
@@ -96,8 +97,7 @@ export function EditDeckPage({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Edit Deck #{deckId}</h1>
+    <FormPage title="Edit deck">
       <DeckForm
         value={value}
         availableCards={availableCards}
@@ -109,7 +109,7 @@ export function EditDeckPage({
         onSubmit={handleSubmit}
         onCancel={onCancel}
       />
-    </section>
+    </FormPage>
   );
 }
 

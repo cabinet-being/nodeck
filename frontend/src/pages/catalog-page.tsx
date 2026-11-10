@@ -1,18 +1,40 @@
 import * as React from 'react';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 
 import {
   createSource, createTag, deleteSource, deleteTag, listSources, listTags,
   updateSource, updateTag, type Source, type Tag,
 } from '@/api/catalog';
-import { TagChip } from '@/components/tag-chip';
+import { EmptyState } from '@/components/empty-state';
+import { NodeChip } from '@/components/node-chip';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
+import { Segmented } from '@/components/ui/segmented';
+import { Skeleton } from '@/components/ui/skeleton';
 
 type Item = Tag | Source;
+type Category = 'all' | 'artist' | 'character' | 'copyright' | 'general' | 'meta' | 'custom';
 
-export function CatalogPage({ kind }: { kind: 'tag' | 'source' }) {
+// The API returns at most 200 entries per request; tag tabs ask the API for their
+// category (most used first), and the client filter below keeps the list consistent.
+const LOAD_LIMIT = 200;
+
+function matchesCategory(item: Item, category: Category) {
+  if (category === 'all' || !('origin' in item)) return true;
+  if (category === 'custom') return item.origin === 'user';
+  return item.origin !== 'user' && item.category === category;
+}
+
+export function CatalogPage({
+  kind,
+  onNavigate,
+}: {
+  kind: 'tag' | 'source';
+  onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  const [category, setCategory] = React.useState<Category>('all');
   const [items, setItems] = React.useState<Item[]>([]);
   const [search, setSearch] = React.useState('');
   const [revision, setRevision] = React.useState(0);
@@ -29,7 +51,9 @@ export function CatalogPage({ kind }: { kind: 'tag' | 'source' }) {
     let active = true;
     setLoading(true);
     setError(null);
-    const load = kind === 'tag' ? listTags(search) : listSources(search);
+    const load = kind === 'tag'
+      ? listTags(search, 'usage', category === 'all' ? undefined : category)
+      : listSources(search);
     load.then((result) => {
       if (active) setItems(result);
     }).catch((cause) => {
@@ -38,7 +62,7 @@ export function CatalogPage({ kind }: { kind: 'tag' | 'source' }) {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [kind, search, revision]);
+  }, [kind, search, revision, category]);
 
   function openEditor(item: Item | 'new') {
     setEditing(item);
@@ -88,48 +112,84 @@ export function CatalogPage({ kind }: { kind: 'tag' | 'source' }) {
   }
 
   const label = kind === 'tag' ? 'Tags' : 'Sources';
+  const visible = items.filter((item) => matchesCategory(item, category));
   return (
-    <section className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-6">
+    <section className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">{label}</h1>
-        <Button type="button" onClick={() => openEditor('new')}><Plus className="size-4" />New {kind}</Button>
+        <Button type="button" onClick={() => openEditor('new')}><Plus />New {kind}</Button>
       </div>
       <Input type="search" aria-label={`Search ${label.toLowerCase()}`}
         placeholder={kind === 'tag' ? 'Search tags and aliases' : 'Search sources'}
         value={search} onChange={(event) => setSearch(event.target.value)} />
-      {error ? <p className="text-destructive text-sm">{error}</p> : null}
-      <div className="grid gap-2">
-        {items.map((item) => {
+      {kind === 'tag' ? (
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <Segmented ariaLabel="Tag category" value={category} onValueChange={setCategory}
+            options={[
+              { value: 'all', label: 'All' },
+              { value: 'artist', label: 'Artist' },
+              { value: 'character', label: 'Character' },
+              { value: 'copyright', label: 'Copyright' },
+              { value: 'general', label: 'General' },
+              { value: 'meta', label: 'Meta' },
+              { value: 'custom', label: 'Custom' },
+            ]} />
+        </div>
+      ) : null}
+      {error ? <p role="alert" className="text-destructive text-sm">{error}</p> : null}
+      {loading && items.length === 0 ? (
+        <div role="status" aria-label="Loading" className="grid gap-2">
+          {Array.from({ length: 6 }, (_, index) => <Skeleton key={index} className="h-14 rounded-xl" />)}
+        </div>
+      ) : null}
+      <ul className="grid gap-2">
+        {visible.map((item) => {
           const editable = !item.nameConflict &&
             (kind === 'tag' ? 'origin' in item && item.origin === 'user' && item.category === 'custom'
               : 'isLegacy' in item && !item.isLegacy);
+          const href = kind === 'tag' ? `/gallery?catalog_tags=${item.id}` : `/gallery?catalog_source=${item.id}`;
+          const aliasText = 'aliases' in item && item.aliases.length > 0 ? item.aliases.join(', ')
+            : item.nameConflict ? 'Name conflict' : '';
           return (
-            <div key={item.id} className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
-              {'origin' in item ? <TagChip name={item.name} category={item.category} origin={item.origin} />
-                : <span className="font-medium">{item.name}</span>}
-              <span className="text-muted-foreground min-w-0 flex-1 text-xs">
-                {'aliases' in item && item.aliases.length > 0 ? item.aliases.join(', ')
-                  : item.nameConflict ? 'Legacy name conflict' : ''}
-              </span>
-              <span className="text-muted-foreground text-xs" aria-label={`${item.referenceCount} cards`}>
-                {item.referenceCount}
+            <li key={item.id} className="bg-surface flex min-h-14 items-center gap-3 rounded-xl border px-3 py-2">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                {'origin' in item
+                  ? <NodeChip kind="tag" label={item.name} category={item.category} origin={item.origin}
+                      href={href} onNavigate={onNavigate} />
+                  : <NodeChip kind="source" label={item.name} href={href} onNavigate={onNavigate} />}
+                {aliasText ? <span className="text-muted-foreground min-w-0 truncate text-xs">{aliasText}</span> : null}
+              </div>
+              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                {item.referenceCount} {item.referenceCount === 1 ? 'card' : 'cards'}
               </span>
               {editable ? (
-                <div className="flex gap-1">
-                  <Button type="button" size="icon" variant="ghost" aria-label={`Edit ${item.name}`}
-                    onClick={() => openEditor(item)}><Pencil className="size-4" /></Button>
-                  <Button type="button" size="icon" variant="ghost" aria-label={`Delete ${item.name}`}
-                    disabled={item.referenceCount > 0} title={item.referenceCount > 0 ? 'Remove from cards first' : undefined}
-                    onClick={() => { setDeleting(item); setFormError(null); }}><Trash2 className="size-4" /></Button>
-                </div>
-              ) : null}
-            </div>
+                <Menu>
+                  <MenuTrigger render={<Button type="button" variant="ghost" size="icon"
+                    aria-label={`Actions for ${item.name}`} />}>
+                    <MoreHorizontal />
+                  </MenuTrigger>
+                  <MenuContent>
+                    <MenuItem onClick={() => openEditor(item)}><Pencil /> Edit</MenuItem>
+                    <MenuItem disabled={item.referenceCount > 0}
+                      onClick={() => { setDeleting(item); setFormError(null); }}
+                      className="text-destructive [&_svg]:text-destructive">
+                      <Trash2 /> {item.referenceCount > 0 ? 'Delete (in use)' : 'Delete'}
+                    </MenuItem>
+                  </MenuContent>
+                </Menu>
+              ) : <span className="size-9 shrink-0 pointer-coarse:size-11" aria-hidden="true" />}
+            </li>
           );
         })}
-        {!loading && items.length === 0 && !error ? (
-          <p className="text-muted-foreground rounded-lg border p-6 text-center text-sm">No {label.toLowerCase()} found</p>
-        ) : null}
-      </div>
+      </ul>
+      {!loading && visible.length === 0 && !error ? (
+        <EmptyState icon={SearchX} title={`No ${label.toLowerCase()} found`} />
+      ) : null}
+      {!loading && items.length >= LOAD_LIMIT ? (
+        <p className="text-muted-foreground text-center text-xs">
+          {kind === 'tag' ? `Showing the ${LOAD_LIMIT} most used tags. Search to find others.` : `Showing the first ${LOAD_LIMIT}. Search to narrow the list.`}
+        </p>
+      ) : null}
 
       <Dialog open={editing !== null} title={editing === 'new' ? `New ${kind}` : `Edit ${kind}`}
         onOpenChange={(open) => { if (!open) setEditing(null); }}>

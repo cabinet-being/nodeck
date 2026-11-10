@@ -43,8 +43,15 @@ function json(body: unknown, method: string): RequestInit {
   return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-export const listTags = (search = '') =>
-  request<Tag[]>(`/api/tags${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+/** Most used tags first; without a search only tags in use are listed (up to 200). */
+export type TagCategoryFilter = 'general' | 'artist' | 'character' | 'copyright' | 'meta' | 'custom';
+
+export const listTags = (search = '', sort: 'usage' | 'name' = 'usage', category?: TagCategoryFilter) => {
+  const params = new URLSearchParams({ sort });
+  if (search) params.set('search', search);
+  if (category) params.set('category', category);
+  return request<Tag[]>(`/api/tags?${params.toString()}`);
+};
 export const getTag = (id: number) => request<Tag>(`/api/tags/${id}`);
 export const createTag = (name: string, aliases: string[] = []) =>
   request<Tag>('/api/tags', json({ name, aliases }, 'POST'));

@@ -159,11 +159,11 @@ function RouteContent({
   }
 
   if (currentPath === '/tags') {
-    return <TagsPage />;
+    return <TagsPage onNavigate={onNavigate} />;
   }
 
   if (currentPath === '/sources') {
-    return <SourcesPage />;
+    return <SourcesPage onNavigate={onNavigate} />;
   }
 
   const editCardMatch = currentPath.match(/^\/cards\/(\d+)\/edit$/);
