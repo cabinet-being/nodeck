@@ -5,7 +5,7 @@ import { resolveApiUrl, type ContainedCard } from '@/api/cards';
 import { MediaViewer } from '@/components/media-viewer';
 import { stageButtonClass } from '@/components/media-stage';
 import { usePagerInput } from '@/hooks/use-pager-input';
-import { onTapZoneMouseMove, tapZoneAt } from '@/hooks/use-tap-zones';
+import { StagePager } from '@/components/stage-pager';
 
 export function SetViewer({
   cards,
@@ -45,26 +45,26 @@ export function SetViewer({
             alt={current.title ?? `Card ${index + 1}`}
             contentRef={contentRef}
             originalUrl={current.contentUrl}
-            wrapImage={(image, { actualSize }) => (
-              <a href={`/cards/${current.id}`} aria-label={openLabel} tabIndex={-1} className="block max-w-full"
-                onMouseMove={actualSize ? undefined : (event) => onTapZoneMouseMove(event, canPrev, canNext)}
-                onClick={(event) => {
-                  if (pager.consumeSwipeClick()) { event.preventDefault(); return; }
-                  const zone = actualSize ? 'open' : tapZoneAt(event);
-                  if (zone === 'open') { onNavigate(event); return; }
-                  event.preventDefault();
-                  setSelected(zone === 'next' ? Math.min(cards.length - 1, index + 1) : Math.max(0, index - 1));
-                }}>
-                {image}
-              </a>
-            )}
-            overlay={(
+            overlay={({ actualSize }) => actualSize ? (
               <>
                 <button type="button" className={`${sideButtonClass} left-2`} aria-label="Previous card" title="Previous card"
                   disabled={!canPrev} onClick={() => setSelected(index - 1)}><ChevronLeft /></button>
                 <button type="button" className={`${sideButtonClass} right-2`} aria-label="Next card" title="Next card"
                   disabled={!canNext} onClick={() => setSelected(index + 1)}><ChevronRight /></button>
               </>
+            ) : (
+              <StagePager
+                canPrev={canPrev}
+                canNext={canNext}
+                onPrev={() => setSelected(Math.max(0, index - 1))}
+                onNext={() => setSelected(Math.min(cards.length - 1, index + 1))}
+                openHref={`/cards/${current.id}`}
+                openLabel={openLabel}
+                onOpen={onNavigate}
+                prevLabel="Previous card"
+                nextLabel="Next card"
+                consumeSwipeClick={pager.consumeSwipeClick}
+              />
             )}
             toolbar={
               <a href={`/cards/${current.id}`} onClick={onNavigate} className={stageButtonClass}

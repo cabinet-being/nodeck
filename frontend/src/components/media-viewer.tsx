@@ -21,7 +21,7 @@ type MediaViewerProps = {
   /** Wraps the image (for example in a link); receives the current fit/actual-size state. */
   wrapImage?: (image: React.ReactNode, state: { actualSize: boolean }) => React.ReactNode;
   /** Extra overlay content positioned against the viewer frame (stays visible in fullscreen). */
-  overlay?: React.ReactNode;
+  overlay?: React.ReactNode | ((state: { actualSize: boolean }) => React.ReactNode);
 };
 
 export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef, className, toolbar, originalUrl, wrapImage, overlay }: MediaViewerProps) {
@@ -105,7 +105,7 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
           wrapImage ? wrapImage(image, { actualSize }) : image
         )}
       </div>
-      {overlay}
+      {typeof overlay === 'function' ? overlay({ actualSize }) : overlay}
     </div>
   );
 }

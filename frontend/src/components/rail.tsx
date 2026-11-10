@@ -49,10 +49,42 @@ export function Rail({
     return () => observer?.disconnect();
   }, [updateScroll, cards, loading]);
 
+  // Target of an in-flight smooth scroll, so quick repeated clicks keep moving forward
+  // instead of measuring from a half-finished position.
+  const pendingRef = React.useRef<{ left: number; timer: number } | null>(null);
+
+  function tileOffsets(rail: HTMLDivElement) {
+    const railLeft = rail.getBoundingClientRect().left;
+    return Array.from(rail.querySelectorAll<HTMLElement>('[role=listitem] > *')).map((tile) => {
+      const rect = tile.getBoundingClientRect();
+      return { left: rect.left - railLeft + rail.scrollLeft, right: rect.right - railLeft + rail.scrollLeft };
+    });
+  }
+
   function scroll(direction: -1 | 1) {
     const rail = railRef.current;
     if (!rail) return;
-    rail.scrollBy({ left: direction * Math.max(rail.clientWidth * 0.8, 180), behavior: 'smooth' });
+    const base = pendingRef.current?.left ?? rail.scrollLeft;
+    const max = rail.scrollWidth - rail.clientWidth;
+    const tiles = tileOffsets(rail);
+    const padding = 4;
+    let target: number;
+    if (direction === 1) {
+      // Page forward: the first tile that is cut off on the right becomes the first visible one.
+      const next = tiles.find((tile) => tile.right > base + rail.clientWidth + 1);
+      target = next ? next.left - padding : max;
+    } else {
+      // Page back by one screen, aligned to a tile edge.
+      const goal = base - rail.clientWidth;
+      const previous = tiles.find((tile) => tile.left >= goal - 1);
+      target = previous ? previous.left - padding : 0;
+    }
+    target = Math.max(0, Math.min(max, target));
+    if (Math.abs(target - base) < 1) return;
+    if (pendingRef.current) window.clearTimeout(pendingRef.current.timer);
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    pendingRef.current = { left: target, timer: window.setTimeout(() => { pendingRef.current = null; }, 700) };
+    rail.scrollTo({ left: target, behavior: reduceMotion ? 'auto' : 'smooth' });
   }
 
   return (
@@ -97,7 +129,7 @@ export function Rail({
           <div
             ref={railRef}
             onScroll={updateScroll}
-            className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pt-1 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="-mx-1 flex gap-3 overflow-x-auto px-1 pt-1 pb-3 [scrollbar-width:none] pointer-coarse:snap-x pointer-coarse:snap-mandatory [&::-webkit-scrollbar]:hidden"
             role="list"
             aria-label={`${title} cards`}
           >
@@ -108,15 +140,23 @@ export function Rail({
             ))}
           </div>
           {(['left', 'right'] as const).map((side) => (
-            canScroll[side] ? (
-              <Button key={side} type="button" size="icon" variant="secondary"
-                aria-label={`Scroll ${title} ${side}`} title={`Scroll ${side}`}
-                onClick={() => scroll(side === 'left' ? -1 : 1)}
-                className={`bg-surface/95 shadow-2 absolute top-[calc(50%-0.375rem)] z-10 hidden size-10 -translate-y-1/2 rounded-full opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within/rail:opacity-100 group-hover/rail:opacity-100 pointer-fine:flex ${side === 'left' ? 'left-1' : 'right-1'}`}
-              >
+            // Always mounted (hidden when it can't scroll) so a click is never lost to a re-mount.
+            // A tall edge strip is the target, not a small round button; touch screens swipe instead.
+            <button
+              key={side}
+              type="button"
+              aria-label={`Scroll ${title} ${side}`}
+              title={`Scroll ${side}`}
+              disabled={!canScroll[side]}
+              onClick={() => scroll(side === 'left' ? -1 : 1)}
+              className={`group/edge absolute top-1 bottom-3 z-10 hidden w-16 items-center outline-none transition-opacity duration-[var(--dur-fast)] pointer-fine:flex disabled:pointer-events-none disabled:opacity-0 ${side === 'left'
+                ? 'left-0 justify-start bg-gradient-to-r from-background/90 to-transparent pl-1'
+                : 'right-0 justify-end bg-gradient-to-l from-background/90 to-transparent pr-1'}`}
+            >
+              <span className="bg-surface text-foreground shadow-2 inline-flex size-11 items-center justify-center rounded-full border transition-transform duration-[var(--dur-fast)] group-hover/edge:scale-105 group-focus-visible/edge:ring-2 group-focus-visible/edge:ring-ring">
                 {side === 'left' ? <ChevronLeft className="size-5" /> : <ChevronRight className="size-5" />}
-              </Button>
-            ) : null
+              </span>
+            </button>
           ))}
         </div>
       ) : null}
