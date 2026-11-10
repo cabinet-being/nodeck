@@ -50,8 +50,9 @@ export async function listDecks(params: DeckListParams = {}) {
   return readJson<DeckSummary[]>(response);
 }
 
-export async function getDeck(id: number) {
-  const response = await fetch(`${apiBaseUrl}/api/decks/${id}`);
+export async function getDeck(id: number, options: { includeCards?: boolean } = {}) {
+  const query = options.includeCards === false ? '?include_cards=false' : '';
+  const response = await fetch(`${apiBaseUrl}/api/decks/${id}${query}`);
 
   return readJson<DeckDetails>(response);
 }

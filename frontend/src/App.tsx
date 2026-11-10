@@ -223,7 +223,7 @@ function RouteContent({
   const deckMatch = currentPath.match(/^\/decks\/(\d+)$/);
 
   if (deckMatch) {
-    return <DeckDetailsPage deckId={Number(deckMatch[1])} onNavigate={onNavigate} />;
+    return <DeckDetailsPage deckId={Number(deckMatch[1])} currentSearch={currentSearch} onNavigate={onNavigate} onNavigateTo={onNavigateTo} />;
   }
 
   return <NotFoundPage onNavigate={onNavigate} />;

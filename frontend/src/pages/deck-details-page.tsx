@@ -1,42 +1,44 @@
 import * as React from 'react';
 import { LoaderCircle, Pencil, X } from 'lucide-react';
 
-import { getDeck, removeCardFromDeck, type DeckCard, type DeckDetails } from '@/api/decks';
+import { type Card } from '@/api/cards';
+import { getDeck, removeCardFromDeck, type DeckDetails } from '@/api/decks';
+import { CardBrowser } from '@/components/card-browser';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  useVisualCardView,
-  VisualCardViewToggle,
-  VisualCardWall,
-} from '@/components/visual-card-wall';
 
 export function DeckDetailsPage({
   deckId,
+  currentSearch,
   onNavigate,
+  onNavigateTo,
 }: {
   deckId: number;
+  currentSearch: string;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onNavigateTo: (path: string) => void;
 }) {
   const [result, setResult] = React.useState<{
     deckId: number;
     deck: DeckDetails | null;
     error: string | null;
   } | null>(null);
-  const [view, setView] = useVisualCardView('nodeck.deckView');
+  const [reloadKey, setReloadKey] = React.useState(0);
   const [removingId, setRemovingId] = React.useState<number | null>(null);
   const [removeError, setRemoveError] = React.useState<string | null>(null);
+  const [headerRetry, setHeaderRetry] = React.useState(0);
+  const pageCount = React.useRef(0);
   const currentDeckId = React.useRef(deckId);
-  const requestGeneration = React.useRef(0);
   currentDeckId.current = deckId;
+  const pageParam = Number(new URLSearchParams(currentSearch).get('page'));
+  const page = Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
   React.useEffect(() => {
     let active = true;
-    requestGeneration.current += 1;
-    setResult(null);
     setRemovingId(null);
     setRemoveError(null);
 
-    getDeck(deckId)
+    getDeck(deckId, { includeCards: false })
       .then((deck) => {
         if (active) setResult({ deckId, deck, error: null });
       })
@@ -48,14 +50,19 @@ export function DeckDetailsPage({
         });
       });
 
-    return () => {
-      active = false;
-      requestGeneration.current += 1;
-    };
-  }, [deckId]);
+    return () => { active = false; };
+  }, [deckId, headerRetry]);
 
   if (result?.deckId === deckId && result.error) {
-    return <div className="text-destructive p-6 text-sm">{result.error}</div>;
+    return (
+      <div className="flex flex-wrap items-center gap-3 p-6" role="alert">
+        <p className="text-destructive text-sm">{result.error}</p>
+        <Button type="button" size="sm" variant="outline" onClick={() => {
+          setResult(null);
+          setHeaderRetry((key) => key + 1);
+        }}>Retry</Button>
+      </div>
+    );
   }
 
   if (result?.deckId !== deckId || !result.deck) {
@@ -63,25 +70,33 @@ export function DeckDetailsPage({
   }
 
   const deck = result.deck;
-  const cards = [...deck.cards].sort((left, right) => left.position - right.position);
+  const canRemove = deck.systemKey !== 'favorites';
 
   async function removeCard(cardId: number) {
     if (removingId !== null) return;
-    const generation = requestGeneration.current;
     setRemovingId(cardId);
     setRemoveError(null);
 
     try {
-      const updated = await removeCardFromDeck(deckId, cardId);
-      if (currentDeckId.current === deckId && requestGeneration.current === generation) {
-        setResult({ deckId, deck: updated, error: null });
+      await removeCardFromDeck(deckId, cardId);
+      if (currentDeckId.current !== deckId) return;
+      const updated = await getDeck(deckId, { includeCards: false }).catch(() => null);
+      if (currentDeckId.current !== deckId) return;
+      if (updated) setResult({ deckId, deck: updated, error: null });
+      if (pageCount.current <= 1 && page > 1) {
+        const params = new URLSearchParams(currentSearch);
+        if (page - 1 <= 1) params.delete('page');
+        else params.set('page', String(page - 1));
+        onNavigateTo(`/decks/${deckId}${params.toString() ? `?${params.toString()}` : ''}`);
+      } else {
+        setReloadKey((key) => key + 1);
       }
     } catch (error) {
-      if (currentDeckId.current === deckId && requestGeneration.current === generation) {
+      if (currentDeckId.current === deckId) {
         setRemoveError(error instanceof Error ? error.message : 'Unable to remove card.');
       }
     } finally {
-      if (currentDeckId.current === deckId && requestGeneration.current === generation) setRemovingId(null);
+      if (currentDeckId.current === deckId) setRemovingId(null);
     }
   }
 
@@ -89,7 +104,10 @@ export function DeckDetailsPage({
     <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div className="grid min-w-0 gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">{deck.title}</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight">{deck.title}</h1>
+            <p className="text-muted-foreground text-sm">{deck.cardCount} card(s)</p>
+          </div>
           {deck.systemKey === 'favorites' ? null : (
             <a
               href={`/decks/${deck.id}/edit`}
@@ -103,30 +121,27 @@ export function DeckDetailsPage({
           )}
         </div>
 
-        <div className="flex justify-end">
-          <VisualCardViewToggle view={view} onChange={setView} />
-        </div>
         {removeError ? <p className="text-destructive text-sm" role="alert">{removeError}</p> : null}
-        {cards.length > 0 ? (
-          <VisualCardWall
-            cards={cards}
-            view={view}
-            onNavigate={onNavigate}
-            renderCaption={(index) => (
-              <DeckCardCaption
-                card={cards[index]}
-                onNavigate={onNavigate}
-                onRemove={deck.systemKey === 'favorites' ? undefined : removeCard}
-                isRemoving={removingId === cards[index].id}
-                isSaving={removingId !== null}
-              />
-            )}
-          />
-        ) : (
-          <div className="text-muted-foreground rounded-lg border p-6 text-center text-sm">
-            No cards
-          </div>
-        )}
+        <CardBrowser
+          scope={{ kind: 'deck', deckId }}
+          basePath={`/decks/${deckId}`}
+          currentSearch={currentSearch}
+          onNavigate={onNavigate}
+          onNavigateTo={onNavigateTo}
+          viewStorageKey="nodeck.deckView"
+          reloadKey={reloadKey}
+          emptyMessage="This deck has no cards yet."
+          onPageLoaded={({ count }) => { pageCount.current = count; }}
+          renderCaption={(card) => (
+            <DeckCardCaption
+              card={card}
+              onNavigate={onNavigate}
+              onRemove={canRemove ? removeCard : undefined}
+              isRemoving={removingId === card.id}
+              isSaving={removingId !== null}
+            />
+          )}
+        />
       </div>
 
       <aside className="grid content-start gap-4">
@@ -149,24 +164,27 @@ function DeckCardCaption({
   isRemoving,
   isSaving,
 }: {
-  card: DeckCard;
+  card: Card;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   onRemove?: (cardId: number) => void;
   isRemoving: boolean;
   isSaving: boolean;
 }) {
+  const label = card.title ?? card.type;
+  const membership = card.membershipProperties;
   return (
     <div className="bg-background/95 flex min-w-0 items-center gap-2 p-2">
-      <a href={`/cards/${card.id}`} onClick={onNavigate} className="block min-w-0 flex-1 hover:underline" aria-label={`Open ${card.title ?? card.type}`}>
-        <div className="truncate text-sm font-medium" title={card.title ?? card.type}>
-          {card.title ?? card.type}
+      <a href={`/cards/${card.id}`} onClick={onNavigate} className="block min-w-0 flex-1 hover:underline" aria-label={`Open ${label}`}>
+        <div className="text-muted-foreground truncate text-xs">
+          {card.deckPosition != null ? `#${card.deckPosition + 1} · ` : ''}{card.type} · ID {card.id}
         </div>
+        <div className="truncate text-sm font-medium" title={label}>{label}</div>
       </a>
-      {card.membershipProperties && Object.keys(card.membershipProperties).length > 0 ? (
+      {membership && Object.keys(membership).length > 0 ? (
         <details className="text-muted-foreground text-xs">
-          <summary className="cursor-pointer" aria-label={`Membership properties for item ${card.position + 1}`}>Details</summary>
+          <summary className="cursor-pointer" aria-label={`Membership properties for ${label}`}>Details</summary>
           <dl className="mt-2 space-y-1 break-words">
-            {Object.entries(card.membershipProperties).map(([key, value]) => (
+            {Object.entries(membership).map(([key, value]) => (
               <div key={key}>
                 <dt className="inline font-medium">{key}: </dt>
                 <dd className="inline">{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
@@ -181,7 +199,7 @@ function DeckCardCaption({
           variant="ghost"
           size="icon-xs"
           disabled={isSaving}
-          aria-label={`Remove ${card.title ?? card.type} from deck`}
+          aria-label={`Remove ${label} from deck`}
           title="Remove from deck"
           onClick={() => onRemove(card.id)}
         >

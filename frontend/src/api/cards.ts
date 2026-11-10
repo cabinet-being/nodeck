@@ -31,6 +31,8 @@ export type Card = {
   outgoingRelations?: CardRelation[];
   incomingRelations?: CardRelation[];
   containedCards?: ContainedCard[];
+  deckPosition?: number | null;
+  membershipProperties?: Record<string, unknown> | null;
 };
 
 export type RelationCard = {
@@ -63,7 +65,8 @@ export type CardListParams = {
   catalogSource?: number;
   search?: string;
   excludeContainedMedia?: boolean;
-  sort?: 'created_at';
+  deckId?: number;
+  sort?: 'created_at' | 'position';
   order?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
@@ -134,6 +137,7 @@ export async function listCards(params: CardListParams = {}) {
   if (params.catalogSource) searchParams.set('catalog_source', String(params.catalogSource));
   if (params.search) searchParams.set('search', params.search);
   if (params.excludeContainedMedia) searchParams.set('exclude_contained_media', 'true');
+  if (params.deckId) searchParams.set('deck_id', String(params.deckId));
   if (params.sort) searchParams.set('sort', params.sort);
   if (params.order) searchParams.set('order', params.order);
   if (params.limit) searchParams.set('limit', String(params.limit));
