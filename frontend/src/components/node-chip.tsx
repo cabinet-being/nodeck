@@ -2,14 +2,25 @@ import * as React from 'react';
 import {
   BookOpen,
   Brush,
+  Clapperboard,
+  Expand,
   FileVideo,
+  Film,
   Globe,
   Hash,
+  Image as ImageIcon,
   Info,
   Layers,
   ListFilter,
+  Maximize,
+  Minimize,
+  RectangleHorizontal,
+  RectangleVertical,
   Sparkle,
+  Square,
   User,
+  Volume2,
+  VolumeX,
   Wand2,
   X,
 } from 'lucide-react';
@@ -26,7 +37,24 @@ const categoryTones: Record<string, Tone> = {
   character: { icon: User, label: 'character', tone: 'bg-tag-character-soft text-tag-character border-tag-character/30' },
   copyright: { icon: BookOpen, label: 'copyright', tone: 'bg-tag-copyright-soft text-tag-copyright border-tag-copyright/30' },
   meta: { icon: Info, label: 'meta', tone: 'bg-tag-meta-soft text-tag-meta border-tag-meta/30' },
-  user: { icon: Sparkle, label: 'custom', tone: 'bg-tag-user-soft text-tag-user border-tag-user/30' },
+  custom: { icon: Sparkle, label: 'custom', tone: 'bg-tag-user-soft text-tag-user border-tag-user/30' },
+};
+
+const metaIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  image: ImageIcon,
+  video: Film,
+  gif: Clapperboard,
+  animated: Clapperboard,
+  sound: Volume2,
+  silent: VolumeX,
+  horizontal: RectangleHorizontal,
+  vertical: RectangleVertical,
+  square_image: Square,
+  highres: Maximize,
+  absurdres: Expand,
+  lowres: Minimize,
+  comic_book: BookOpen,
+  set: Layers,
 };
 
 const neutralTone = 'bg-muted text-foreground border-border';
@@ -34,12 +62,15 @@ const neutralTone = 'bg-muted text-foreground border-border';
 function resolveTone(
   kind: NodeChipKind,
   category: string | undefined,
-  origin: string | undefined
+  origin: string | undefined,
+  label: string
 ): Tone {
   switch (kind) {
-    case 'tag':
-      if (origin === 'user') return categoryTones.user;
-      return categoryTones[category ?? 'general'] ?? categoryTones.general;
+    case 'tag': {
+      const tone = categoryTones[category ?? (origin === 'user' ? 'custom' : 'general')] ?? categoryTones.general;
+      if (category === 'meta') return { ...tone, icon: metaIcons[label.toLowerCase()] ?? tone.icon };
+      return tone;
+    }
     case 'source':
       return { icon: Globe, label: 'source', tone: neutralTone };
     case 'deck':
@@ -79,7 +110,7 @@ export function NodeChip({
   size?: 'sm' | 'md';
   className?: string;
 }) {
-  const tone = resolveTone(kind, category, origin);
+  const tone = resolveTone(kind, category, origin, label);
   const Glyph = suggested ? Wand2 : tone.icon;
   const typeLabel = suggested ? `suggested ${tone.label}` : tone.label;
   const ariaLabel = `${typeLabel}: ${label}`;

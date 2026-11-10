@@ -7,8 +7,7 @@ import { cardLabel } from '@/components/card-tile';
 import { deckCardCountLabel } from '@/components/deck-stack';
 import { EmptyState } from '@/components/empty-state';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useVisualCardView, VisualCardViewToggle, VisualCardWall } from '@/components/visual-card-wall';
+import { useVisualCardView, VisualCardViewToggle, VisualCardWall, VisualCardWallSkeleton } from '@/components/visual-card-wall';
 
 export function FavoritesPage({
   onNavigate,
@@ -20,7 +19,7 @@ export function FavoritesPage({
   const [isLoading, setIsLoading] = React.useState(true);
   const [retryKey, setRetryKey] = React.useState(0);
   const [removingCardId, setRemovingCardId] = React.useState<number | null>(null);
-  const [view, setView] = useVisualCardView('nodeck.favoritesView');
+  const [view, setView] = useVisualCardView();
 
   React.useEffect(() => {
     let active = true;
@@ -55,12 +54,7 @@ export function FavoritesPage({
         </div>
       ) : null}
 
-      {isLoading ? (
-        <div role="status" aria-label="Loading" className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-6">
-          {Array.from({ length: 12 }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
-        </div>
-      ) : null}
-
+      {isLoading ? <VisualCardWallSkeleton count={12} /> : null}
       {!isLoading && !error && cards.length === 0 ? (
         <EmptyState icon={Heart} title="No favorites yet"
           action={<a href="/gallery" onClick={onNavigate} className={buttonVariants({ variant: 'outline' })}><Images className="size-4" /> Browse gallery</a>} />

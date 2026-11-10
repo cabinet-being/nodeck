@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { resolveApiUrl, type ContainedCard } from '@/api/cards';
 import { usePagerInput } from '@/hooks/use-pager-input';
+import { onTapZoneMouseMove, tapZoneAt } from '@/hooks/use-tap-zones';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { stageButtonClass } from '@/components/media-stage';
@@ -32,18 +33,29 @@ export function ComicReader({
       event.preventDefault();
       return;
     }
-    onNavigate(event);
+    const zone = tapZoneAt(event);
+    if (zone === 'open') {
+      onNavigate(event);
+      return;
+    }
+    event.preventDefault();
+    changePage(zone === 'next' ? 1 : -1);
   }
+
+  const sideButtonClass = `${stageButtonClass} absolute top-1/2 z-10 -translate-y-1/2 disabled:pointer-events-none disabled:opacity-0`;
 
   return (
     <div className="grid min-w-0" role="region" aria-label="Comic reader" tabIndex={0} {...pager.containerProps}>
       <div ref={contentRef} className="grid">
         {mode === 'page' ? (
           currentPage ? (
-            <div {...pager.swipeProps} className="flex min-h-[16rem] items-center justify-center overflow-hidden sm:min-h-[28rem]">
-              <a href={`/cards/${currentPage.id}`} onClick={handlePageClick} aria-label={`Open page ${pageIndex + 1}${currentPage.title ? `: ${currentPage.title}` : ''}`} className="block max-w-full">
+            <div {...pager.swipeProps} className="relative flex min-h-[16rem] items-center justify-center overflow-hidden sm:min-h-[28rem]">
+              <a href={`/cards/${currentPage.id}`} onClick={handlePageClick}
+                onMouseMove={(event) => onTapZoneMouseMove(event, pageIndex > 0, pageIndex < pages.length - 1)} aria-label={`Open page ${pageIndex + 1}${currentPage.title ? `: ${currentPage.title}` : ''}`} className="block max-w-full">
                 {currentPage.contentUrl ? <img src={resolveApiUrl(currentPage.contentUrl)} alt={currentPage.title ?? `Page ${pageIndex + 1}`} className="max-h-[calc(100dvh-7rem)] max-w-full object-contain" /> : <span className="p-4 text-sm">Open page {pageIndex + 1}</span>}
               </a>
+              <button type="button" className={`${sideButtonClass} left-2`} onClick={() => changePage(-1)} disabled={pageIndex === 0} aria-label="Previous page"><ChevronLeft /></button>
+              <button type="button" className={`${sideButtonClass} right-2`} onClick={() => changePage(1)} disabled={pageIndex >= pages.length - 1} aria-label="Next page"><ChevronRight /></button>
             </div>
           ) : <p className="text-stage-foreground/70 p-6 text-sm">No pages in this comic.</p>
         ) : pages.map((page, index) => (
@@ -61,11 +73,7 @@ export function ComicReader({
           options={[{ value: 'page', label: 'Single page' }, { value: 'scroll', label: 'Long scroll' }]}
         />
         {mode === 'page' ? (
-          <div className="flex items-center gap-2">
-            <button type="button" className={stageButtonClass} onClick={() => changePage(-1)} disabled={pageIndex === 0} aria-label="Previous page"><ChevronLeft /></button>
-            <span className="text-stage-foreground/80 min-w-12 text-center text-sm tabular-nums" aria-live="polite">{pages.length ? pageIndex + 1 : 0} / {pages.length}</span>
-            <button type="button" className={stageButtonClass} onClick={() => changePage(1)} disabled={pageIndex >= pages.length - 1} aria-label="Next page"><ChevronRight /></button>
-          </div>
+          <span className="text-stage-foreground/80 min-w-12 text-center text-sm tabular-nums" aria-live="polite">{pages.length ? pageIndex + 1 : 0} / {pages.length}</span>
         ) : null}
       </div>
 

@@ -9,7 +9,7 @@ import { DeleteCardDialog } from '@/components/delete-card-dialog';
 import { EmptyState } from '@/components/empty-state';
 import { MediaStage } from '@/components/media-stage';
 import { MediaViewer } from '@/components/media-viewer';
-import { RecommendationRail } from '@/components/recommendation-rail';
+import { SimilarGrid } from '@/components/similar-grid';
 import { SetViewer } from '@/components/set-viewer';
 import { buttonVariants } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
@@ -147,7 +147,7 @@ function MediaDetails(props: PageProps) {
         </MediaStage>
       }
       inspector={<CardInspector {...props} originalUrl={card.contentUrl} />}
-      similar={<RecommendationRail title="Similar" contextCardId={card.id} onNavigate={onNavigate} />}
+      similar={<SimilarGrid contextCardId={card.id} onNavigate={onNavigate} />}
     />
   );
 }
@@ -164,7 +164,7 @@ function ComicDetails(props: PageProps) {
         </MediaStage>
       }
       inspector={<CardInspector {...props} />}
-      similar={<RecommendationRail title="Similar" contextCardId={card.id} onNavigate={onNavigate} />}
+      similar={<SimilarGrid contextCardId={card.id} onNavigate={onNavigate} />}
     />
   );
 }
@@ -174,7 +174,7 @@ function SetDetails(props: PageProps) {
   const containedCards = card.containedCards ?? [];
   const [wall, setWall] = React.useState(false);
   const contentRef = useCardViewTracking(card.id, 'collection');
-  const [view, setView] = useVisualCardView('nodeck.setView');
+  const [view, setView] = useVisualCardView();
 
   const modeSwitch = (
     <Segmented
@@ -205,7 +205,7 @@ function SetDetails(props: PageProps) {
         )
       }
       inspector={<CardInspector {...props} />}
-      similar={<RecommendationRail title="Similar" contextCardId={card.id} onNavigate={onNavigate} />}
+      similar={<SimilarGrid contextCardId={card.id} onNavigate={onNavigate} />}
     />
   );
 }

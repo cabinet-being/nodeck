@@ -10,11 +10,11 @@ import {
 import { EmptyState } from '@/components/empty-state';
 import { RecommendationModeControl } from '@/components/recommendation-rail';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   useVisualCardView,
   VisualCardViewToggle,
   VisualCardWall,
+  VisualCardWallSkeleton,
 } from '@/components/visual-card-wall';
 import { useLocalDay } from '@/hooks/use-local-day';
 
@@ -39,7 +39,7 @@ export function FeedPage({
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [requestVersion, retry] = React.useReducer((value: number) => value + 1, 0);
-  const [view, setView] = useVisualCardView('nodeck.feedView');
+  const [view, setView] = useVisualCardView();
 
   React.useEffect(() => {
     let active = true;
@@ -79,12 +79,7 @@ export function FeedPage({
           <Button type="button" size="sm" variant="outline" onClick={retry}>Try again</Button>
         </div>
       ) : null}
-      {loading ? (
-        <div role="status" aria-label="Loading"
-          className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-6">
-          {Array.from({ length: 12 }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
-        </div>
-      ) : null}
+      {loading ? <VisualCardWallSkeleton count={12} /> : null}
       {!loading && !error && items.length === 0 ? (
         <EmptyState icon={Sparkles} title="Nothing here yet" />
       ) : null}

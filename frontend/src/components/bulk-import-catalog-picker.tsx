@@ -28,7 +28,7 @@ export function BulkImportCatalogPicker({ selection, onChange, locked }: {
   React.useEffect(() => {
     if (!open || locked || !tagSearch.trim()) { setTagChoices([]); return; }
     let active = true;
-    listTags(tagSearch.trim()).then((choices) => { if (active) { setTagChoices(choices); setError(null); } })
+    listTags(tagSearch.trim()).then((choices) => { if (active) { setTagChoices(choices.filter((tag) => tag.origin !== 'system')); setError(null); } })
       .catch((cause) => { if (active) setError(message(cause)); });
     return () => { active = false; };
   }, [open, locked, tagSearch]);

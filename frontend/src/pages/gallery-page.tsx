@@ -19,7 +19,6 @@ export function GalleryPage({
         currentSearch={currentSearch}
         onNavigate={onNavigate}
         onNavigateTo={onNavigateTo}
-        viewStorageKey="nodeck.galleryView"
         title={<h1 className="text-2xl font-semibold tracking-tight">Gallery</h1>}
         emptyMessage="Nothing here yet"
       />

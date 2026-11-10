@@ -149,7 +149,6 @@ export function DeckDetailsPage({
         currentSearch={currentSearch}
         onNavigate={onNavigate}
         onNavigateTo={onNavigateTo}
-        viewStorageKey="nodeck.deckView"
         reloadKey={reloadKey}
         emptyMessage="This deck has no cards yet."
         onPageLoaded={({ count }) => { pageCount.current = count; }}

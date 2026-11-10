@@ -7,11 +7,11 @@ import { EmptyState } from '@/components/empty-state';
 import { FilterBar, type CatalogFilters } from '@/components/filter-bar';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
-import { Skeleton } from '@/components/ui/skeleton';
 import {
   useVisualCardView,
   VisualCardViewToggle,
   VisualCardWall,
+  VisualCardWallSkeleton,
 } from '@/components/visual-card-wall';
 
 const pageSize = 48;
@@ -24,7 +24,6 @@ export function CardBrowser({
   currentSearch,
   onNavigate,
   onNavigateTo,
-  viewStorageKey,
   title,
   renderCaption,
   renderActions,
@@ -37,7 +36,6 @@ export function CardBrowser({
   currentSearch: string;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   onNavigateTo: (path: string) => void;
-  viewStorageKey: string;
   title?: React.ReactNode;
   /** Optional caption below each card; makes the wall show captions. */
   renderCaption?: (card: Card, index: number) => React.ReactNode;
@@ -54,7 +52,7 @@ export function CardBrowser({
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [retryKey, setRetryKey] = React.useState(0);
-  const [view, setView] = useVisualCardView(viewStorageKey);
+  const [view, setView] = useVisualCardView();
   const [tags, setTags] = React.useState<Tag[]>([]);
   const [source, setSource] = React.useState<Source | null>(null);
   const onPageLoadedRef = React.useRef(onPageLoaded);
@@ -194,12 +192,7 @@ export function CardBrowser({
         <p className="text-destructive text-sm">{error}</p>
         <Button type="button" size="sm" variant="outline" onClick={() => setRetryKey((key) => key + 1)}>Try again</Button>
       </div> : null}
-      {loading ? (
-        <div role="status" aria-label="Loading"
-          className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-6">
-          {Array.from({ length: 12 }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
-        </div>
-      ) : null}
+      {loading ? <VisualCardWallSkeleton count={pageSize} /> : null}
       {!loading && !error && cards.length === 0 ? (
         filtersActive ? (
           <EmptyState icon={SearchX} title="No matches"

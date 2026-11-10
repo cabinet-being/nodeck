@@ -206,6 +206,7 @@
   }
   html {
     @apply font-sans;
+    scrollbar-gutter: stable;
     color-scheme: light;
   }
   html.dark {

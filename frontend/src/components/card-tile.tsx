@@ -10,6 +10,7 @@ export type VisualCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl'> & {
   isFavorite?: Card['isFavorite'];
   contentUrl?: Card['contentUrl'];
   containedCards?: Card['containedCards'];
+  metadata?: Card['metadata'];
 };
 
 export type CardTileLayout = 'grid' | 'brick' | 'rail';
@@ -20,6 +21,12 @@ export function cardLabel(card: Pick<VisualCard, 'type' | 'title'>) {
   if (card.type === 'comic') return 'Untitled comic';
   if (card.type === 'set') return 'Untitled set';
   return 'Untitled';
+}
+
+function metadataRatio(card: VisualCard) {
+  const width = Number(card.metadata?.width);
+  const height = Number(card.metadata?.height);
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? width / height : null;
 }
 
 function typeBadge(card: VisualCard) {
@@ -54,6 +61,9 @@ export function CardTile({
   const label = cardLabel(card);
   const badge = typeBadge(card);
   const isFavorite = favoriteOverride ?? card.isFavorite ?? false;
+  const [loadedUrl, setLoadedUrl] = React.useState<string | null>(null);
+  const ratio = metadataRatio(card);
+  const loaded = loadedUrl === card.previewUrl;
   const hasFavorite = showFavorite && card.isFavorite !== undefined;
 
   return (
@@ -65,20 +75,22 @@ export function CardTile({
         className
       )}
     >
-      <div className={cn('bg-muted relative overflow-hidden', caption ? 'rounded-t-2xl' : 'rounded-2xl')}>
+      <div className={cn('bg-muted relative overflow-hidden', !loaded && card.previewUrl && 'animate-pulse motion-reduce:animate-none', caption ? 'rounded-t-2xl' : 'rounded-2xl')}>
         <a
           href={`/cards/${card.id}`}
           onClick={onNavigate}
           aria-label={`Open ${label}`}
           title={label}
           className={cn('block rounded-[inherit]', layout !== 'brick' && 'aspect-square')}
+          style={layout === 'brick' && (ratio !== null || !loaded) ? { aspectRatio: ratio ?? 1 } : undefined}
         >
           <CardPreview
             url={card.previewUrl}
             title={card.title}
             type="No preview"
-            imageClassName={cn('w-full object-cover', layout === 'brick' ? 'h-auto' : 'size-full')}
+            imageClassName={cn('w-full object-cover', layout === 'brick' && ratio === null ? 'h-auto' : 'size-full')}
             fallbackClassName={layout === 'brick' ? 'aspect-square' : 'size-full'}
+            onLoad={() => setLoadedUrl(card.previewUrl)}
           />
           {!caption ? (
             <span

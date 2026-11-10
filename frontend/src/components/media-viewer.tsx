@@ -18,9 +18,13 @@ type MediaViewerProps = {
   toolbar?: React.ReactNode;
   /** When set, the overlay toolbar offers a download link for the original file. */
   originalUrl?: string | null;
+  /** Wraps the image (for example in a link); receives the current fit/actual-size state. */
+  wrapImage?: (image: React.ReactNode, state: { actualSize: boolean }) => React.ReactNode;
+  /** Extra overlay content positioned against the viewer frame (stays visible in fullscreen). */
+  overlay?: React.ReactNode;
 };
 
-export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef, className, toolbar, originalUrl }: MediaViewerProps) {
+export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef, className, toolbar, originalUrl, wrapImage, overlay }: MediaViewerProps) {
   const frameRef = React.useRef<HTMLDivElement>(null);
   const [actualSize, setActualSize] = React.useState(false);
   const [fullscreen, setFullscreen] = React.useState(false);
@@ -41,6 +45,18 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
   }
 
   const imageSrc = failed && fallbackSrc ? fallbackSrc : src;
+  const image = (
+    <img
+            src={resolveApiUrl(imageSrc)}
+            alt={alt}
+            onError={() => { if (fallbackSrc) setFailed(true); }}
+            className={cn(
+              actualSize
+                ? 'max-h-none max-w-none'
+                : cn('max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]'),
+            )}
+          />
+  );
 
   return (
     <div ref={frameRef} className={cn('bg-stage text-stage-foreground relative min-w-0', fullscreen && 'h-dvh', className)}>
@@ -86,18 +102,10 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
             className={cn('max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]')}
           />
         ) : (
-          <img
-            src={resolveApiUrl(imageSrc)}
-            alt={alt}
-            onError={() => { if (fallbackSrc) setFailed(true); }}
-            className={cn(
-              actualSize
-                ? 'max-h-none max-w-none'
-                : cn('max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]'),
-            )}
-          />
+          wrapImage ? wrapImage(image, { actualSize }) : image
         )}
       </div>
+      {overlay}
     </div>
   );
 }

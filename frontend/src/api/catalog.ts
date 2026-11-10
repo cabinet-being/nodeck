@@ -17,7 +17,7 @@ export type Source = {
 };
 
 export type CardTag = Pick<Tag, 'id' | 'name' | 'category' | 'origin'> & {
-  assignmentSource: 'manual' | 'auto' | 'confirmed';
+  assignmentSource: 'manual' | 'auto' | 'confirmed' | 'system';
 };
 export type TagSuggestion = {
   tagId: number;
@@ -53,10 +53,10 @@ export const listTags = (search = '', sort: 'usage' | 'name' = 'usage', category
   return request<Tag[]>(`/api/tags?${params.toString()}`);
 };
 export const getTag = (id: number) => request<Tag>(`/api/tags/${id}`);
-export const createTag = (name: string, aliases: string[] = []) =>
-  request<Tag>('/api/tags', json({ name, aliases }, 'POST'));
-export const updateTag = (id: number, name: string, aliases: string[]) =>
-  request<Tag>(`/api/tags/${id}`, json({ name, aliases }, 'PUT'));
+export const createTag = (name: string, aliases: string[] = [], category?: TagCategoryFilter) =>
+  request<Tag>('/api/tags', json({ name, aliases, ...(category ? { category } : {}) }, 'POST'));
+export const updateTag = (id: number, name: string, aliases: string[], category?: TagCategoryFilter) =>
+  request<Tag>(`/api/tags/${id}`, json({ name, aliases, ...(category ? { category } : {}) }, 'PUT'));
 export const deleteTag = (id: number) =>
   request<void>(`/api/tags/${id}`, { method: 'DELETE' });
 

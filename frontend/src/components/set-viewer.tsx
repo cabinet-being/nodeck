@@ -5,6 +5,7 @@ import { resolveApiUrl, type ContainedCard } from '@/api/cards';
 import { MediaViewer } from '@/components/media-viewer';
 import { stageButtonClass } from '@/components/media-stage';
 import { usePagerInput } from '@/hooks/use-pager-input';
+import { onTapZoneMouseMove, tapZoneAt } from '@/hooks/use-tap-zones';
 
 export function SetViewer({
   cards,
@@ -27,6 +28,9 @@ export function SetViewer({
   if (!current) return <p className="text-stage-foreground/70 p-6 text-sm">No cards in this set.</p>;
 
   const mainSrc = current.contentUrl || current.previewUrl;
+  const canPrev = index > 0;
+  const canNext = index < cards.length - 1;
+  const sideButtonClass = `${stageButtonClass} absolute top-1/2 z-10 -translate-y-1/2 disabled:pointer-events-none disabled:opacity-0`;
   const openLabel = `Open card${current.title ? `: ${current.title}` : ''}`;
 
   return (
@@ -41,6 +45,27 @@ export function SetViewer({
             alt={current.title ?? `Card ${index + 1}`}
             contentRef={contentRef}
             originalUrl={current.contentUrl}
+            wrapImage={(image, { actualSize }) => (
+              <a href={`/cards/${current.id}`} aria-label={openLabel} tabIndex={-1} className="block max-w-full"
+                onMouseMove={actualSize ? undefined : (event) => onTapZoneMouseMove(event, canPrev, canNext)}
+                onClick={(event) => {
+                  if (pager.consumeSwipeClick()) { event.preventDefault(); return; }
+                  const zone = actualSize ? 'open' : tapZoneAt(event);
+                  if (zone === 'open') { onNavigate(event); return; }
+                  event.preventDefault();
+                  setSelected(zone === 'next' ? Math.min(cards.length - 1, index + 1) : Math.max(0, index - 1));
+                }}>
+                {image}
+              </a>
+            )}
+            overlay={(
+              <>
+                <button type="button" className={`${sideButtonClass} left-2`} aria-label="Previous card" title="Previous card"
+                  disabled={!canPrev} onClick={() => setSelected(index - 1)}><ChevronLeft /></button>
+                <button type="button" className={`${sideButtonClass} right-2`} aria-label="Next card" title="Next card"
+                  disabled={!canNext} onClick={() => setSelected(index + 1)}><ChevronRight /></button>
+              </>
+            )}
             toolbar={
               <a href={`/cards/${current.id}`} onClick={onNavigate} className={stageButtonClass}
                 aria-label={openLabel} title={openLabel}>
@@ -56,13 +81,7 @@ export function SetViewer({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-        <div className="flex items-center gap-2">
-          <button type="button" className={stageButtonClass} aria-label="Previous card" title="Previous card" disabled={index === 0}
-            onClick={() => setSelected(index - 1)}><ChevronLeft /></button>
-          <span className="text-stage-foreground/80 min-w-12 text-center text-sm tabular-nums" aria-live="polite">{index + 1} / {cards.length}</span>
-          <button type="button" className={stageButtonClass} aria-label="Next card" title="Next card" disabled={index >= cards.length - 1}
-            onClick={() => setSelected(index + 1)}><ChevronRight /></button>
-        </div>
+        <span className="text-stage-foreground/80 min-w-12 text-center text-sm tabular-nums" aria-live="polite">{index + 1} / {cards.length}</span>
         {toolbar}
       </div>
 

@@ -3,7 +3,7 @@ import { MoreHorizontal, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 
 import {
   createSource, createTag, deleteSource, deleteTag, listSources, listTags,
-  updateSource, updateTag, type Source, type Tag,
+  updateSource, updateTag, type Source, type Tag, type TagCategoryFilter,
 } from '@/api/catalog';
 import { EmptyState } from '@/components/empty-state';
 import { NodeChip } from '@/components/node-chip';
@@ -17,14 +17,22 @@ import { Skeleton } from '@/components/ui/skeleton';
 type Item = Tag | Source;
 type Category = 'all' | 'artist' | 'character' | 'copyright' | 'general' | 'meta' | 'custom';
 
+const categoryChoices: { value: TagCategoryFilter; label: string }[] = [
+  { value: 'general', label: 'General' },
+  { value: 'artist', label: 'Artist' },
+  { value: 'character', label: 'Character' },
+  { value: 'copyright', label: 'Copyright' },
+  { value: 'meta', label: 'Meta' },
+  { value: 'custom', label: 'Custom' },
+];
+
 // The API returns at most 200 entries per request; tag tabs ask the API for their
 // category (most used first), and the client filter below keeps the list consistent.
 const LOAD_LIMIT = 200;
 
 function matchesCategory(item: Item, category: Category) {
   if (category === 'all' || !('origin' in item)) return true;
-  if (category === 'custom') return item.origin === 'user';
-  return item.origin !== 'user' && item.category === category;
+  return item.category === category;
 }
 
 export function CatalogPage({
@@ -44,6 +52,7 @@ export function CatalogPage({
   const [deleting, setDeleting] = React.useState<Item | null>(null);
   const [name, setName] = React.useState('');
   const [aliases, setAliases] = React.useState('');
+  const [tagCategory, setTagCategory] = React.useState<TagCategoryFilter>('custom');
   const [formError, setFormError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
 
@@ -68,6 +77,9 @@ export function CatalogPage({
     setEditing(item);
     setName(item === 'new' ? '' : item.name);
     setAliases(item !== 'new' && 'aliases' in item ? item.aliases.join(', ') : '');
+    setTagCategory(item !== 'new' && 'origin' in item
+      ? (categoryChoices.some((choice) => choice.value === item.category) ? item.category as TagCategoryFilter : 'custom')
+      : category === 'all' ? 'custom' : category);
     setFormError(null);
   }
 
@@ -80,8 +92,8 @@ export function CatalogPage({
       const trimmed = name.trim();
       if (kind === 'tag') {
         const parsedAliases = aliases.split(',').map((alias) => alias.trim()).filter(Boolean);
-        if (editing === 'new') await createTag(trimmed, parsedAliases);
-        else await updateTag(editing.id, trimmed, parsedAliases);
+        if (editing === 'new') await createTag(trimmed, parsedAliases, tagCategory);
+        else await updateTag(editing.id, trimmed, parsedAliases, tagCategory);
       } else {
         if (editing === 'new') await createSource(trimmed);
         else await updateSource(editing.id, trimmed);
@@ -112,9 +124,10 @@ export function CatalogPage({
   }
 
   const label = kind === 'tag' ? 'Tags' : 'Sources';
+  const importedEditing = editing !== null && editing !== 'new' && 'origin' in editing && editing.origin !== 'user';
   const visible = items.filter((item) => matchesCategory(item, category));
   return (
-    <section className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:p-6">
+    <section className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-5 p-4 sm:p-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">{label}</h1>
         <Button type="button" onClick={() => openEditor('new')}><Plus />New {kind}</Button>
@@ -145,8 +158,9 @@ export function CatalogPage({
       <ul className="grid gap-2">
         {visible.map((item) => {
           const editable = !item.nameConflict &&
-            (kind === 'tag' ? 'origin' in item && item.origin === 'user' && item.category === 'custom'
+            (kind === 'tag' ? 'origin' in item && item.origin !== 'system'
               : 'isLegacy' in item && !item.isLegacy);
+          const deletable = kind !== 'tag' || ('origin' in item && item.origin === 'user');
           const href = kind === 'tag' ? `/gallery?catalog_tags=${item.id}` : `/gallery?catalog_source=${item.id}`;
           const aliasText = 'aliases' in item && item.aliases.length > 0 ? item.aliases.join(', ')
             : item.nameConflict ? 'Name conflict' : '';
@@ -170,11 +184,11 @@ export function CatalogPage({
                   </MenuTrigger>
                   <MenuContent>
                     <MenuItem onClick={() => openEditor(item)}><Pencil /> Edit</MenuItem>
-                    <MenuItem disabled={item.referenceCount > 0}
+                    {deletable ? <MenuItem disabled={item.referenceCount > 0}
                       onClick={() => { setDeleting(item); setFormError(null); }}
                       className="text-destructive [&_svg]:text-destructive">
                       <Trash2 /> {item.referenceCount > 0 ? 'Delete (in use)' : 'Delete'}
-                    </MenuItem>
+                    </MenuItem> : null}
                   </MenuContent>
                 </Menu>
               ) : <span className="size-9 shrink-0 pointer-coarse:size-11" aria-hidden="true" />}
@@ -195,11 +209,20 @@ export function CatalogPage({
         onOpenChange={(open) => { if (!open) setEditing(null); }}>
         <form onSubmit={save} className="grid gap-3">
           <label className="grid gap-1 text-sm font-medium">Name
-            <Input autoFocus value={name} onChange={(event) => setName(event.target.value)} />
+            <Input autoFocus={!importedEditing} value={name} readOnly={importedEditing}
+              onChange={(event) => setName(event.target.value)} />
           </label>
           {kind === 'tag' ? <label className="grid gap-1 text-sm font-medium">Aliases
-            <Input value={aliases} onChange={(event) => setAliases(event.target.value)} placeholder="Comma separated" />
+            <Input value={aliases} readOnly={importedEditing} onChange={(event) => setAliases(event.target.value)}
+              placeholder="Comma separated" />
           </label> : null}
+          {kind === 'tag' ? <div className="grid gap-1 text-sm font-medium">
+            <span>Category</span>
+            <Segmented ariaLabel="Category" value={tagCategory} onValueChange={setTagCategory}
+              className="flex-wrap" options={categoryChoices} />
+            {importedEditing ? <p className="text-muted-foreground text-xs font-normal">
+              Imported tags keep their name and aliases; only the category can change.</p> : null}
+          </div> : null}
           {formError ? <p className="text-destructive text-sm">{formError}</p> : null}
           <Button type="submit" disabled={saving || !name.trim()}>{saving ? 'Saving...' : 'Save'}</Button>
         </form>

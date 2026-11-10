@@ -5,24 +5,49 @@ import { CardTile, type VisualCard } from '@/components/card-tile';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Segmented } from '@/components/ui/segmented';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 export type { VisualCard };
 export type VisualCardView = 'grid' | 'brick';
 export type VisualCardDensity = 'default' | 'compact';
 
-export const visualCardViewStorageKey = 'nodeck.visualCardView';
+const storageKey = 'nodeck.cardView';
+const legacyStorageKey = 'nodeck.galleryView';
+const listeners = new Set<() => void>();
 
-export function useVisualCardView(storageKey = visualCardViewStorageKey) {
-  const [view, setView] = React.useState<VisualCardView>(() => {
-    return window.localStorage.getItem(storageKey) === 'brick' ? 'brick' : 'grid';
-  });
+function readView(): VisualCardView {
+  try {
+    const value = window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(legacyStorageKey);
+    return value === 'brick' ? 'brick' : 'grid';
+  } catch {
+    return 'grid';
+  }
+}
 
-  React.useEffect(() => {
+let currentView: VisualCardView = typeof window === 'undefined' ? 'grid' : readView();
+
+function setCardView(view: VisualCardView) {
+  currentView = view;
+  try {
     window.localStorage.setItem(storageKey, view);
-  }, [storageKey, view]);
+  } catch {
+    // Storage can be unavailable; the choice still applies for this session.
+  }
+  listeners.forEach((listener) => listener());
+}
 
-  return [view, setView] as const;
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** One layout preference shared by every card wall. */
+export function useVisualCardView() {
+  const view = React.useSyncExternalStore(subscribe, () => currentView, () => 'grid' as VisualCardView);
+  return [view, setCardView] as const;
 }
 
 export function VisualCardViewToggle({
@@ -50,6 +75,28 @@ export function VisualCardViewToggle({
         />
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Placeholder tiles that hold the wall's layout while a page loads. */
+export function VisualCardWallSkeleton({
+  count = 12,
+  density = 'default',
+}: {
+  count?: number;
+  density?: VisualCardDensity;
+}) {
+  return (
+    <div
+      role="status"
+      aria-label="Loading"
+      className={cn(
+        'grid w-full max-w-full min-w-0 grid-cols-2 gap-3 sm:gap-4',
+        density === 'default' && 'sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6'
+      )}
+    >
+      {Array.from({ length: count }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
+    </div>
   );
 }
 

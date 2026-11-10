@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check, ExternalLink, Globe, MoreHorizontal, Pencil, Save, Tag as TagIcon, Wand2, X } from 'lucide-react';
+import { Check, ExternalLink, FileText, Globe, MoreHorizontal, Pencil, Save, Tag as TagIcon, Wand2, X } from 'lucide-react';
 
 import {
   correctTagSuggestion, createSource, createTag, decideTagSuggestion, decideTagSuggestions, deleteCardSource, deleteCardTag,
@@ -99,8 +99,10 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
 
   const suggestionById = new Map(suggestions.map((suggestion) => [suggestion.tagId, suggestion]));
   const assignedIds = new Set(tags.map((tag) => tag.id));
-  const settledTags = tags.filter((tag) => !suggestionById.has(tag.id));
-  const pendingTags = tags.filter((tag) => suggestionById.has(tag.id));
+  const systemTags = tags.filter((tag) => tag.assignmentSource === 'system' || tag.origin === 'system');
+  const userTags = tags.filter((tag) => !(tag.assignmentSource === 'system' || tag.origin === 'system'));
+  const settledTags = userTags.filter((tag) => !suggestionById.has(tag.id));
+  const pendingTags = userTags.filter((tag) => suggestionById.has(tag.id));
   const orderedTags = [...settledTags, ...pendingTags];
   const visibleTags = showAllTags ? orderedTags : orderedTags.slice(0, 8);
   const unassignedSuggestions = suggestions.filter((suggestion) => !assignedIds.has(suggestion.tagId));
@@ -115,6 +117,14 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
     return onNavigate ? `/gallery?catalog_tags=${tagId}` : undefined;
   }
 
+  const fileNode = file ? (
+    <NodeChip kind="file" size="sm" label={file} className={cn('border-transparent bg-transparent px-0 font-normal text-muted-foreground')} />
+  ) : null;
+  const systemNodes = systemTags.map((tag) => (
+    <NodeChip key={`s${tag.id}`} kind="tag" size="sm" label={tag.name} category="meta" origin="system"
+      href={chipHref(tag.id)} onNavigate={onNavigate} />
+  ));
+
   const tagNodes = visibleTags.map((tag) => {
     const pending = suggestionById.get(tag.id);
     if (pending) return renderSuggestion(pending);
@@ -127,7 +137,8 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
     const open = openSuggestionId === suggestion.tagId;
     return (
       <span key={suggestion.tagId}
-        className="group/s inline-flex max-w-full min-w-0 items-center gap-0.5">
+        onKeyDown={(event) => { if (event.key === 'Escape' && open) setOpenSuggestionId(null); }}
+        className="group/s relative inline-flex max-w-full min-w-0 items-center gap-0.5">
         {selectMode ? (
           <label className="inline-flex size-6 shrink-0 items-center justify-center pointer-coarse:size-11">
             <Checkbox aria-label={`Select ${suggestion.name}`} checked={selected} disabled={busy}
@@ -143,7 +154,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
           </button>
         </Tooltip>
         <span data-open={open}
-          className="inline-flex shrink-0 items-center opacity-0 transition-opacity group-focus-within/s:opacity-100 group-hover/s:opacity-100 pointer-coarse:hidden pointer-coarse:opacity-100 pointer-coarse:data-[open=true]:inline-flex">
+          className="bg-surface shadow-2 pointer-events-none invisible absolute top-full left-0 z-20 inline-flex items-center rounded-full border p-0.5 opacity-0 transition-opacity group-focus-within/s:pointer-events-auto group-focus-within/s:visible group-focus-within/s:opacity-100 group-hover/s:pointer-events-auto group-hover/s:visible group-hover/s:opacity-100 pointer-coarse:group-focus-within/s:invisible pointer-coarse:group-focus-within/s:opacity-0 pointer-coarse:group-hover/s:invisible pointer-coarse:group-hover/s:opacity-0 pointer-coarse:data-[open=true]:pointer-events-auto pointer-coarse:data-[open=true]:visible pointer-coarse:data-[open=true]:opacity-100">
           <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-10"
             aria-label={`Accept ${suggestion.name}`} title="Accept" disabled={busy}
             onClick={() => void run(() => decideTagSuggestion(cardId, suggestion.tagId, 'accepted'))}>
@@ -233,7 +244,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
 
   const groups: ConnectionGroup[] = [
     {
-      key: 'tags', label: 'Tags', icon: TagIcon, nodes: tagNodes, count: tags.length, empty: 'No tags',
+      key: 'tags', label: 'Tags', icon: TagIcon, nodes: tagNodes, count: userTags.length, empty: 'No tags',
       onAdd: () => startPicker('tag'), addLabel: 'Add tag', actions: suggestionActions,
       footer: !showAllTags && orderedTags.length > 8 ? (
         <Button type="button" variant="ghost" size="xs" className="justify-self-start pointer-coarse:h-11"
@@ -252,14 +263,15 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
       key: 'sources', label: 'Sources', icon: Globe, nodes: sourceNodes, empty: 'No sources',
       onAdd: () => startPicker('source'), addLabel: 'Add source',
     },
+    ...(systemNodes.length > 0 ? [{
+      key: 'file', label: 'File', icon: FileText, nodes: systemNodes, footer: fileNode,
+    }] : []),
     ...extraGroups,
   ];
 
   return (
     <>
-      <ConnectionStrip groups={groups} footer={file ? (
-        <NodeChip kind="file" size="sm" label={file} className={cn('border-transparent bg-transparent px-0 font-normal text-muted-foreground')} />
-      ) : null} />
+      <ConnectionStrip groups={groups} footer={systemNodes.length === 0 ? fileNode : null} />
       {error && !mode ? <p className="text-destructive text-xs">{error}</p> : null}
 
       <Dialog open={mode !== null} title={correcting ? `Correct ${correcting.name}` : mode === 'tag' ? 'Add tag' : 'Add source'}
@@ -271,7 +283,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
             value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} /> : null}
           {error ? <p className="text-destructive text-xs">{error}</p> : null}
           <div className="grid max-h-64 gap-1 overflow-auto">
-            {choices.filter((choice) => mode === 'tag'
+            {choices.filter((choice) => !('origin' in choice && choice.origin === 'system')).filter((choice) => mode === 'tag'
               ? correcting ? choice.id !== correcting.tagId : !tags.some((tag) => tag.id === choice.id)
               : !sources.some((source) => source.id === choice.id))
               .map((choice) => <Button key={choice.id} type="button" variant="ghost"
