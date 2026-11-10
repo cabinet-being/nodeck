@@ -14,7 +14,7 @@ internal static class VideoProbe
             "-print_format",
             "json",
             "-show_entries",
-            "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,channels,sample_rate,avg_frame_rate,r_frame_rate",
+            "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,channels,sample_rate,avg_frame_rate,r_frame_rate:stream_tags=rotate:stream_side_data=rotation",
             videoPath,
         ]);
 
@@ -86,8 +86,11 @@ internal static class VideoProbe
 
             if (streamWidth > 0 && streamHeight > 0 && width == 0)
             {
-                width = streamWidth;
-                height = streamHeight;
+                // Phones store portrait video as landscape frames plus a display rotation;
+                // report the displayed size so cards get the same shape as playback and poster.
+                var quarterTurn = Math.Abs(ReadRotation(stream)) % 180 == 90;
+                width = quarterTurn ? streamHeight : streamWidth;
+                height = quarterTurn ? streamWidth : streamHeight;
             }
         }
 
@@ -95,6 +98,19 @@ internal static class VideoProbe
             return new VideoProbeResult(mimeType, container!, width, height, duration, hasAudio, videoCodec, audioCodec, pixelFormat, audioChannels, audioSampleRate, frameRate);
 
         throw new InvalidOperationException("Uploaded file does not contain a readable video stream.");
+    }
+
+    /// <summary>Display rotation in degrees from the display matrix side data or the legacy rotate tag.</summary>
+    internal static int ReadRotation(JsonElement stream)
+    {
+        if (stream.TryGetProperty("side_data_list", out var sideData) && sideData.ValueKind == JsonValueKind.Array)
+            foreach (var entry in sideData.EnumerateArray())
+                if (entry.TryGetProperty("rotation", out var rotation) && rotation.TryGetDouble(out var degrees))
+                    return (int)Math.Round(degrees);
+        if (stream.TryGetProperty("tags", out var tags) && tags.TryGetProperty("rotate", out var rotate) &&
+            int.TryParse(rotate.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var tagged))
+            return tagged;
+        return 0;
     }
 
     internal static double? ParseFrameRate(JsonElement stream, string property)

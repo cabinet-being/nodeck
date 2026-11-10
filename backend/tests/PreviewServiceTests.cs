@@ -976,6 +976,69 @@ public sealed class PreviewServiceTests
         Assert.True((bool?)metadata["animated"]);
     }
 
+    [Fact]
+    public async Task RotatedPhoneVideoReportsDisplayedSizeAndPortraitPoster()
+    {
+        if (!VideoToolsAvailable()) return;
+        var root = NewTempRoot();
+        try
+        {
+            var plain = Path.Combine(root, "landscape.mov");
+            var rotated = Path.Combine(root, "rotated.mov");
+            await RunFfmpegAsync("-y", "-f", "lavfi", "-i", "testsrc=s=1280x720:r=10:d=2",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", plain);
+            await RunFfmpegAsync("-y", "-i", plain, "-c", "copy", "-metadata:s:v:0", "rotate=90", rotated);
+            var probe = await RunFfprobeAsync("-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height:stream_tags=rotate:stream_side_data=rotation", rotated);
+            // Only meaningful when the fixture really carries a display rotation (tag or display matrix).
+            if (!probe.Contains("rotat", StringComparison.OrdinalIgnoreCase)) return;
+            Assert.Contains("width=1280", probe);
+
+            var rotatedAssets = await CreateService(root).SaveMediaAndCreatePreviewAsync(
+                60, Upload(await File.ReadAllBytesAsync(rotated), "rotated.mov", "video/quicktime"));
+            var plainAssets = await CreateService(root).SaveMediaAndCreatePreviewAsync(
+                61, Upload(await File.ReadAllBytesAsync(plain), "landscape.mov", "video/quicktime"));
+
+            Assert.Equal("video", rotatedAssets.MediaType);
+            Assert.Equal(720, rotatedAssets.Width);
+            Assert.Equal(1280, rotatedAssets.Height);
+            var posterPath = Path.Combine(root, Assert.IsType<string>(rotatedAssets.PosterPath));
+            Assert.True(File.Exists(posterPath), "Poster file should exist.");
+            using (var poster = await Image.LoadAsync<Rgba32>(posterPath))
+                Assert.True(poster.Height > poster.Width, $"Poster should be portrait, got {poster.Width}x{poster.Height}.");
+
+            Assert.Equal(1280, plainAssets.Width);
+            Assert.Equal(720, plainAssets.Height);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static Task RunFfmpegAsync(params string[] arguments) => RunToolAsync("ffmpeg", arguments);
+
+    private static Task<string> RunFfprobeAsync(params string[] arguments) =>
+        RunToolAsync("ffprobe", arguments);
+
+    private static async Task<string> RunToolAsync(string tool, string[] arguments)
+    {
+        var start = new ProcessStartInfo(tool)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var stderr = process.StandardError.ReadToEndAsync();
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, $"{tool} failed: {await stderr}");
+        return stdout;
+    }
+
     private static string NewTempRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "nodeck-preview-tests", Guid.NewGuid().ToString("N"));
