@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using System.Globalization;
 using Dapper;
+using Microsoft.Extensions.Options;
 using MyApp.Api.Cards;
 using MyApp.Api.Storage;
 using MySqlConnector;
@@ -15,10 +16,12 @@ public sealed class RecommendationRepository
     private readonly string _connectionString;
     private readonly TimeProvider _timeProvider;
     private readonly PreviewService _previewService;
+    private readonly RecommendationOptions _options;
 
     public RecommendationRepository(IConfiguration configuration, PreviewService previewService,
-        TimeProvider? timeProvider = null)
+        IOptions<RecommendationOptions> options, TimeProvider? timeProvider = null)
     {
+        _options = options.Value;
         _connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("Missing database connection string.");
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -115,8 +118,9 @@ public sealed class RecommendationRepository
         long? contextCardId, CancellationToken cancellationToken = default)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
-        var viewCutoff = now.AddDays(-30);
-        var voteCutoff = now.Date.AddDays(-90);
+        var o = _options;
+        var viewCutoff = now.AddDays(-o.ViewWindowDays);
+        var voteCutoff = now.Date.AddDays(-o.VoteWindowDays);
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
@@ -131,13 +135,13 @@ public sealed class RecommendationRepository
         var candidateIds = (await connection.QueryAsync<long>(new CommandDefinition("""
             SELECT card_id FROM (
                 SELECT card_id FROM card_view_events
-                ORDER BY viewed_at_utc DESC, id DESC LIMIT 500
+                ORDER BY viewed_at_utc DESC, id DESC LIMIT @ViewLimit
             ) recent_views
             UNION
             SELECT card_id FROM (
                 SELECT card_id FROM card_daily_votes
                 WHERE vote_date >= @VoteCutoff
-                ORDER BY updated_at_utc DESC, card_id DESC LIMIT 500
+                ORDER BY updated_at_utc DESC, card_id DESC LIMIT @VoteLimit
             ) recent_votes
             UNION
             SELECT id FROM (
@@ -145,9 +149,10 @@ public sealed class RecommendationRepository
                 WHERE c.type IN ('media', 'comic', 'set')
                   AND NOT EXISTS (SELECT 1 FROM card_relations r
                                   WHERE r.to_card_id = c.id AND r.relation_type = 'contains')
-                ORDER BY c.id DESC LIMIT 200
+                ORDER BY c.id DESC LIMIT @NewestLimit
             ) newest_cards;
-            """, new { VoteCutoff = voteCutoff }, cancellationToken: cancellationToken))).ToHashSet();
+            """, new { VoteCutoff = voteCutoff, ViewLimit = o.RecentViewLimit,
+                VoteLimit = o.RecentVoteLimit, NewestLimit = o.NewestCardLimit }, cancellationToken: cancellationToken))).ToHashSet();
 
         if (mode == "pages")
         {
@@ -188,25 +193,36 @@ public sealed class RecommendationRepository
             SELECT card_id AS CardId, viewed_at_utc AS ViewedAtUtc
             FROM card_view_events
             WHERE viewed_at_utc >= @ViewCutoff
-            ORDER BY viewed_at_utc DESC, id DESC LIMIT 500;
-            """, new { ViewCutoff = viewCutoff }, cancellationToken: cancellationToken))).ToArray();
+            ORDER BY viewed_at_utc DESC, id DESC LIMIT @ViewLimit;
+            """, new { ViewCutoff = viewCutoff, ViewLimit = o.RecentViewLimit }, cancellationToken: cancellationToken))).ToArray();
         var profileVotes = (await connection.QueryAsync<VoteRow>(new CommandDefinition("""
             SELECT card_id AS CardId, vote AS Vote FROM card_daily_votes
             WHERE vote_date >= @VoteCutoff
-            ORDER BY updated_at_utc DESC, card_id DESC LIMIT 500;
-            """, new { VoteCutoff = voteCutoff }, cancellationToken: cancellationToken))).ToArray();
+            ORDER BY updated_at_utc DESC, card_id DESC LIMIT @VoteLimit;
+            """, new { VoteCutoff = voteCutoff, VoteLimit = o.RecentVoteLimit }, cancellationToken: cancellationToken))).ToArray();
         var cardWeights = new Dictionary<long, double>();
+        var recentViewWeights = new Dictionary<long, double>();
         foreach (var view in profileViews)
         {
             var ageDays = Math.Max(0, (now - view.ViewedAtUtc).TotalDays);
-            cardWeights[view.CardId] = Math.Min(3,
-                cardWeights.GetValueOrDefault(view.CardId) + 1.0 / (1.0 + ageDays / 7.0));
+            var decayed = 1.0 / (1.0 + ageDays / o.ViewHalfLifeDays);
+            cardWeights[view.CardId] = Math.Min(o.ViewCardCap, cardWeights.GetValueOrDefault(view.CardId) + decayed);
+            if (ageDays <= o.SeenWindowDays)
+                recentViewWeights[view.CardId] = recentViewWeights.GetValueOrDefault(view.CardId) + decayed;
         }
+        // Votes alone drive the card's own score; views only feed the tag profile.
+        var voteWeights = new Dictionary<long, double>();
         foreach (var vote in profileVotes)
-            cardWeights[vote.CardId] = Math.Clamp(cardWeights.GetValueOrDefault(vote.CardId) +
-                (vote.Vote switch { 1 => 2, -1 => -3, _ => 0 }), -8, 8);
+        {
+            var delta = vote.Vote switch { 1 => o.PositiveVoteWeight, -1 => -o.NegativeVoteWeight, _ => 0 };
+            cardWeights[vote.CardId] = Math.Clamp(cardWeights.GetValueOrDefault(vote.CardId) + delta,
+                -o.VoteCardClamp, o.VoteCardClamp);
+            voteWeights[vote.CardId] = Math.Clamp(voteWeights.GetValueOrDefault(vote.CardId) + delta,
+                -o.VoteCardClamp, o.VoteCardClamp);
+        }
 
-        var tagWeights = contextTags.ToDictionary(tagId => tagId, _ => 4.0);
+        // Pure profile from assigned tags of viewed/voted cards; context weights are kept apart.
+        var tagWeights = new Dictionary<long, double>();
         if (cardWeights.Count > 0)
         {
             var signalTags = await connection.QueryAsync<TagRow>(new CommandDefinition("""
@@ -216,12 +232,12 @@ public sealed class RecommendationRepository
                 """, new { Ids = cardWeights.Keys.ToArray() }, cancellationToken: cancellationToken));
             foreach (var tag in signalTags)
                 tagWeights[tag.TagId] = Math.Clamp(tagWeights.GetValueOrDefault(tag.TagId) +
-                    cardWeights[tag.CardId], -12, 12);
+                    cardWeights[tag.CardId], -o.TagProfileClamp, o.TagProfileClamp);
         }
-        foreach (var tagId in contextTags)
-            tagWeights[tagId] = Math.Max(4, tagWeights[tagId]);
+        double ContextWeight(long tagId) => contextTags.Contains(tagId) ? o.ContextTagWeight : 0;
 
-        var strongestContextTags = contextTags.OrderByDescending(tagId => tagWeights[tagId])
+        var strongestContextTags = contextTags
+            .OrderByDescending(tagId => Math.Max(ContextWeight(tagId), tagWeights.GetValueOrDefault(tagId)))
             .ThenBy(tagId => tagId).Take(4);
         var strongestProfileTags = tagWeights.Where(pair => pair.Value > 0 &&
                 !contextTags.Contains(pair.Key))
@@ -232,9 +248,23 @@ public sealed class RecommendationRepository
         {
             var related = await connection.QueryAsync<long>(new CommandDefinition("""
                 SELECT card_id FROM card_tags WHERE tag_id = @TagId
-                ORDER BY card_id DESC LIMIT 50;
-                """, new { TagId = tagId }, cancellationToken: cancellationToken));
+                ORDER BY card_id DESC LIMIT @Limit;
+                """, new { TagId = tagId, Limit = o.TagCandidateLimit }, cancellationToken: cancellationToken));
             candidateIds.UnionWith(related);
+        }
+        if (strongestTags.Length > 0)
+        {
+            // Pending suggestions can surface cards that carry no assigned tag yet.
+            var suggested = await connection.QueryAsync<long>(new CommandDefinition("""
+                SELECT card_id FROM (
+                    SELECT card_id, ROW_NUMBER() OVER (PARTITION BY tag_id
+                               ORDER BY confidence DESC, card_id DESC) AS rn
+                    FROM card_tag_suggestions
+                    WHERE state = 'pending' AND confidence >= @MinConfidence AND tag_id IN @TagIds
+                ) ranked WHERE rn <= @Limit;
+                """, new { MinConfidence = o.SuggestMinConfidence, TagIds = strongestTags,
+                    Limit = o.TagCandidateLimit }, cancellationToken: cancellationToken));
+            candidateIds.UnionWith(suggested);
         }
 
         if (candidateIds.Count == 0) return [];
@@ -269,29 +299,12 @@ public sealed class RecommendationRepository
         var scores = new Dictionary<long, double>();
         foreach (var id in ids) scores.TryAdd(Resolve(id), 0);
 
-        var candidateSignals = cardWeights.Where(pair => candidateIds.Contains(pair.Key));
-        if (mode == "collections")
-        {
-            foreach (var group in candidateSignals.GroupBy(pair => Resolve(pair.Key)))
-            {
-                var ownWeight = group.Where(pair => pair.Key == group.Key).Sum(pair => pair.Value);
-                var childWeight = group.Where(pair => pair.Key != group.Key)
-                    .OrderByDescending(pair => pair.Value).Take(3).Sum(pair => pair.Value);
-                scores[group.Key] += Math.Clamp(ownWeight + childWeight, -8, 8);
-            }
-        }
-        else
-        {
-            foreach (var (cardId, weight) in candidateSignals)
-                scores[cardId] += weight;
-        }
-
-        var scoringTagWeights = tagWeights.Where(pair => contextTags.Contains(pair.Key))
+        var scoringTagWeights = contextTags.Where(tagWeights.ContainsKey)
             .Concat(tagWeights.Where(pair => pair.Value > 0 && !contextTags.Contains(pair.Key))
-                .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key).Take(32))
+                .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key).Take(32).Select(pair => pair.Key))
             .Concat(tagWeights.Where(pair => pair.Value < 0 && !contextTags.Contains(pair.Key))
-                .OrderBy(pair => pair.Value).ThenBy(pair => pair.Key).Take(16))
-            .ToDictionary(pair => pair.Key, pair => pair.Value);
+                .OrderBy(pair => pair.Value).ThenBy(pair => pair.Key).Take(16).Select(pair => pair.Key))
+            .ToDictionary(tagId => tagId, tagId => tagWeights[tagId]);
         // Load assigned tags once for both preference scoring and diversity. The
         // deterministic cap bounds work even when cards have unusually many tags.
         var candidateTags = await connection.QueryAsync<TagRow>(new CommandDefinition("""
@@ -302,8 +315,120 @@ public sealed class RecommendationRepository
             cancellationToken: cancellationToken));
         var tagsByCard = candidateTags.GroupBy(row => Resolve(row.CardId))
             .ToDictionary(group => group.Key, group => group.Select(row => row.TagId).Distinct().ToArray());
+
+        // Specificity: rare tags and informative categories count more. One GROUP BY
+        // over card_tags (idx_card_tags_tag) covers every tag that can contribute.
+        var involvedTags = scoringTagWeights.Keys.Concat(contextTags).Distinct().ToArray();
+        var specificity = new Dictionary<long, double>();
+        if (involvedTags.Length > 0)
+        {
+            var topLevelCount = Math.Max(1, await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
+                SELECT COUNT(*) FROM cards c
+                WHERE c.type IN ('media', 'comic', 'set')
+                  AND NOT EXISTS (SELECT 1 FROM card_relations r
+                                  WHERE r.to_card_id = c.id AND r.relation_type = 'contains');
+                """, cancellationToken: cancellationToken)));
+            var frequencies = (await connection.QueryAsync<TagFrequencyRow>(new CommandDefinition("""
+                SELECT ct.tag_id AS TagId, COUNT(DISTINCT ct.card_id) AS Df
+                FROM card_tags ct WHERE ct.tag_id IN @Ids GROUP BY ct.tag_id;
+                """, new { Ids = involvedTags }, cancellationToken: cancellationToken)))
+                .ToDictionary(row => row.TagId, row => row.Df);
+            var categories = (await connection.QueryAsync<TagCategoryRow>(new CommandDefinition(
+                "SELECT id AS TagId, category AS Category FROM tags WHERE id IN @Ids;",
+                new { Ids = involvedTags }, cancellationToken: cancellationToken)))
+                .ToDictionary(row => row.TagId, row => row.Category);
+            foreach (var tagId in involvedTags)
+            {
+                var multiplier = categories.TryGetValue(tagId, out var category) &&
+                    o.CategoryMultipliers.TryGetValue(category, out var mapped)
+                        ? mapped : o.UnknownCategoryMultiplier;
+                specificity[tagId] = multiplier *
+                    Math.Log(1 + (double)topLevelCount / (1 + frequencies.GetValueOrDefault(tagId))) /
+                    Math.Log(1 + topLevelCount);
+            }
+        }
+        double Spec(long tagId) => specificity.GetValueOrDefault(tagId);
+
+        // Affinity from the tag profile and, with a context card, overlap with its tags.
+        var contextSpecTotal = contextTags.Sum(Spec);
         foreach (var (cardId, tags) in tagsByCard)
-            scores[cardId] += Math.Clamp(tags.Sum(tagId => scoringTagWeights.GetValueOrDefault(tagId)), -12, 12);
+        {
+            if (!scores.ContainsKey(cardId)) continue;
+            scores[cardId] += o.WAffinity * Math.Clamp(
+                tags.Sum(tagId => scoringTagWeights.GetValueOrDefault(tagId) * Spec(tagId)),
+                -o.TagProfileClamp, o.TagProfileClamp);
+            if (contextSpecTotal > 0)
+                scores[cardId] += o.WContext * o.ContextScale *
+                    tags.Where(contextTags.Contains).Sum(Spec) / contextSpecTotal;
+        }
+
+        // Pending suggestions count like assigned tags, scaled by confidence and
+        // limited to tags the profile or context already values.
+        var valuedTags = scoringTagWeights.Where(pair => pair.Value > 0).Select(pair => pair.Key)
+            .Concat(contextTags).Distinct().ToArray();
+        if (valuedTags.Length > 0)
+        {
+            var pending = await connection.QueryAsync<SuggestionRow>(new CommandDefinition("""
+                SELECT card_id AS CardId, tag_id AS TagId, confidence AS Confidence
+                FROM card_tag_suggestions
+                WHERE state = 'pending' AND confidence >= @MinConfidence
+                  AND card_id IN @Ids AND tag_id IN @TagIds;
+                """, new { MinConfidence = o.SuggestMinConfidence, Ids = ids.Concat(scores.Keys).Distinct().ToArray(),
+                    TagIds = valuedTags }, cancellationToken: cancellationToken));
+            var suggestScores = new Dictionary<long, double>();
+            var seenPairs = new Dictionary<(long, long), double>();
+            foreach (var row in pending)
+            {
+                var resolved = Resolve(row.CardId);
+                if (tagsByCard.TryGetValue(resolved, out var assigned) && assigned.Contains(row.TagId)) continue;
+                var key = (resolved, row.TagId);
+                seenPairs[key] = Math.Max(seenPairs.GetValueOrDefault(key), (double)row.Confidence);
+            }
+            foreach (var ((resolved, tagId), confidence) in seenPairs)
+                suggestScores[resolved] = suggestScores.GetValueOrDefault(resolved) + confidence *
+                    Math.Max(tagWeights.GetValueOrDefault(tagId), ContextWeight(tagId)) * Spec(tagId);
+            foreach (var (cardId, value) in suggestScores)
+                if (scores.ContainsKey(cardId))
+                    scores[cardId] += o.WSuggest * Math.Min(o.SuggestCap, value);
+        }
+
+        // Votes only: views no longer boost the card they were made on.
+        var candidateVotes = voteWeights.Where(pair => candidateIds.Contains(pair.Key));
+        if (mode == "collections")
+        {
+            foreach (var group in candidateVotes.GroupBy(pair => Resolve(pair.Key)))
+            {
+                var ownWeight = group.Where(pair => pair.Key == group.Key).Sum(pair => pair.Value);
+                var childWeight = group.Where(pair => pair.Key != group.Key)
+                    .OrderByDescending(pair => pair.Value).Take(3).Sum(pair => pair.Value);
+                scores[group.Key] += o.WSelfVote * Math.Clamp(ownWeight + childWeight,
+                    -o.VoteCardClamp, o.VoteCardClamp);
+            }
+        }
+        else
+        {
+            foreach (var (cardId, weight) in candidateVotes)
+                scores[cardId] += o.WSelfVote * weight;
+        }
+
+        // Recently viewed cards are demoted unless the latest vote is positive.
+        var latestPositiveIds = (await connection.QueryAsync<long>(new CommandDefinition("""
+            SELECT v.card_id FROM card_daily_votes v
+            WHERE v.card_id IN @Ids AND v.vote = 1
+              AND NOT EXISTS (
+                  SELECT 1 FROM card_daily_votes newer
+                  WHERE newer.card_id = v.card_id
+                    AND (newer.updated_at_utc > v.updated_at_utc
+                         OR (newer.updated_at_utc = v.updated_at_utc
+                             AND newer.vote_date > v.vote_date))
+              );
+            """, new { Ids = scores.Keys.ToArray() }, cancellationToken: cancellationToken))).ToHashSet();
+        foreach (var group in recentViewWeights.Where(pair => candidateIds.Contains(pair.Key))
+                     .GroupBy(pair => Resolve(pair.Key)))
+        {
+            if (latestPositiveIds.Contains(group.Key)) continue;
+            scores[group.Key] -= o.WSeen * Math.Min(o.SeenCap, group.Sum(pair => pair.Value));
+        }
 
         var createdCards = await connection.QueryAsync<CreatedRow>(new CommandDefinition("""
             SELECT id AS Id, created_at AS CreatedAt FROM cards WHERE id IN @Ids;
@@ -312,7 +437,7 @@ public sealed class RecommendationRepository
         {
             if (card.CreatedAt is not DateTime createdAt) continue;
             var ageDays = Math.Max(0, (now - createdAt).TotalDays);
-            scores[card.Id] += 2.0 / (1.0 + ageDays / 7.0);
+            scores[card.Id] += o.WFresh * o.FreshnessMax / (1.0 + ageDays / o.FreshnessHalfLifeDays);
         }
 
         // A negative vote on the collection suppresses its children. A negative
@@ -350,7 +475,7 @@ public sealed class RecommendationRepository
                     ? tags.Select(tagId => selectedTagCounts.GetValueOrDefault(tagId)).DefaultIfEmpty().Max()
                     : 0;
                 // Keep one related follow-up before diversity lowers repeated tags.
-                var marginalScore = scores[id] - 4 * Math.Max(0, repetition - 1);
+                var marginalScore = scores[id] - o.WDiversity * Math.Max(0, repetition - 1);
                 if (marginalScore > bestScore ||
                     (marginalScore == bestScore && (bestId is null || id > bestId.Value)))
                 {
@@ -478,6 +603,9 @@ public sealed class RecommendationRepository
     private sealed class ViewRow { public long CardId { get; init; } public DateTime ViewedAtUtc { get; init; } }
     private sealed class VoteRow { public long CardId { get; init; } public sbyte Vote { get; init; } }
     private sealed class TagRow { public long CardId { get; init; } public long TagId { get; init; } }
+    private sealed class TagFrequencyRow { public long TagId { get; init; } public long Df { get; init; } }
+    private sealed class TagCategoryRow { public long TagId { get; init; } public string Category { get; init; } = ""; }
+    private sealed class SuggestionRow { public long CardId { get; init; } public long TagId { get; init; } public decimal Confidence { get; init; } }
     private sealed class CreatedRow { public long Id { get; init; } public DateTime? CreatedAt { get; init; } }
     private sealed class CardRow
     {

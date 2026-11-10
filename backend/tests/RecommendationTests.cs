@@ -586,6 +586,172 @@ public sealed class RecommendationTests
         }
     }
 
+    [DatabaseFact]
+    public async Task RareSharedTagOutranksCommonSharedTag()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var context = await scope.AddCardAsync("media", "context");
+        var rareMatch = await scope.AddCardAsync("media", "rare match");
+        var commonMatch = await scope.AddCardAsync("media", "common match");
+        var rare = await scope.AddTagAsync("rare tag");
+        var common = await scope.AddTagAsync("common tag");
+        await scope.AssignTagAsync(context, rare);
+        await scope.AssignTagAsync(context, common);
+        await scope.AssignTagAsync(rareMatch, rare);
+        await scope.AssignTagAsync(commonMatch, common);
+        var all = new List<long> { context, rareMatch, commonMatch };
+        for (var i = 0; i < 6; i++)
+        {
+            var filler = await scope.AddCardAsync("media", $"filler {i}");
+            await scope.AssignTagAsync(filler, common);
+            all.Add(filler);
+        }
+        await scope.SameAgeAsync(all.ToArray());
+
+        var items = await scope.GetItemsAsync($"/api/recommendations?mode=pages&contextCardId={context}");
+
+        Assert.True(ScoreOf(items, rareMatch) > ScoreOf(items, commonMatch));
+        Assert.True(IndexOf(items, rareMatch) < IndexOf(items, commonMatch));
+    }
+
+    [DatabaseFact]
+    public async Task ArtistTagOutranksGeneralTagOfEqualFrequency()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var context = await scope.AddCardAsync("media", "context");
+        var artistMatch = await scope.AddCardAsync("media", "artist match");
+        var generalMatch = await scope.AddCardAsync("media", "general match");
+        var artist = await scope.AddTagAsync("some artist", "artist");
+        var general = await scope.AddTagAsync("some general", "general");
+        await scope.AssignTagAsync(context, artist);
+        await scope.AssignTagAsync(context, general);
+        await scope.AssignTagAsync(artistMatch, artist);
+        await scope.AssignTagAsync(generalMatch, general);
+        await scope.SameAgeAsync(context, artistMatch, generalMatch);
+
+        var items = await scope.GetItemsAsync($"/api/recommendations?mode=pages&contextCardId={context}");
+
+        Assert.True(ScoreOf(items, artistMatch) > ScoreOf(items, generalMatch));
+        Assert.True(IndexOf(items, artistMatch) < IndexOf(items, generalMatch));
+    }
+
+    [DatabaseFact]
+    public async Task PendingConfidentSuggestionLinksUntaggedCardToContextButRejectedAndLowDoNot()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var context = await scope.AddCardAsync("media", "context");
+        var suggested = await scope.AddCardAsync("media", "suggested");
+        var rejected = await scope.AddCardAsync("media", "rejected");
+        var low = await scope.AddCardAsync("media", "low confidence");
+        var plain = await scope.AddCardAsync("media", "plain");
+        var tag = await scope.AddTagAsync("suggested tag");
+        await scope.AssignTagAsync(context, tag);
+        await scope.AddSuggestionAsync(suggested, tag, "pending", 0.9);
+        await scope.AddSuggestionAsync(rejected, tag, "rejected", 0.9);
+        await scope.AddSuggestionAsync(low, tag, "pending", 0.3);
+        await scope.SameAgeAsync(context, suggested, rejected, low, plain);
+
+        var items = await scope.GetItemsAsync($"/api/recommendations?mode=pages&contextCardId={context}");
+
+        var plainScore = ScoreOf(items, plain);
+        Assert.True(ScoreOf(items, suggested) > plainScore);
+        Assert.True(ScoreOf(items, suggested) > ScoreOf(items, rejected));
+        Assert.True(ScoreOf(items, suggested) > ScoreOf(items, low));
+        Assert.Equal(plainScore, ScoreOf(items, rejected), 6);
+        Assert.Equal(plainScore, ScoreOf(items, low), 6);
+        Assert.True(IndexOf(items, suggested) < IndexOf(items, rejected));
+        Assert.True(IndexOf(items, suggested) < IndexOf(items, low));
+    }
+
+    [DatabaseFact]
+    public async Task JustViewedCardRanksBelowIdenticalUnseenCard()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var viewed = await scope.AddCardAsync("media", "viewed");
+        var unseen = await scope.AddCardAsync("media", "unseen");
+        await scope.SameAgeAsync(viewed, unseen);
+        await scope.ViewAsync(viewed, DateTime.UtcNow.AddMinutes(-1));
+
+        var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+
+        Assert.True(ScoreOf(items, viewed) < ScoreOf(items, unseen));
+        Assert.True(IndexOf(items, unseen) < IndexOf(items, viewed));
+    }
+
+    [DatabaseFact]
+    public async Task LatestPositiveVoteCardIsNotPenalizedAsSeen()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var likedViewed = await scope.AddCardAsync("media", "liked and viewed");
+        var likedOnly = await scope.AddCardAsync("media", "liked only");
+        await scope.SameAgeAsync(likedViewed, likedOnly);
+        await scope.VoteAsync(likedViewed, 1, DateTime.UtcNow.Date);
+        await scope.VoteAsync(likedOnly, 1, DateTime.UtcNow.Date);
+        await scope.ViewAsync(likedViewed, DateTime.UtcNow.AddMinutes(-1));
+
+        var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+
+        Assert.Equal(ScoreOf(items, likedOnly), ScoreOf(items, likedViewed), 6);
+    }
+
+    [DatabaseFact]
+    public async Task OverridingSeenWeightRemovesViewedPenalty()
+    {
+        async Task<(double Viewed, double Unseen)> RunAsync(Action<RecommendationOptions>? configure)
+        {
+            await using var scope = await RecommendationScope.CreateAsync(configureOptions: configure);
+            var viewed = await scope.AddCardAsync("media", "viewed");
+            var unseen = await scope.AddCardAsync("media", "unseen");
+            await scope.SameAgeAsync(viewed, unseen);
+            await scope.ViewAsync(viewed, DateTime.UtcNow.AddMinutes(-1));
+            var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+            return (ScoreOf(items, viewed), ScoreOf(items, unseen));
+        }
+
+        var defaults = await RunAsync(null);
+        var noSeen = await RunAsync(o => o.WSeen = 0);
+
+        Assert.True(defaults.Viewed < defaults.Unseen);
+        Assert.Equal(noSeen.Unseen, noSeen.Viewed, 6);
+    }
+
+    [DatabaseFact]
+    public async Task OverridingFreshnessWeightToZeroRemovesAgeAdvantage()
+    {
+        async Task<(double Old, double New)> RunAsync(Action<RecommendationOptions>? configure)
+        {
+            await using var scope = await RecommendationScope.CreateAsync(configureOptions: configure);
+            var older = await scope.AddCardAsync("media", "older");
+            var newer = await scope.AddCardAsync("media", "newer");
+            await scope.SetCreatedAtAsync(older, DateTime.UtcNow.AddDays(-30));
+            await scope.SetCreatedAtAsync(newer, DateTime.UtcNow.AddDays(-1));
+            var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+            return (ScoreOf(items, older), ScoreOf(items, newer));
+        }
+
+        var defaults = await RunAsync(null);
+        var noFresh = await RunAsync(o => o.WFresh = 0);
+
+        Assert.True(defaults.New > defaults.Old);
+        Assert.Equal(noFresh.Old, noFresh.New, 6);
+    }
+
+    [DatabaseFact]
+    public async Task TaggedCardsWithoutHistoryOrContextStillReturnWithFiniteScores()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var first = await scope.AddCardAsync("media", "tagged one");
+        var second = await scope.AddCardAsync("media", "tagged two");
+        var tag = await scope.AddTagAsync("lonely tag");
+        await scope.AssignTagAsync(first, tag);
+        await scope.AssignTagAsync(second, tag);
+
+        var items = await scope.GetItemsAsync("/api/recommendations?mode=pages");
+
+        Assert.Equal(new[] { first, second }, items.Select(CardId).Order().ToArray());
+        Assert.All(items, item => Assert.True(double.IsFinite(item.GetProperty("score").GetDouble())));
+    }
+
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response) =>
         await response.Content.ReadFromJsonAsync<JsonDocument>()
         ?? throw new Xunit.Sdk.XunitException("Recommendation response did not contain JSON.");
@@ -615,7 +781,8 @@ public sealed class RecommendationTests
             Client = client;
         }
 
-        public static async Task<RecommendationScope> CreateAsync(TimeProvider? timeProvider = null)
+        public static async Task<RecommendationScope> CreateAsync(TimeProvider? timeProvider = null,
+            Action<RecommendationOptions>? configureOptions = null)
         {
             var builder = new MySqlConnectionStringBuilder(
                 Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!);
@@ -651,6 +818,8 @@ public sealed class RecommendationTests
                 await new CatalogDatabaseInitializer(configuration, NullLogger<CatalogDatabaseInitializer>.Instance)
                     .InitializeAsync();
                 await new InterestDatabaseInitializer(configuration).InitializeAsync();
+                await new CatalogDatabaseInitializer(configuration, NullLogger<CatalogDatabaseInitializer>.Instance)
+                    .InitializeTagSuggestionsAsync();
 
                 var host = WebApplication.CreateBuilder();
                 host.WebHost.UseUrls("http://127.0.0.1:0");
@@ -659,6 +828,7 @@ public sealed class RecommendationTests
                 host.Services.AddSingleton<PreviewService>();
                 host.Services.AddScoped<RecommendationRepository>();
                 if (timeProvider is not null) host.Services.AddSingleton(timeProvider);
+                if (configureOptions is not null) host.Services.Configure(configureOptions);
                 app = host.Build();
                 app.MapRecommendationEndpoints();
                 await app.StartAsync();
@@ -729,6 +899,31 @@ public sealed class RecommendationTests
             INSERT INTO tags (name, canonical_key) VALUES (@Name, @Name);
             SELECT LAST_INSERT_ID();
             """, new { Name = name });
+
+        public async Task<long> AddTagAsync(string name, string category)
+        {
+            var id = await AddTagAsync(name);
+            await _connection.ExecuteAsync("UPDATE tags SET category = @Category WHERE id = @Id;",
+                new { Category = category, Id = id });
+            return id;
+        }
+
+        public Task AddSuggestionAsync(long cardId, long tagId, string state, double confidence) =>
+            _connection.ExecuteAsync("""
+                INSERT INTO card_tag_suggestions (card_id, tag_id, state, confidence)
+                VALUES (@CardId, @TagId, @State, @Confidence);
+                """, new { CardId = cardId, TagId = tagId, State = state, Confidence = confidence });
+
+        public Task ViewAsync(long cardId, DateTime viewedAtUtc) => _connection.ExecuteAsync("""
+            INSERT INTO card_view_events (event_id, card_id, viewed_at_utc, duration_ms)
+            VALUES (UUID(), @CardId, @ViewedAt, 5000);
+            """, new { CardId = cardId, ViewedAt = viewedAtUtc });
+
+        public async Task SameAgeAsync(params long[] cardIds)
+        {
+            var at = DateTime.UtcNow.AddDays(-2);
+            foreach (var id in cardIds) await SetCreatedAtAsync(id, at);
+        }
 
         public Task AssignTagAsync(long cardId, long tagId) => _connection.ExecuteAsync("""
             INSERT INTO card_tags (card_id, tag_id, assignment_source) VALUES (@CardId, @TagId, 'manual');

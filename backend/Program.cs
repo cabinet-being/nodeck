@@ -89,6 +89,7 @@ builder.Services.AddScoped<CatalogRepository>();
 builder.Services.AddScoped<CardCatalogRepository>();
 builder.Services.AddScoped<InterestRepository>();
 builder.Services.AddScoped<RecommendationRepository>();
+builder.Services.Configure<RecommendationOptions>(builder.Configuration.GetSection(RecommendationOptions.SectionName));
 builder.Services.AddSingleton<AnalysisQueueRepository>();
 builder.Services.AddSingleton<SpeechAnalysisQueueRepository>();
 if (!importingDanbooru && !analyzingCard && !seedingWdTags)
