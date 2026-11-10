@@ -83,6 +83,13 @@ if (importingDanbooru)
 
 var builder = WebApplication.CreateBuilder(importingDanbooru || analyzingCard || seedingWdTags ? [] : args);
 
+// Refuse to run with the placeholder password shipped in .env.example.
+if (builder.Configuration.GetConnectionString("Default") is { } defaultConnection &&
+    new MySqlConnectionStringBuilder(defaultConnection).Password == "change-me")
+    throw new InvalidOperationException(
+        "MYSQL_PASSWORD is still the placeholder \"change-me\". Set real passwords in .env " +
+        "(for example: tr -dc A-Za-z0-9 </dev/urandom | head -c 24) and recreate the stack.");
+
 builder.Services.AddScoped<CardRepository>();
 builder.Services.AddScoped<DeckRepository>();
 builder.Services.AddScoped<CatalogRepository>();
@@ -170,7 +177,29 @@ if (analysisCardId is long cardId)
 
 app.UseCors();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+var appVersion = Environment.GetEnvironmentVariable("NODECK_VERSION") is { Length: > 0 } configuredVersion
+    ? configuredVersion
+    : "dev";
+var webRoot = app.Environment.WebRootPath;
+var indexFile = webRoot is null ? null : Path.Combine(webRoot, "index.html");
+var serveFrontend = indexFile is not null && File.Exists(indexFile);
+
+if (serveFrontend)
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        OnPrepareResponse = context =>
+        {
+            var headers = context.Context.Response.Headers;
+            headers.CacheControl = context.Context.Request.Path.StartsWithSegments("/assets")
+                ? "public, max-age=31536000, immutable"
+                : "no-cache";
+        }
+    });
+}
+
+app.MapGet("/health", () => Results.Ok(new { status = "ok", version = appVersion }));
 
 app.MapGet("/health/mysql", async (IConfiguration configuration) =>
 {
@@ -194,5 +223,24 @@ app.MapFavoriteEndpoints();
 app.MapInterestEndpoints();
 app.MapRecommendationEndpoints();
 app.MapCatalogEndpoints();
+
+if (serveFrontend)
+{
+    // SPA fallback: deep links such as /tags?tab=artist load the app on refresh.
+    app.MapFallback(async context =>
+    {
+        var path = context.Request.Path;
+        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method) ||
+            path.StartsWithSegments("/api") || path.StartsWithSegments("/health") ||
+            Path.HasExtension(path.Value))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.ContentType = "text/html; charset=utf-8";
+        await context.Response.SendFileAsync(indexFile!);
+    });
+}
 
 app.Run();

@@ -1,10 +1,16 @@
+# Single image: React UI (served from wwwroot) + ASP.NET Core API.
+FROM node:22.12-bookworm-slim AS frontend
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
-
-COPY MyApp.Api.csproj ./
+COPY backend/MyApp.Api.csproj ./
 RUN dotnet restore
-
-COPY . ./
+COPY backend/ ./
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS whisper-build
@@ -24,6 +30,8 @@ RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build --config Release --target whisper-cli --parallel 2
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+ARG NODECK_VERSION=dev
+ENV NODECK_VERSION=${NODECK_VERSION}
 WORKDIR /app
 
 RUN apt-get update \
@@ -32,4 +40,5 @@ RUN apt-get update \
 
 COPY --from=build /app/publish ./
 COPY --from=whisper-build /src/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=frontend /src/frontend/dist ./wwwroot
 ENTRYPOINT ["dotnet", "MyApp.Api.dll"]

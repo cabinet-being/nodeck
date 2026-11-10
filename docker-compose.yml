@@ -1,11 +1,16 @@
 services:
   backend:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
+      args:
+        NODECK_VERSION: ${NODECK_VERSION:-dev}
+    image: nodeck-app:${NODECK_VERSION:-dev}
+    restart: unless-stopped
     environment:
+      TZ: ${TZ:-UTC}
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__Default: Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD};
+      ConnectionStrings__Default: Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env};
       NODECK_APP_DATA: /app/data
       NODECK_MIGRATION_BACKUP_MANIFEST: ${NODECK_MIGRATION_BACKUP_MANIFEST:-}
     ports:
@@ -19,13 +24,28 @@ services:
 
   mysql:
     image: mysql:8.4
+    restart: unless-stopped
+    # Refuse to initialise the database with placeholder passwords: MySQL stores the
+    # password on first start, so changing .env afterwards would no longer match.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        for value in "$$MYSQL_PASSWORD" "$$MYSQL_ROOT_PASSWORD"; do
+          if [ "$$value" = "change-me" ]; then
+            echo "Set MYSQL_PASSWORD and MYSQL_ROOT_PASSWORD in .env (they are still change-me)." >&2
+            exit 1
+          fi
+        done
+        exec docker-entrypoint.sh mysqld
     environment:
+      TZ: ${TZ:-UTC}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
     ports:
-      - "127.0.0.1:${MYSQL_HOST_PORT:-3306}:3306"
+      - "${MYSQL_BIND_ADDRESS:-127.0.0.1}:${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - ./database/init:/docker-entrypoint-initdb.d:ro
       - ./volumes/mysql_data:/var/lib/mysql
