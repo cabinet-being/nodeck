@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { resolveApiUrl, type ContainedCard } from '@/api/cards';
+import { usePagerInput } from '@/hooks/use-pager-input';
 import { Button } from '@/components/ui/button';
 
 export function ComicReader({
@@ -16,37 +17,15 @@ export function ComicReader({
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const pageIndex = Math.min(selectedIndex, Math.max(0, pages.length - 1));
   const currentPage = pages[pageIndex];
-  const touchStart = React.useRef<{ x: number; y: number } | null>(null);
-  const lastSwipeAt = React.useRef(0);
 
   function changePage(delta: number) {
     setSelectedIndex((index) => Math.max(0, Math.min(pages.length - 1, index + delta)));
   }
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (mode !== 'page' || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    const target = event.target;
-    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [contenteditable]'))) return;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      event.preventDefault();
-      changePage(event.key === 'ArrowRight' ? 1 : -1);
-    }
-  }
-
-  function handleTouchEnd(event: React.TouchEvent<HTMLDivElement>) {
-    if (!touchStart.current) return;
-    const changeX = event.changedTouches[0].clientX - touchStart.current.x;
-    const changeY = event.changedTouches[0].clientY - touchStart.current.y;
-    touchStart.current = null;
-    if (Math.abs(changeX) >= 50 && Math.abs(changeX) > Math.abs(changeY) * 1.3) {
-      lastSwipeAt.current = Date.now();
-      changePage(changeX < 0 ? 1 : -1);
-    }
-  }
+  const pager = usePagerInput(changePage, mode === 'page');
 
   function handlePageClick(event: React.MouseEvent<HTMLAnchorElement>) {
-    if (Date.now() - lastSwipeAt.current < 500) {
-      lastSwipeAt.current = 0;
+    if (pager.consumeSwipeClick()) {
       event.preventDefault();
       return;
     }
@@ -54,7 +33,7 @@ export function ComicReader({
   }
 
   return (
-    <div className="grid min-w-0 gap-4" role="region" aria-label="Comic reader" tabIndex={0} onKeyDown={handleKeyDown}>
+    <div className="grid min-w-0 gap-4" role="region" aria-label="Comic reader" tabIndex={0} {...pager.containerProps}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-2" role="group" aria-label="Reading mode">
           <Button type="button" size="sm" variant={mode === 'page' ? 'default' : 'outline'} aria-pressed={mode === 'page'} onClick={() => setMode('page')}>Single page</Button>
@@ -73,13 +52,11 @@ export function ComicReader({
         {mode === 'page' ? (
           currentPage ? (
             <div
-              onTouchStart={(event) => { lastSwipeAt.current = 0; touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }; }}
-              onTouchEnd={handleTouchEnd}
-              onTouchCancel={() => { touchStart.current = null; lastSwipeAt.current = 0; }}
+              {...pager.swipeProps}
               className="bg-muted flex min-h-[28rem] items-center justify-center overflow-hidden rounded-lg border"
             >
               <a href={`/cards/${currentPage.id}`} onClick={handlePageClick} aria-label={`Open page ${pageIndex + 1}${currentPage.title ? `: ${currentPage.title}` : ''}`} className="block max-w-full">
-                {currentPage.contentUrl ? <img src={resolveApiUrl(currentPage.contentUrl)} alt={currentPage.title ?? `Page ${pageIndex + 1}`} className="max-h-[calc(100vh-8rem)] max-w-full object-contain" /> : <span className="p-4 text-sm">Open page {pageIndex + 1}</span>}
+                {currentPage.contentUrl ? <img src={resolveApiUrl(currentPage.contentUrl)} alt={currentPage.title ?? `Page ${pageIndex + 1}`} className="max-h-[calc(100dvh-8rem)] max-w-full object-contain" /> : <span className="p-4 text-sm">Open page {pageIndex + 1}</span>}
               </a>
             </div>
           ) : <p className="text-muted-foreground text-sm">No pages in this comic.</p>

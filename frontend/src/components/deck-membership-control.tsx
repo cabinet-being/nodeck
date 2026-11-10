@@ -2,12 +2,14 @@ import * as React from 'react';
 
 import {
   addCardToDeck,
+  createDeck,
   getCardDecks,
   listDecks,
   removeCardFromDeck,
   type DeckSummary,
 } from '@/api/decks';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 type MembershipState = {
   cardId: number;
@@ -21,6 +23,9 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [savingId, setSavingId] = React.useState<number | null>(null);
   const [reload, setReload] = React.useState(0);
+  const [search, setSearch] = React.useState('');
+  const [newTitle, setNewTitle] = React.useState('');
+  const [creating, setCreating] = React.useState(false);
   const [opened, setOpened] = React.useState(false);
   const currentCardId = React.useRef(cardId);
   currentCardId.current = cardId;
@@ -87,6 +92,45 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
     }
   }
 
+  async function createAndAdd(event: React.FormEvent) {
+    event.preventDefault();
+    const title = newTitle.trim();
+    if (!title || creating || savingId !== null || !visibleState) return;
+    setCreating(true);
+    setSaveError(null);
+    try {
+      const created = await createDeck({ title, cards: [{ cardId }] });
+      if (currentCardId.current !== cardId) return;
+      setState((current) => {
+        if (!current || current.cardId !== cardId) return current;
+        const memberIds = new Set(current.memberIds);
+        memberIds.add(created.id);
+        const summary: DeckSummary = {
+          id: created.id,
+          title: created.title,
+          cardCount: created.cards.length,
+          properties: created.properties,
+          metadata: created.metadata,
+          systemKey: created.systemKey,
+        };
+        return { ...current, memberIds, decks: [summary, ...current.decks] };
+      });
+      setNewTitle('');
+      setSearch('');
+    } catch (error) {
+      if (currentCardId.current === cardId) {
+        setSaveError(error instanceof Error ? error.message : 'Unable to create deck.');
+      }
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  const query = search.trim().toLowerCase();
+  const filteredDecks = visibleState
+    ? visibleState.decks.filter((deck) => deck.title.toLowerCase().includes(query))
+    : [];
+
   return (
     <details className="rounded-lg border" aria-label="Deck membership"
       onToggle={(event) => setOpened(event.currentTarget.open)}>
@@ -103,12 +147,25 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
             </Button>
           </div>
         ) : null}
+        {visibleState ? (
+          <Input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search decks"
+            aria-label="Search decks by title"
+            className="mb-3"
+          />
+        ) : null}
         {visibleState?.decks.length === 0 ? (
           <p className="text-muted-foreground text-sm">No decks yet.</p>
         ) : null}
-        {visibleState && visibleState.decks.length > 0 ? (
+        {visibleState && visibleState.decks.length > 0 && filteredDecks.length === 0 ? (
+          <p className="text-muted-foreground text-sm">No decks match.</p>
+        ) : null}
+        {visibleState && filteredDecks.length > 0 ? (
           <ul className="max-h-64 space-y-2 overflow-y-auto">
-            {visibleState.decks.map((deck) => {
+            {filteredDecks.map((deck) => {
               const isMember = visibleState.memberIds.has(deck.id);
               return (
                 <li key={deck.id} className="flex items-center justify-between gap-2">
@@ -130,6 +187,20 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
               );
             })}
           </ul>
+        ) : null}
+        {visibleState ? (
+          <form className="mt-3 flex gap-2" onSubmit={(event) => void createAndAdd(event)}>
+            <Input
+              value={newTitle}
+              onChange={(event) => setNewTitle(event.target.value)}
+              placeholder="New deck title"
+              aria-label="New deck title"
+              maxLength={200}
+            />
+            <Button type="submit" size="sm" disabled={creating || savingId !== null || !newTitle.trim()}>
+              {creating ? 'Creating...' : 'Create and add'}
+            </Button>
+          </form>
         ) : null}
         {saveError ? <p className="text-destructive mt-2 text-sm" role="alert">{saveError}</p> : null}
       </div>

@@ -4,6 +4,9 @@ import { getCard, getCardRelations, resolveApiUrl, type Card, type CardRelations
 import { FavoriteToggle } from '@/components/favorite-toggle';
 import { DailyVote } from '@/components/daily-vote';
 import { CardCatalogPanel } from '@/components/card-catalog-panel';
+import { MediaViewer } from '@/components/media-viewer';
+import { SetViewer } from '@/components/set-viewer';
+import { Button } from '@/components/ui/button';
 import { ComicReader } from '@/components/comic-reader';
 import { DeckMembershipControl } from '@/components/deck-membership-control';
 import { RecommendationRail } from '@/components/recommendation-rail';
@@ -125,26 +128,14 @@ function MediaDetails({
 
   return (
     <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div className="grid gap-4 xl:grid-cols-[1fr_24rem]">
-        <div className="grid gap-2">
-          <div ref={contentRef} className="bg-muted flex min-h-[20rem] items-center justify-center overflow-hidden rounded-xl sm:min-h-[28rem]">
-            {videoUrl && isVideo ? (
-              <video
-                src={resolveApiUrl(videoUrl)}
-                poster={card.posterUrl ? resolveApiUrl(card.posterUrl) : undefined}
-                controls
-                preload="metadata"
-                className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
-              />
-            ) : null}
-            {card.contentUrl && !isVideo ? (
-              <img
-                src={resolveApiUrl(card.contentUrl)}
-                alt={card.title ?? ''}
-                className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
-              />
-            ) : null}
-          </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="grid min-w-0 gap-2">
+          {videoUrl && isVideo ? (
+            <MediaViewer kind="video" src={videoUrl} alt={card.title ?? ''} posterUrl={card.posterUrl} contentRef={contentRef} />
+          ) : null}
+          {card.contentUrl && !isVideo ? (
+            <MediaViewer kind="image" src={card.contentUrl} alt={card.title ?? ''} contentRef={contentRef} />
+          ) : null}
 
           {isVideo && card.contentUrl ? (
             <a href={resolveApiUrl(card.contentUrl)} className="text-primary w-fit text-sm underline">
@@ -156,12 +147,7 @@ function MediaDetails({
         <CardAside card={card} onFavoriteChange={onFavoriteChange} />
       </div>
 
-      <RelationDashboard
-        card={card}
-        relations={relations}
-        onRelationsChange={onRelationsChange}
-        onNavigate={onNavigate}
-      />
+      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
       <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
     </section>
   );
@@ -185,18 +171,13 @@ function ComicDetails({
 
   return (
     <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <ComicReader key={card.id} pages={containedCards} contentRef={contentRef} onNavigate={onNavigate} />
 
         <CardAside card={card} onFavoriteChange={onFavoriteChange} />
       </div>
 
-      <RelationDashboard
-        card={card}
-        relations={relations}
-        onRelationsChange={onRelationsChange}
-        onNavigate={onNavigate}
-      />
+      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
       <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
     </section>
   );
@@ -216,30 +197,39 @@ function SetDetails({
   onFavoriteChange: (isFavorite: boolean) => void;
 }) {
   const containedCards = card.containedCards ?? [];
-  const [view, setView] = useVisualCardView('nodeck.setView');
+  const [wall, setWall] = React.useState(false);
   const contentRef = useCardViewTracking(card.id, 'collection');
+  const [view, setView] = useVisualCardView('nodeck.setView');
 
   return (
     <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="grid min-w-0 gap-4">
-          <div className="flex justify-end">
-            <VisualCardViewToggle view={view} onChange={setView} />
-          </div>
-          <div ref={contentRef}>
-            <VisualCardWall cards={containedCards} view={view} density="compact" />
-          </div>
+          {wall ? (
+            <>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setWall(false)}>Viewer</Button>
+                <VisualCardViewToggle view={view} onChange={setView} />
+              </div>
+              <div ref={contentRef}>
+                <VisualCardWall cards={containedCards} view={view} density="compact" onNavigate={onNavigate} />
+              </div>
+            </>
+          ) : (
+            <SetViewer
+              key={card.id}
+              cards={containedCards}
+              contentRef={contentRef}
+              onNavigate={onNavigate}
+              toolbar={<Button type="button" size="sm" variant="outline" onClick={() => setWall(true)}>Wall</Button>}
+            />
+          )}
         </div>
 
         <CardAside card={card} onFavoriteChange={onFavoriteChange} />
       </div>
 
-      <RelationDashboard
-        card={card}
-        relations={relations}
-        onRelationsChange={onRelationsChange}
-        onNavigate={onNavigate}
-      />
+      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
       <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
     </section>
   );
@@ -270,19 +260,7 @@ function TextCardDetails({
           </div>
         </CardHeader>
       </UiCard>
-      <details className="rounded-lg border">
-        <summary className="cursor-pointer px-4 py-3 text-sm">Technical details</summary>
-        <div className="grid gap-3 border-t p-3">
-          <JsonPanel title="Properties" value={card.properties} />
-          <JsonPanel title="Metadata" value={card.metadata} />
-        </div>
-      </details>
-      <RelationDashboard
-        card={card}
-        relations={relations}
-        onRelationsChange={onRelationsChange}
-        onNavigate={onNavigate}
-      />
+      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
     </section>
   );
 }
@@ -312,14 +290,37 @@ function CardAside({
 
       <CardCatalogPanel cardId={card.id} metadata={card.metadata} />
       <DeckMembershipControl key={card.id} cardId={card.id} />
-      <details className="rounded-lg border">
-        <summary className="cursor-pointer px-4 py-3 text-sm">Technical details</summary>
-        <div className="grid gap-3 border-t p-3">
-          <JsonPanel title="Properties" value={card.properties} />
-          <JsonPanel title="Metadata" value={card.metadata} />
-        </div>
-      </details>
     </aside>
+  );
+}
+
+function MoreSection({
+  card,
+  relations,
+  onRelationsChange,
+  onNavigate,
+}: {
+  card: Card;
+  relations: CardRelations;
+  onRelationsChange: (relations: CardRelations) => void;
+  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+}) {
+  return (
+    <details className="rounded-lg border">
+      <summary className="focus-visible:ring-ring cursor-pointer rounded-lg px-4 py-3 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none">
+        More: relations and technical details
+      </summary>
+      <div className="grid gap-4 border-t p-3">
+        <RelationDashboard
+          card={card}
+          relations={relations}
+          onRelationsChange={onRelationsChange}
+          onNavigate={onNavigate}
+        />
+        <JsonPanel title="Properties" value={card.properties} />
+        <JsonPanel title="Metadata" value={card.metadata} />
+      </div>
+    </details>
   );
 }
 

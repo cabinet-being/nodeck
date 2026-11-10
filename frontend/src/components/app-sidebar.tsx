@@ -18,6 +18,26 @@ export function AppSidebar({ currentPath, onNavigate }: AppSidebarProps) {
     onNavigate(event);
   }
 
+  React.useEffect(() => {
+    function closeMenu() { mobileMenuRef.current?.removeAttribute('open'); }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && mobileMenuRef.current?.open) {
+        closeMenu();
+        mobileMenuRef.current.querySelector('summary')?.focus();
+      }
+    }
+    function onPointerDown(event: PointerEvent) {
+      const menu = mobileMenuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) closeMenu();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, []);
+
   return (
     <aside className="border-sidebar-border bg-sidebar text-sidebar-foreground sticky top-0 z-20 flex h-16 items-center border-b md:static md:h-auto md:min-h-screen md:flex-col md:items-stretch md:border-b-0 md:border-r">
       <a
@@ -36,7 +56,7 @@ export function AppSidebar({ currentPath, onNavigate }: AppSidebarProps) {
         <summary className="flex size-12 cursor-pointer list-none items-center justify-center rounded-lg" aria-label="Open navigation menu">
           <Menu className="size-5" />
         </summary>
-        <nav className="border-sidebar-border bg-sidebar absolute left-0 top-16 grid max-h-[calc(100vh-4rem)] w-full gap-3 overflow-y-auto border-b p-3 shadow-lg"
+        <nav className="border-sidebar-border bg-sidebar absolute left-0 top-16 grid max-h-[calc(100dvh-4rem)] w-full gap-3 overflow-y-auto border-b p-3 shadow-lg"
           aria-label="Mobile navigation">
           <NavGroup label="Core" routes={routes.filter((route) => route.group === 'core')}
             currentPath={currentPath} onNavigate={navigateFromMenu} />
