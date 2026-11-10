@@ -14,6 +14,7 @@ import { SetViewer } from '@/components/set-viewer';
 import { buttonVariants } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useUrlState } from '@/hooks/use-url-state';
 import { useVisualCardView, VisualCardViewToggle, VisualCardWall } from '@/components/visual-card-wall';
 import { useCardViewTracking } from '@/hooks/use-card-view-tracking';
 
@@ -87,7 +88,7 @@ export function CardDetailsPage({
   };
 
   if (card.type === 'comic') return <ComicDetails {...props} />;
-  if (card.type === 'set') return <SetDetails {...props} />;
+  if (card.type === 'set') return <SetDetails key={props.card.id} {...props} />;
   if (card.type === 'tag' || card.type === 'source') return <TextCardDetails {...props} />;
   return <MediaDetails {...props} />;
 }
@@ -147,7 +148,7 @@ function MediaDetails(props: PageProps) {
         </MediaStage>
       }
       inspector={<CardInspector {...props} originalUrl={card.contentUrl} />}
-      similar={<SimilarGrid contextCardId={card.id} onNavigate={onNavigate} />}
+      similar={<SimilarGrid key={card.id} contextCardId={card.id} onNavigate={onNavigate} />}
     />
   );
 }
@@ -164,7 +165,7 @@ function ComicDetails(props: PageProps) {
         </MediaStage>
       }
       inspector={<CardInspector {...props} />}
-      similar={<SimilarGrid contextCardId={card.id} onNavigate={onNavigate} />}
+      similar={<SimilarGrid key={card.id} contextCardId={card.id} onNavigate={onNavigate} />}
     />
   );
 }
@@ -172,7 +173,10 @@ function ComicDetails(props: PageProps) {
 function SetDetails(props: PageProps) {
   const { card, onNavigate } = props;
   const containedCards = card.containedCards ?? [];
-  const [wall, setWall] = React.useState(false);
+  const [layout, setLayout] = useUrlState<'viewer' | 'grid'>('layout', 'viewer', {
+    parse: (raw) => (raw === 'grid' ? 'grid' : undefined),
+  });
+  const wall = layout === 'grid';
   const contentRef = useCardViewTracking(card.id, 'collection');
   const [view, setView] = useVisualCardView();
 
@@ -180,7 +184,7 @@ function SetDetails(props: PageProps) {
     <Segmented
       ariaLabel="Set layout"
       value={wall ? 'grid' : 'viewer'}
-      onValueChange={(value) => setWall(value === 'grid')}
+      onValueChange={setLayout}
       options={[{ value: 'viewer', label: 'Viewer' }, { value: 'grid', label: 'Grid' }]}
     />
   );
@@ -205,7 +209,7 @@ function SetDetails(props: PageProps) {
         )
       }
       inspector={<CardInspector {...props} />}
-      similar={<SimilarGrid contextCardId={card.id} onNavigate={onNavigate} />}
+      similar={<SimilarGrid key={card.id} contextCardId={card.id} onNavigate={onNavigate} />}
     />
   );
 }

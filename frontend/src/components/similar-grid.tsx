@@ -3,6 +3,8 @@ import * as React from 'react';
 import { getRecommendations, type Recommendation, type RecommendationMode } from '@/api/recommendations';
 import { RecommendationModeControl } from '@/components/recommendation-rail';
 import { Button } from '@/components/ui/button';
+import { useUrlState } from '@/hooks/use-url-state';
+import { readEntryValue, writeEntryValue } from '@/lib/history-state';
 import { VisualCardWall, VisualCardWallSkeleton, useVisualCardView } from '@/components/visual-card-wall';
 
 const loadLimit = 50;
@@ -18,11 +20,18 @@ export function SimilarGrid({
   title?: string;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
-  const [mode, setMode] = React.useState<RecommendationMode>('collections');
+  const [mode, setMode] = useUrlState<RecommendationMode>('similar', 'collections', {
+    parse: (raw) => (raw === 'pages' ? 'pages' : undefined),
+  });
   const [items, setItems] = React.useState<Recommendation[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = React.useState(batchSize);
+  // The revealed count is remembered per history entry so Back shows the same tiles.
+  const [visibleCount, setVisibleCount] = React.useState(() => {
+    const saved = Number(readEntryValue('similarCount'));
+    return Number.isSafeInteger(saved) && saved >= batchSize ? saved : batchSize;
+  });
+  const restoredCount = React.useRef(true);
   const [requestVersion, retry] = React.useReducer((value: number) => value + 1, 0);
   const [view] = useVisualCardView();
   const sentinelRef = React.useRef<HTMLDivElement>(null);
@@ -32,7 +41,8 @@ export function SimilarGrid({
     setLoading(true);
     setError(null);
     setItems([]);
-    setVisibleCount(batchSize);
+    if (restoredCount.current) restoredCount.current = false;
+    else setVisibleCount(batchSize);
     getRecommendations({ mode, contextCardId, limit: loadLimit })
       .then((response) => { if (active) setItems(response.items); })
       .catch((cause) => {
@@ -43,6 +53,8 @@ export function SimilarGrid({
   }, [contextCardId, mode, requestVersion]);
 
   const hasMore = visibleCount < items.length;
+
+  React.useEffect(() => { writeEntryValue('similarCount', String(visibleCount)); }, [visibleCount]);
 
   React.useEffect(() => {
     const sentinel = sentinelRef.current;

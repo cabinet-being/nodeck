@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Menu, MenuContent, MenuItem, MenuLinkItem, MenuTrigger } from '@/components/ui/menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useUrlState } from '@/hooks/use-url-state';
 
 export function CardsPage({
   onNavigate,
@@ -19,9 +20,13 @@ export function CardsPage({
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const [cards, setCards] = React.useState<Card[]>([]);
-  const [search, setSearch] = React.useState('');
-  const [type, setType] = React.useState('');
-  const [order, setOrder] = React.useState<'asc' | 'desc'>('desc');
+  const [search, setSearch] = useUrlState('q', '', { debounce: 300 });
+  const [type, setType] = useUrlState('type', '', {
+    parse: (raw) => ((cardTypes as readonly string[]).includes(raw) ? raw : undefined),
+  });
+  const [order, setOrder] = useUrlState<'asc' | 'desc'>('order', 'desc', {
+    parse: (raw) => (raw === 'asc' ? 'asc' : undefined),
+  });
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [cardToDelete, setCardToDelete] = React.useState<Card | null>(null);

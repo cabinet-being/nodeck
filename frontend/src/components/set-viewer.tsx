@@ -5,6 +5,7 @@ import { resolveApiUrl, type ContainedCard } from '@/api/cards';
 import { MediaViewer } from '@/components/media-viewer';
 import { stageButtonClass } from '@/components/media-stage';
 import { usePagerInput } from '@/hooks/use-pager-input';
+import { parsePositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { StagePager } from '@/components/stage-pager';
 
 export function SetViewer({
@@ -19,7 +20,16 @@ export function SetViewer({
   /** Extra controls rendered in the control row under the media (for example a view switch). */
   toolbar?: React.ReactNode;
 }) {
-  const [selected, setSelected] = React.useState(0);
+  // `item` is the 1-based position in the set; it is clamped to the available range below.
+  const [itemNumber, setItemNumber] = useUrlState('item', 1, { parse: parsePositiveInt });
+  const selected = itemNumber - 1;
+  const setSelected = React.useCallback(
+    (next: number | ((value: number) => number)) => setItemNumber((number) => {
+      const value = typeof next === 'function' ? next(number - 1) : next;
+      return Math.max(0, value) + 1;
+    }),
+    [setItemNumber],
+  );
   const index = Math.min(selected, Math.max(0, cards.length - 1));
   const current = cards[index];
 

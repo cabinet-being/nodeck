@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { CardTile, type VisualCard } from '@/components/card-tile';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { getEntryKey, readEntryValue, writeEntryValue } from '@/lib/history-state';
 
 export type RailCard = VisualCard;
 
@@ -48,6 +49,33 @@ export function Rail({
     observer?.observe(rail);
     return () => observer?.disconnect();
   }, [updateScroll, cards, loading]);
+
+  // Remember the horizontal position per history entry so Back returns to the same spot.
+  const storageName = `rail:${title}`;
+  const saveTimer = React.useRef<number | null>(null);
+  const restored = React.useRef(false);
+  const hasRail = !loading && cards.length > 0;
+
+  React.useLayoutEffect(() => {
+    const rail = railRef.current;
+    if (!rail || !hasRail || restored.current) return;
+    restored.current = true;
+    const saved = Number(readEntryValue(storageName));
+    if (Number.isFinite(saved) && saved > 0) rail.scrollLeft = saved;
+  }, [hasRail, storageName]);
+
+  React.useEffect(() => () => {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+  }, []);
+
+  function rememberScroll() {
+    const rail = railRef.current;
+    if (!rail || !restored.current) return;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    const entryKey = getEntryKey();
+    const left = rail.scrollLeft;
+    saveTimer.current = window.setTimeout(() => writeEntryValue(storageName, String(Math.round(left)), entryKey), 150);
+  }
 
   // Target of an in-flight smooth scroll, so quick repeated clicks keep moving forward
   // instead of measuring from a half-finished position.
@@ -128,7 +156,7 @@ export function Rail({
         <div className="relative">
           <div
             ref={railRef}
-            onScroll={updateScroll}
+            onScroll={() => { updateScroll(); rememberScroll(); }}
             className="-mx-1 flex gap-3 overflow-x-auto px-1 pt-1 pb-3 [scrollbar-width:none] pointer-coarse:snap-x pointer-coarse:snap-mandatory [&::-webkit-scrollbar]:hidden"
             role="list"
             aria-label={`${title} cards`}

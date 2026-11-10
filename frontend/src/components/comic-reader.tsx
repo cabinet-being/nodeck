@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { resolveApiUrl, type ContainedCard } from '@/api/cards';
 import { usePagerInput } from '@/hooks/use-pager-input';
+import { parsePositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { StagePager } from '@/components/stage-pager';
 
 import { Segmented } from '@/components/ui/segmented';
@@ -15,8 +16,19 @@ export function ComicReader({
   contentRef: React.Ref<HTMLDivElement>;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
-  const [mode, setMode] = React.useState<'page' | 'scroll'>('page');
-  const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const [mode, setMode] = useUrlState<'page' | 'scroll'>('mode', 'page', {
+    parse: (raw) => (raw === 'scroll' ? 'scroll' : undefined),
+  });
+  // `p` is the 1-based page number; it is clamped to the available range below.
+  const [pageNumber, setPageNumber] = useUrlState('p', 1, { parse: parsePositiveInt });
+  const selectedIndex = pageNumber - 1;
+  const setSelectedIndex = React.useCallback(
+    (next: number | ((index: number) => number)) => setPageNumber((number) => {
+      const index = typeof next === 'function' ? next(number - 1) : next;
+      return Math.max(0, index) + 1;
+    }),
+    [setPageNumber],
+  );
   const pageIndex = Math.min(selectedIndex, Math.max(0, pages.length - 1));
   const currentPage = pages[pageIndex];
 

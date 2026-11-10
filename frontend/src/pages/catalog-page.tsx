@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useUrlState } from '@/hooks/use-url-state';
 
 type Item = Tag | Source;
 type Category = 'all' | 'artist' | 'character' | 'copyright' | 'general' | 'meta' | 'custom';
@@ -42,9 +43,11 @@ export function CatalogPage({
   kind: 'tag' | 'source';
   onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
-  const [category, setCategory] = React.useState<Category>('all');
+  const [category, setCategory] = useUrlState<Category>('tab', 'all', {
+    parse: (raw) => (categoryChoices.some((choice) => choice.value === raw) ? raw as Category : undefined),
+  });
   const [items, setItems] = React.useState<Item[]>([]);
-  const [search, setSearch] = React.useState('');
+  const [search, setSearch] = useUrlState('q', '', { debounce: 300 });
   const [revision, setRevision] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);

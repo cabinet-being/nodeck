@@ -20,6 +20,7 @@ import { GalleryPage } from '@/pages/gallery-page';
 import { HomePage } from '@/pages/home-page';
 import { SourcesPage } from '@/pages/sources-page';
 import { TagsPage } from '@/pages/tags-page';
+import { currentUrl as readCurrentUrl, initHistoryScroll, pushEntry, restoreEntryScroll } from '@/lib/history-state';
 
 function getCurrentPath() {
   return window.location.pathname || '/';
@@ -33,8 +34,12 @@ export function App() {
   const [currentUrl, setCurrentUrl] = React.useState(getCurrentUrl);
 
   React.useEffect(() => {
-    const handlePopState = () => setCurrentUrl(getCurrentUrl());
+    const handlePopState = () => {
+      setCurrentUrl(getCurrentUrl());
+      restoreEntryScroll();
+    };
 
+    initHistoryScroll();
     window.addEventListener('popstate', handlePopState);
 
     return () => window.removeEventListener('popstate', handlePopState);
@@ -70,18 +75,19 @@ export function App() {
 
     const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
 
-    if (nextPath !== currentUrl) {
-      window.history.pushState(null, '', nextPath);
+    // Compare with the real URL: pages may have rewritten the query with replaceState.
+    if (nextPath !== readCurrentUrl()) {
+      pushEntry(nextPath);
       setCurrentUrl(nextPath);
     }
-  }, [currentUrl]);
+  }, []);
 
   const navigateTo = React.useCallback((path: string) => {
-    if (path !== currentUrl) {
-      window.history.pushState(null, '', path);
+    if (path !== readCurrentUrl()) {
+      pushEntry(path);
       setCurrentUrl(path);
     }
-  }, [currentUrl]);
+  }, []);
 
   return (
     <AppShell currentPath={currentPath} onNavigate={navigate} onNavigateTo={navigateTo}>
