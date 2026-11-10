@@ -68,11 +68,13 @@ dotnet restore
 npm install
 ```
 
-4. Create a `.env` file for Docker Compose and MySQL settings.
+4. Create a `.env` file for Docker Compose and MySQL settings, then set both passwords (see **Passwords and ports** below).
 
 ```bash
 cp .env.example .env
 ```
+
+To install a ready-made release on a NAS instead of building from source, see **Installing on ZimaOS**.
 
 ## Usage
 
@@ -80,21 +82,38 @@ cp .env.example .env
   <img src="docs/mermaid/tree.svg" width="50%">
 </p>
 
-Run the composed project so the backend API starts in one container and MySQL starts in another. The frontend can be served separately by Vite during development or added to the compose file as the project grows.
-
-Typical container workflow:
+The root `Dockerfile` builds one image that contains the React UI and the API (plus ffmpeg and whisper.cpp). Compose runs that image next to a MySQL 8.4 container. The backend serves the built UI itself, so no separate web server is needed:
 
 ```bash
 docker compose up --build
 ```
 
-Typical frontend workflow:
+Open `http://HOST:BACKEND_HTTP_PORT` (default `http://localhost:5080`). Deep links such as `/cards/12` work because the backend falls back to the UI for non-API paths; unknown `/api/...` paths still return 404. `GET /health` returns `{"status":"ok","version":"..."}`; the version is `dev` for a source build and `0.1.0` in the release image (`NODECK_VERSION`).
+
+For frontend development, keep the backend running and use the Vite dev server instead:
 
 ```bash
 npm run dev
 ```
 
-In development, Vite proxies `/api` to `http://localhost:5080`, matching `.env.example`. If you choose another `BACKEND_HTTP_PORT`, start Vite with `VITE_API_PROXY_TARGET=http://localhost:YOUR_PORT npm run dev`. For a separately hosted production frontend, set `VITE_API_BASE_URL` when building or route `/api` to the backend. Docker Compose publishes MySQL only on `127.0.0.1`, at `MYSQL_HOST_PORT` (default 3306; see `.env.example`), so it is not reachable from other machines. A fresh copy may include `.gitkeep` files under `volumes/app_data`; these are empty directory placeholders and do not require a migration backup.
+In development, Vite proxies `/api` to `http://localhost:5080`, matching `.env.example`. If you choose another `BACKEND_HTTP_PORT`, start Vite with `VITE_API_PROXY_TARGET=http://localhost:YOUR_PORT npm run dev`. For a separately hosted production frontend, set `VITE_API_BASE_URL` when building or route `/api` to the backend.
+
+### Passwords and ports
+
+`.env.example` ships `MYSQL_PASSWORD=change-me` and `MYSQL_ROOT_PASSWORD=change-me` as placeholders. Docker Compose refuses to start with either password empty, and both the MySQL container and the backend refuse to start while one is still `change-me`. The reason: MySQL stores the password inside `volumes/mysql_data` the first time it starts, so editing `.env` later no longer changes it and the backend would not be able to log in. Set both before the first `docker compose up`. To generate a password without openssl:
+
+```bash
+tr -dc A-Za-z0-9 </dev/urandom | head -c 24
+```
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `BACKEND_HTTP_PORT` | `5080` | Host port for the UI and API. |
+| `MYSQL_BIND_ADDRESS` | `127.0.0.1` | Address MySQL is published on. `0.0.0.0` exposes MySQL to the whole LAN (for desktop DB tools); use strong passwords. |
+| `MYSQL_HOST_PORT` | `3306` in the repository, `33306` in the release bundle | Host port for MySQL; change it if the port is taken. |
+| `TZ` | `UTC` | Time zone of both containers. |
+
+By default MySQL is reachable only from the same machine. A fresh copy may include `.gitkeep` files under `volumes/app_data`; these are empty directory placeholders and do not require a migration backup.
 
 Open the Vite URL in a browser. Create media, comic, or set cards; add reusable tags and sources from a card page; organize cards in decks.
 
@@ -107,7 +126,8 @@ Open the Vite URL in a browser. Create media, comic, or set cards; add reusable 
 - **Decks and favorites.** Decks appear as fanned card stacks whose covers load lazily. A deck page and Favorites show tile grids with a remove port on each tile.
 - **Import.** One primary button changes its label with the state of the queue. The page has a drop zone, an apply-to-all control for tags and source, a progress bar with a summary, and queue rows with a status pill and a details popover. Behavior is described under Bulk import below.
 - **Tags and Sources.** Catalogs with category tabs (all, general, artist, character, copyright, meta, custom). Each list shows at most 200 entries, without paging.
-- **Wall view and navigation.** A single Grid/Masonry preference (localStorage `nodeck.cardView`) applies to all card walls. Carousel arrows sit at the sides of the rail. On a card page, **Similar** is a growing grid under the media that reveals more cards as you scroll. On a comic or set single page, tapping the left third turns to the previous page, the right third to the next, and the middle opens that page's card; side buttons do the same. The tag dialog lets you pick a category when creating or editing a tag.
+- **Wall view and navigation.** A single Grid/Masonry preference (localStorage `nodeck.cardView`) applies to all card walls. Carousels page by their visible width; their edges are full-height gradients with chevrons (on touch, swipe). On a card page, **Similar** is a growing grid under the media that reveals more cards as you scroll. On a comic or set single page, the tap zones cover the whole stage: the left third turns to the previous page, the right third to the next, and the middle opens that page's card; the chevrons are only hints. In actual-size mode the set uses side buttons instead. The tag dialog lets you pick a category when creating or editing a tag.
+- **Back keeps your place.** Going Back restores the page state: tabs, search, filters, the comic page (`p`), the set item, Similar mode, scroll position, and carousel offsets. Opening a page from the menu starts fresh.
 - **Not by colour alone.** Every tag category has its own glyph as well as a colour, and an unreviewed suggestion is drawn with a dashed outline and a wand glyph.
 
 Use **Import files** in the Add menu (`/cards/import`) to select or drop a mixed batch of JPEG, PNG, WebP, GIF, MP4, MOV, and WebM files. Each file starts as a standalone media card with a title taken from its filename; edit the title before uploading. Optionally assign files to a comic or set group, give the group a title, and move its files up or down before uploading. Before importing, search for existing tags and select any number, plus one existing source with an optional original URL for the batch. The choice locks when the first import starts and is assigned to each created media card and each created comic or set group card. **Upload / retry** uploads up to three media files in parallel, then creates or updates each group; first creation waits until all files assigned to that group are uploaded and requires at least two. The page shows each file's queued, uploading, created, error, or needs review state, links to created cards, group errors, and counts of total, uploaded, upload errors, needs review, and pending files. **Pause after current request** stops before the next request; it lets requests already in flight finish and does not abort them. **Cancel** aborts in-flight uploads; an interrupted upload keeps its creation key and is checked through the creation-request lookup before any repeat, so a repeated run does not create extra cards. Each row shows an Image, GIF, or Video label. Use **Upload / retry** to continue: created card IDs and completed tag/source steps on media and group cards are retained, while remaining steps are retried. Tag/source assignment has its own status and errors, separate from upload errors. After a media card is created, the page checks its image analysis status every five seconds, with at most four checks in flight, until it is done or failed; use **Refresh analysis** to check manually. Analysis status, retry details, and analysis check errors appear separately from upload errors. Files matching a queued name, size, and modified time are added with a possible duplicate warning for review. For new bulk-import rows, the browser stores a stable creation key in the local draft before each media or group creation POST. After a network or server error, **Upload / retry** checks the server's creation-request lookup with that key before sending the same request again. A matching completed request returns the existing card; a missing result can be retried with the same key. The original file is still needed to resend a media POST. Older keyless draft rows retain the manual review flow: check the gallery and enter an existing ID to reconcile it. That check compares media type, original name and size, or a group's type and ordered child IDs; it does not prove whole-file identity. Retrying a keyless creation POST can create a duplicate. The browser saves queue details, catalog choices, created IDs, and retry state in localStorage, but not file bytes. After a reload, reselect missing files: a unique match of name, size, modified time, type, and a sampled SHA-256 fingerprint can reattach from a batch selection; ambiguous or older rows without a fingerprint need the per-row **Attach file to this row** control. The fingerprint covers the first and last 64 KiB, so it does not prove whole-file identity. An interrupted keyed POST is checked by its saved key on retry; an interrupted older keyless POST returns as needs review before another POST. **Clear local draft** asks for confirmation and removes the local queue only; cards already created on the server remain. If browser storage cannot save the recovery marker, the create POST is not sent; free storage and retry. Browser storage can be unavailable or full. The creation key survives a reload with the local draft, so keyed creation requests can be reconciled across browser sessions. The queue itself remains local; there is no persistent server batch or background import queue.
@@ -198,6 +218,8 @@ scripts/install-wd-tagger.sh
 docker compose run --rm backend seed-wd-tags
 ```
 
+`scripts/install-models.sh [wd|whisper|all]` does the same for both models in one step using only Docker: it runs the installers inside a throwaway `alpine` container, so the host needs no curl or sha256sum. No backend restart is needed, because the analysis workers look for the model files on every cycle. The WD tag vocabulary is then seeded automatically the first time the backend sees the model files (about 10 seconds); the manual `docker compose run --rm backend seed-wd-tags` command still works.
+
 The seed is safe to rerun: it preserves existing tags, reports name or ID conflicts, and records readiness separately from the complete Danbooru import. The running backend then processes queued image jobs automatically; a full Danbooru import can follow later. The model and labels persist in `volumes/app_data/`, and the seeded catalog persists in MySQL under `volumes/mysql_data/`. Keep these data directories out of Git; the seed needs no Danbooru User-Agent. Speech recognition has its own setup below, unchanged by this step.
 
 Once the model is installed and either the WD seed or the full Danbooru tag import is complete, the backend automatically analyzes newly uploaded or replaced JPEG, PNG, WebP, GIF, MP4, MOV, and WebM media cards, including pages added to a comic or set. Static images use their preview; GIF and video use up to 30 baseline frames sampled across ten parts of the original file, plus up to ten frames probed between visibly different parts. The optional scene probes have a 15-second budget and are kept only when distinct from both neighboring baseline frames. Repeated frames reuse one inference, and tags are combined by peak confidence and appearances in different parts. MySQL stores each job so a restart does not discard it. The worker runs one analysis at a time, retries failures up to five times, and discards results when the media was replaced during analysis. Automatic tags can then be reviewed on the card page. `GET /api/cards/{id}/analysis` shows a job's state, attempt count, next attempt time, and last error; a card without an analysis job returns 404.
@@ -241,14 +263,14 @@ Before upgrading an existing library, keep MySQL running and create a backup fro
 scripts/library-backup.sh backup ./backups
 ```
 
-The command stops the backend, writes `database.sql`, `app_data.tar`, and `manifest.txt` into a new timestamped directory, and leaves the backend stopped. Add the generated directory name to `.env` (do not commit `.env`):
+The command stops the backend, writes `database.sql`, `app_data.tar`, and `manifest.txt` into a new timestamped directory, and leaves the backend stopped. Downloaded models under `volumes/app_data/models` are excluded from the archive (re-download them with `scripts/install-models.sh`), and a restore keeps the models that are already installed. Add the generated directory name to `.env` (do not commit `.env`):
 
 ```dotenv
 NODECK_MIGRATION_BACKUP_DIR=./backups
 NODECK_MIGRATION_BACKUP_MANIFEST=/app/migration-backup/nodeck-YYYYMMDDTHHMMSSZ-XXXXXXXX/manifest.txt
 ```
 
-Then start the updated backend with `docker compose up -d --build backend`. For an installation running the backend outside Docker, set `NODECK_MIGRATION_BACKUP_MANIFEST` to the host's absolute manifest path. A fresh empty database needs no backup acknowledgement. The backup script also works after a schema version is already installed, when preparing for a later upgrade.
+Then start the updated backend with `docker compose up -d --build backend` (from a release bundle: `docker load` the new image, then `docker compose up -d`). For an installation running the backend outside Docker, set `NODECK_MIGRATION_BACKUP_MANIFEST` to the host's absolute manifest path. A fresh empty database needs no backup acknowledgement. The backup script also works after a schema version is already installed, when preparing for a later upgrade.
 
 If the upgrade fails, keep the backend stopped and restore the same snapshot:
 
@@ -257,6 +279,173 @@ scripts/library-backup.sh restore ./backups/nodeck-YYYYMMDDTHHMMSSZ-XXXXXXXX --c
 ```
 
 The restore command verifies both archives, replaces the configured database, and moves the current `volumes/app_data` aside before installing the saved files. Review the error before starting the API again; use the previous application version or fix the migration first. Do not resume writes between taking the backup and completing the upgrade.
+
+On hosts without GNU tar, awk, `find -printf`, `sha256sum` or `mktemp` (such as ZimaOS), use the Docker-only variant. It takes the same arguments and runs `library-backup.sh` inside a container, so only Docker is needed:
+
+```bash
+scripts/library-backup-docker.sh backup ./backups
+scripts/library-backup-docker.sh restore ./backups/nodeck-YYYYMMDDTHHMMSSZ-XXXXXXXX --confirm-restore
+```
+
+`scripts/export-db.sh [dir]` writes a readable SQL dump (`nodeck-db-<UTC timestamp>.sql`, default directory `./backups`) with `mysqldump` inside the MySQL container. It does not stop the app and needs only Docker; it is a way to read or move the data, not a replacement for the full backup above, because it does not include files.
+
+## Building a release
+
+`scripts/build-release.sh` builds `nodeck-app:<VERSION>` for `linux/amd64` (version from the `VERSION` file) and assembles `release/nodeck-<version>-amd64.tar.gz`. Nothing is pushed anywhere. The archive extracts to a `nodeck/` folder containing:
+
+- `images/nodeck-app-<version>-amd64.tar` (the image, from `docker save`);
+- `docker-compose.yml` (from `deploy/docker-compose.release.yml`, referencing the image instead of building it);
+- `.env.example` (with `MYSQL_HOST_PORT=33306`), `VERSION`, `database/init/`, and `scripts/`;
+- empty `volumes/app_data/*` folders and `backups/`;
+- `SHA256SUMS`.
+
+The archive carries no `.env`, no `volumes/mysql_data`, and no user data, so unpacking a newer version over an existing install does not overwrite them. Only amd64 is built. The target host needs only Docker.
+
+## Installing on ZimaOS
+
+These steps install a release bundle on a ZimaOS device with only Docker. Menu names come from the ZimaOS documentation and may differ between ZimaOS versions. This procedure has not yet been tested on a real ZimaOS device (see the journal in `docs/product-plan.md`).
+
+**Requirements.** ZimaOS on x86_64 (the image is amd64 only); about 2 GB of free RAM recommended; about 1.5 GB of disk for the image plus space for your library; internet access to pull the MySQL image and download models.
+
+1. Open a terminal on the device. In ZimaOS enable **Settings → Developer Mode → SSH Access** (or use the web terminal), connect over SSH, then become root:
+
+```bash
+sudo -i
+```
+
+2. Find the AppData folder. It is commonly `/DATA/AppData`; some devices keep it on another disk, such as `/ZimaOS-HD/AppData`. Check in the **Files** app. Put `nodeck-0.1.0-amd64.tar.gz` there: either upload it through the Files app, or download it if it is hosted somewhere:
+
+```bash
+cd /DATA/AppData
+curl -L -o nodeck-0.1.0-amd64.tar.gz https://YOUR-HOST/nodeck-0.1.0-amd64.tar.gz
+```
+
+3. Unpack it and enter the folder:
+
+```bash
+cd /DATA/AppData && tar -xzf nodeck-0.1.0-amd64.tar.gz && cd nodeck
+```
+
+4. Optionally verify the files (skip this if `sha256sum` is not installed):
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+5. Load the image into Docker:
+
+```bash
+docker load -i images/nodeck-app-0.1.0-amd64.tar
+```
+
+6. Create `.env` from the template:
+
+```bash
+cp .env.example .env
+```
+
+7. Put two generated passwords into `.env`. This command replaces both placeholders (the passwords are written to the file, so you do not need to remember them):
+
+```bash
+sed -i "s/^MYSQL_PASSWORD=.*/MYSQL_PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)/; s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)/" .env
+```
+
+To edit by hand instead, run `nano .env`. Also pick `BACKEND_HTTP_PORT`: avoid 80 and 443, which ZimaOS uses; the default `5080` is fine if it is free. Set the passwords before the first start, because MySQL stores them on first start (see **Passwords and ports**).
+
+8. Start the stack:
+
+```bash
+docker compose up -d
+```
+
+9. Check that both containers are running and the app answers (replace `5080` if you changed `BACKEND_HTTP_PORT`):
+
+```bash
+docker compose ps
+```
+
+```bash
+curl -s http://127.0.0.1:5080/health
+```
+
+Then open `http://ZIMA-IP:5080` in a browser, with `ZIMA-IP` being the device's address.
+
+10. Install the tagging and speech models (about 500 MB, roughly a minute on a good connection). No restart is needed; tagging starts automatically:
+
+```bash
+bash scripts/install-models.sh all
+```
+
+**Management.** Installed from the command line, the app is not managed by the ZimaOS dashboard, the same as other CLI-installed apps. Start and stop it with `docker compose` inside the folder (`docker compose stop`, `docker compose up -d`). `restart: unless-stopped` brings it back after a reboot.
+
+**Updating.** Back up first:
+
+```bash
+bash scripts/library-backup-docker.sh backup ./backups
+```
+
+Unpack the new archive over the same folder (it contains no data, `.env` or backups), and load the new image:
+
+```bash
+cd /DATA/AppData && tar -xzf nodeck-NEW-VERSION-amd64.tar.gz && cd nodeck
+docker load -i images/nodeck-app-NEW-VERSION-amd64.tar
+```
+
+When the release notes say a schema migration is needed, set `NODECK_MIGRATION_BACKUP_MANIFEST` in `.env` to `/app/migration-backup/<backup directory name>/manifest.txt`. The API refuses to migrate a populated database without a verified backup: it checks the manifest, the database name, schema version, row counts and checksums first (see **Database upgrades and recovery**). Then restart:
+
+```bash
+docker compose up -d
+```
+
+**Restoring.** The backup script stops the backend itself when it runs; run the restore with the backend stopped:
+
+```bash
+docker compose stop backend
+bash scripts/library-backup-docker.sh restore ./backups/<backup directory name> --confirm-restore
+```
+
+The restore leaves the backend stopped; start it again when you are done:
+
+```bash
+docker compose up -d
+```
+
+**Uninstalling.** Stop and remove the containers:
+
+```bash
+docker compose down
+```
+
+Delete the `nodeck` folder only if you also want to delete your library.
+
+**Troubleshooting.**
+
+- Port already in use: change `BACKEND_HTTP_PORT` (or `MYSQL_HOST_PORT`) in `.env`, then run `docker compose up -d` again.
+- An error mentioning `change-me`: a password in `.env` is still the placeholder. If MySQL already started once with a real password, do not change it later.
+- The app does not open: look at the log with `docker compose logs backend` (and `docker compose logs mysql`).
+- Slow or killed containers: check free memory; about 2 GB is recommended, and image analysis and video transcoding use several CPU cores.
+
+## Where your data lives (and what you may touch)
+
+Everything is stored as plain folders next to `docker-compose.yml` (for example `/DATA/AppData/nodeck`):
+
+| Path | What it holds | Notes |
+| --- | --- | --- |
+| `volumes/app_data/cards/<id>/original.<ext>` | The original file as uploaded, renamed by card id. | The mapping card to file, titles, tags and decks live in MySQL. |
+| `volumes/app_data/cache/cards/<id>/` | Previews and posters. | Regenerable. |
+| `volumes/app_data/uploads`, `tmp` | Uploads in progress. | |
+| `volumes/app_data/models` | WD tagger and Whisper models. | Re-downloadable with `scripts/install-models.sh`. |
+| `volumes/app_data/config`, `user-data` | Application settings and user data. | |
+| `volumes/mysql_data` | MySQL internal files. | Binary. Do not copy or edit while MySQL runs. |
+| `backups/` | Backup snapshots and SQL dumps. | |
+
+**Ownership.** Files written by the app are owned by root (a ZimaOS SSH session runs as root after `sudo -i`). `mysql_data` is owned by the MySQL user (uid 999).
+
+**Safe while the app runs:** reading or copying originals and previews, and reading SQL dumps.
+
+**Not safe:** deleting or renaming files under `cards/` (the database still points at them; delete cards in the app instead) and touching `mysql_data`. To move the database use `scripts/export-db.sh` or a backup, never a copy of `mysql_data`. Copying files into `cards/` does not import them; use the **Import** page.
+
+**Moving to another app.** Originals are plain files. `scripts/export-db.sh` gives a readable SQL dump (tables `cards`, `tags`, `card_tags`, `decks`, and others) to map card ids to titles, tags and decks. Desktop database tools can also connect when `MYSQL_BIND_ADDRESS=0.0.0.0` is set in `.env` (port `MYSQL_HOST_PORT`, user and password from `.env`).
 
 ## Project Structure
 
