@@ -60,22 +60,25 @@ public sealed partial class CardRepository
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            conditions.Add("""
+            // Matching tag ids are resolved once (name or alias) instead of per card and per tag,
+            // so the substring scan over the tag catalog does not repeat for every card row.
+            const string matchingTagIds = """
+                SELECT t.id FROM tags t WHERE t.name LIKE @SearchLike ESCAPE '!'
+                UNION SELECT a.tag_id FROM tag_aliases a WHERE a.alias LIKE @SearchLike ESCAPE '!'
+                """;
+            conditions.Add($"""
                 (CAST(cards.id AS CHAR) = @Search OR cards.title LIKE @SearchLike ESCAPE '!'
-                 OR EXISTS (
-                    SELECT 1 FROM card_tags ct JOIN tags t ON t.id = ct.tag_id
-                    WHERE (ct.card_id = cards.id OR ct.card_id IN (
-                        SELECT child.to_card_id FROM card_relations child
-                        WHERE child.from_card_id = cards.id AND child.relation_type = 'contains'))
-                      AND (t.name LIKE @SearchLike ESCAPE '!' OR EXISTS (
-                          SELECT 1 FROM tag_aliases a WHERE a.tag_id = t.id
-                            AND a.alias LIKE @SearchLike ESCAPE '!'))
-                 ) OR EXISTS (
-                    SELECT 1 FROM card_relations r JOIN tags t ON t.legacy_card_id = r.to_card_id
-                    WHERE r.from_card_id = cards.id AND r.relation_type = 'tagged_with'
-                      AND (t.name LIKE @SearchLike ESCAPE '!' OR EXISTS (
-                          SELECT 1 FROM tag_aliases a WHERE a.tag_id = t.id
-                            AND a.alias LIKE @SearchLike ESCAPE '!'))
+                 OR cards.id IN (
+                    SELECT ct.card_id FROM card_tags ct
+                    WHERE ct.tag_id IN ({matchingTagIds})
+                    UNION
+                    SELECT child.from_card_id FROM card_relations child
+                    JOIN card_tags ct ON ct.card_id = child.to_card_id
+                    WHERE child.relation_type = 'contains' AND ct.tag_id IN ({matchingTagIds})
+                    UNION
+                    SELECT r.from_card_id FROM card_relations r
+                    JOIN tags t ON t.legacy_card_id = r.to_card_id
+                    WHERE r.relation_type = 'tagged_with' AND t.id IN ({matchingTagIds})
                  ))
                 """);
             parameters.Add("Search", search);
@@ -128,21 +131,28 @@ public sealed partial class CardRepository
         for (var index = 0; index < catalogTagIds.Count; index++)
         {
             var parameterName = $"CatalogTagId{index}";
+            // The card set for one tag is built once (own tag, a contained child's tag, and both
+            // through legacy tagged_with links) instead of an OR-correlated scan per card row.
             conditions.Add($"""
-                (EXISTS (
-                    SELECT 1 FROM card_tags ct WHERE ct.tag_id = @{parameterName}
-                      AND ct.legacy_relation_id IS NULL
-                      AND (ct.card_id = cards.id OR ct.card_id IN (
-                          SELECT child.to_card_id FROM card_relations child
-                          WHERE child.from_card_id = cards.id AND child.relation_type = 'contains'))
-                ) OR EXISTS (
-                    SELECT 1 FROM card_relations r JOIN tags t ON t.legacy_card_id = r.to_card_id
-                    WHERE (r.from_card_id = cards.id OR r.from_card_id IN (
-                        SELECT child.to_card_id FROM card_relations child
-                        WHERE child.from_card_id = cards.id AND child.relation_type = 'contains'))
-                      AND r.relation_type = 'tagged_with'
-                      AND t.id = @{parameterName}
-                ))
+                cards.id IN (
+                    SELECT ct.card_id FROM card_tags ct
+                    WHERE ct.tag_id = @{parameterName} AND ct.legacy_relation_id IS NULL
+                    UNION
+                    SELECT child.from_card_id FROM card_relations child
+                    JOIN card_tags ct ON ct.card_id = child.to_card_id
+                    WHERE child.relation_type = 'contains'
+                      AND ct.tag_id = @{parameterName} AND ct.legacy_relation_id IS NULL
+                    UNION
+                    SELECT r.from_card_id FROM card_relations r
+                    JOIN tags t ON t.legacy_card_id = r.to_card_id
+                    WHERE r.relation_type = 'tagged_with' AND t.id = @{parameterName}
+                    UNION
+                    SELECT child.from_card_id FROM card_relations child
+                    JOIN card_relations r ON r.from_card_id = child.to_card_id
+                    JOIN tags t ON t.legacy_card_id = r.to_card_id
+                    WHERE child.relation_type = 'contains'
+                      AND r.relation_type = 'tagged_with' AND t.id = @{parameterName}
+                )
                 """);
             parameters.Add(parameterName, catalogTagIds[index]);
         }
