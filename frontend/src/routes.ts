@@ -1,34 +1,44 @@
 import {
   Archive,
+  FilePlus2,
   GalleryVerticalEnd,
   Globe,
   Heart,
   House,
   Layers3,
   Plus,
-  Settings,
   Tag,
-  Wrench,
+  Upload,
 } from 'lucide-react';
 
 export type RouteItem = {
   path: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  group: 'core' | 'create' | 'service';
 };
 
-export const routes: RouteItem[] = [
-  { path: '/', label: 'Home', icon: House, group: 'core' },
-  { path: '/gallery', label: 'Gallery', icon: GalleryVerticalEnd, group: 'core' },
-  { path: '/favorites', label: 'Favorites', icon: Heart, group: 'core' },
-  { path: '/cards', label: 'Cards', icon: Archive, group: 'core' },
-  { path: '/decks', label: 'Decks', icon: Layers3, group: 'core' },
-  { path: '/tags', label: 'Tags', icon: Tag, group: 'core' },
-  { path: '/sources', label: 'Sources', icon: Globe, group: 'core' },
-  { path: '/cards/new', label: 'Create Card', icon: Plus, group: 'create' },
-  { path: '/cards/import', label: 'Bulk import', icon: Plus, group: 'create' },
-  { path: '/decks/new', label: 'Create Deck', icon: Plus, group: 'create' },
-  { path: '/settings', label: 'Settings', icon: Settings, group: 'service' },
-  { path: '/service', label: 'Service', icon: Wrench, group: 'service' },
-];
+export const routes: { primary: RouteItem[]; library: RouteItem[]; create: RouteItem[] } = {
+  primary: [
+    { path: '/', label: 'Home', icon: House },
+    { path: '/gallery', label: 'Gallery', icon: GalleryVerticalEnd },
+    { path: '/decks', label: 'Decks', icon: Layers3 },
+    { path: '/favorites', label: 'Favorites', icon: Heart },
+  ],
+  library: [
+    { path: '/tags', label: 'Tags', icon: Tag },
+    { path: '/sources', label: 'Sources', icon: Globe },
+    { path: '/cards', label: 'Manage cards', icon: Archive },
+  ],
+  create: [
+    { path: '/cards/import', label: 'Import files', icon: Upload },
+    { path: '/decks/new', label: 'New deck', icon: Plus },
+    { path: '/cards/new', label: 'New card', icon: FilePlus2 },
+  ],
+};
+
+export function isRouteActive(currentPath: string, path: string) {
+  if (path === '/') return currentPath === '/';
+  if (path === '/cards') return currentPath === '/cards' || /^\/cards\/\d+(\/edit)?$/.test(currentPath);
+  if (path === '/decks') return currentPath === '/decks' || /^\/decks\/\d+(\/edit)?$/.test(currentPath);
+  return currentPath === path || currentPath.startsWith(`${path}/`);
+}

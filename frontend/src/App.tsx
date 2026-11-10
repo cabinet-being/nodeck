@@ -1,9 +1,7 @@
 import * as React from 'react';
-import { Search } from 'lucide-react';
 
-import { AppSidebar } from '@/components/app-sidebar';
+import { AppShell } from '@/components/app-shell';
 import { BulkImportPage } from '@/pages/bulk-import-page';
-import { Input } from '@/components/ui/input';
 import { CardDetailsPage } from '@/pages/card-details-page';
 import { CardsPage } from '@/pages/cards-page';
 import { CreateCardPage } from '@/pages/create-card-page';
@@ -29,7 +27,6 @@ function getCurrentUrl() {
 
 export function App() {
   const [currentUrl, setCurrentUrl] = React.useState(getCurrentUrl);
-  const [globalSearch, setGlobalSearch] = React.useState('');
 
   React.useEffect(() => {
     const handlePopState = () => setCurrentUrl(getCurrentUrl());
@@ -45,12 +42,6 @@ export function App() {
   const currentSearch = React.useMemo(() => {
     return new URL(currentUrl, window.location.origin).search;
   }, [currentUrl]);
-
-  React.useEffect(() => {
-    if (currentPath === '/gallery') {
-      setGlobalSearch(new URLSearchParams(currentSearch).get('search') ?? '');
-    }
-  }, [currentPath, currentSearch]);
 
   const navigate = React.useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
@@ -89,41 +80,20 @@ export function App() {
   }, [currentUrl]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-cols-1 grid-rows-[auto_1fr] md:grid-cols-[17rem_minmax(0,1fr)] md:grid-rows-1">
-        <AppSidebar currentPath={currentPath} onNavigate={navigate} />
-
-        <div className="flex min-w-0 flex-col">
-          <header className="bg-background/95 sticky top-16 z-10 flex h-16 items-center border-b px-6 backdrop-blur md:top-0">
-            <form className="relative w-full max-w-xl" onSubmit={(event) => {
-              event.preventDefault();
-              const query = globalSearch.trim();
-              navigateTo(query ? `/gallery?search=${encodeURIComponent(query)}` : '/gallery');
-            }}>
-              <Search className="text-muted-foreground pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2" />
-              <Input type="search" aria-label="Global search" placeholder="Search Nodeck"
-                className="pl-9" value={globalSearch}
-                onChange={(event) => setGlobalSearch(event.target.value)} />
-            </form>
-          </header>
-
-          <main className="min-w-0 flex-1">
-            <RouteContent
-              currentPath={currentPath}
-              currentSearch={currentSearch}
-              onNavigate={navigate}
-              onNavigateTo={navigateTo}
-            />
-          </main>
-        </div>
-      </div>
-    </div>
+    <AppShell currentPath={currentPath} onNavigate={navigate} onNavigateTo={navigateTo}>
+      <RouteContent
+        currentPath={currentPath}
+        currentSearch={currentSearch}
+        onNavigate={navigate}
+        onNavigateTo={navigateTo}
+      />
+    </AppShell>
   );
 }
 
 function NotFoundPage({ onNavigate }: { onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void }) {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-6">
+    <div className="flex min-h-[calc(100vh-7.5rem)] items-center justify-center p-6">
       <div className="grid gap-4 text-center">
         <div className="text-2xl font-semibold">Page not found</div>
         <div className="text-muted-foreground text-sm">The route you requested does not exist.</div>
