@@ -63,7 +63,7 @@ export function FeedPage({
   return (
     <section className="grid gap-5 px-4 py-6 sm:px-6 sm:py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">{kind === 'daily' ? "Today's picks" : 'Recommended'}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{kind === 'daily' ? "Today's picks" : 'For you'}</h1>
         <div className="flex items-center gap-2">
           {kind === 'recommended' ? (
             <div className="bg-muted flex rounded-lg p-1" role="group" aria-label="Recommendation scope">

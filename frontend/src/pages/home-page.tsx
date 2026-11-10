@@ -65,7 +65,7 @@ export function HomePage({
     <div className="grid gap-10 px-4 py-6 sm:px-6 sm:py-8">
       <CardRail title="Recently added" cards={recent} onNavigate={onNavigate}
         loading={recentLoading} error={recentError} onRetry={retry} viewAllHref="/gallery" />
-      <CardRail title="Recommended" cards={recommended.slice(0, 20).map(({ card }) => card)}
+      <CardRail title="For you" cards={recommended.slice(0, 20).map(({ card }) => card)}
         onNavigate={onNavigate} loading={recommendedLoading}
         error={recommendedError} onRetry={retry} viewAllHref="/feed/recommended" />
       <CardRail title="Today's picks" cards={daily.slice(0, 12).map(({ card }) => card)}

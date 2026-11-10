@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Images, Layers3 } from 'lucide-react';
 
 import { listCards, type Card } from '@/api/cards';
 import { getSource, getTag, type Source, type Tag } from '@/api/catalog';
@@ -62,6 +63,7 @@ export function CardBrowser({
   const legacySource = params.get('source') ?? '';
   const legacyActive = legacyTags !== '' || legacySource !== '';
   const deckId = scope.kind === 'deck' ? scope.deckId : null;
+  const pagesMode = deckId === null && params.get('view') === 'pages';
 
   React.useEffect(() => {
     let active = true;
@@ -83,7 +85,9 @@ export function CardBrowser({
     setLoading(true);
     listCards({
       ...(deckId === null
-        ? { types: ['media', 'comic', 'set'], excludeContainedMedia: true, sort: 'created_at' as const, order: 'desc' as const }
+        ? pagesMode
+          ? { types: ['media'], sort: 'created_at' as const, order: 'desc' as const }
+          : { types: ['media', 'comic', 'set'], excludeContainedMedia: true, sort: 'created_at' as const, order: 'desc' as const }
         : { deckId, sort: 'position' as const }),
       tags: parseIds(legacyTags || null),
       source: parseSingleId(legacySource),
@@ -107,7 +111,7 @@ export function CardBrowser({
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [deckId, search, catalogTagIds, catalogSourceId, legacyTags, legacySource, page, reloadKey, retryKey]);
+  }, [deckId, pagesMode, search, catalogTagIds, catalogSourceId, legacyTags, legacySource, page, reloadKey, retryKey]);
 
   function navigateWith(next: URLSearchParams) {
     const query = next.toString();
@@ -119,6 +123,21 @@ export function CardBrowser({
     if (filters.search.trim()) next.set('search', filters.search.trim());
     if (filters.tags.length > 0) next.set('catalog_tags', filters.tags.map((tag) => tag.id).join(','));
     if (filters.source) next.set('catalog_source', String(filters.source.id));
+    if (pagesMode) next.set('view', 'pages');
+    navigateWith(next);
+  }
+
+  function selectGalleryMode(mode: 'collections' | 'pages') {
+    const next = new URLSearchParams(currentSearch);
+    next.delete('page');
+    if (mode === 'pages') next.set('view', 'pages');
+    else next.delete('view');
+    navigateWith(next);
+  }
+
+  function clearFilters() {
+    const next = new URLSearchParams();
+    if (pagesMode) next.set('view', 'pages');
     navigateWith(next);
   }
 
@@ -135,13 +154,29 @@ export function CardBrowser({
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {title ?? <span />}
-        <VisualCardViewToggle view={view} onChange={setView} />
+        <div className="flex items-center gap-2">
+          {deckId === null ? (
+            <div className="bg-muted flex rounded-lg p-1" role="group" aria-label="Gallery mode">
+              <Button type="button" size="icon" variant={pagesMode ? 'ghost' : 'secondary'}
+                aria-label="Collections" title="Collections"
+                aria-pressed={!pagesMode} onClick={() => selectGalleryMode('collections')}>
+                <Layers3 className="size-4" />
+              </Button>
+              <Button type="button" size="icon" variant={pagesMode ? 'secondary' : 'ghost'}
+                aria-label="Pages" title="Pages"
+                aria-pressed={pagesMode} onClick={() => selectGalleryMode('pages')}>
+                <Images className="size-4" />
+              </Button>
+            </div>
+          ) : null}
+          <VisualCardViewToggle view={view} onChange={setView} />
+        </div>
       </div>
       <CatalogFilterBar
         filters={{ search, tags, source }}
         legacyActive={legacyActive}
         onChange={applyFilters}
-        onClearAll={() => navigateWith(new URLSearchParams())}
+        onClearAll={clearFilters}
       />
       {error ? <div className="flex flex-wrap items-center gap-3" role="alert">
         <p className="text-destructive text-sm">{error}</p>
@@ -152,7 +187,7 @@ export function CardBrowser({
         <div className="text-muted-foreground grid justify-items-center gap-3 rounded-lg border p-6 text-center text-sm">
           {filtersActive ? <>
             <p>No matches for the current filters.</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => navigateWith(new URLSearchParams())}>Clear filters</Button>
+            <Button type="button" variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button>
           </> : page > 1 ? <>
             <p>This page is empty.</p>
             <Button type="button" variant="outline" size="sm" onClick={() => goToPage(1)}>Back to first page</Button>
