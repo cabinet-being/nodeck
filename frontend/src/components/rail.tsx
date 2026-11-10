@@ -149,12 +149,12 @@ export function Rail({
               title={`Scroll ${side}`}
               disabled={!canScroll[side]}
               onClick={() => scroll(side === 'left' ? -1 : 1)}
-              className={`group/edge absolute top-1 bottom-3 z-10 hidden w-16 items-center outline-none transition-opacity duration-[var(--dur-fast)] pointer-fine:flex disabled:pointer-events-none disabled:opacity-0 ${side === 'left'
+              className={`group/edge absolute top-1 bottom-3 z-10 hidden w-16 items-center rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring transition-opacity duration-[var(--dur-fast)] pointer-fine:flex disabled:pointer-events-none disabled:opacity-0 ${side === 'left'
                 ? 'left-0 justify-start bg-gradient-to-r from-background/90 to-transparent pl-1'
                 : 'right-0 justify-end bg-gradient-to-l from-background/90 to-transparent pr-1'}`}
             >
-              <span className="bg-surface text-foreground shadow-2 inline-flex size-11 items-center justify-center rounded-full border transition-transform duration-[var(--dur-fast)] group-hover/edge:scale-105 group-focus-visible/edge:ring-2 group-focus-visible/edge:ring-ring">
-                {side === 'left' ? <ChevronLeft className="size-5" /> : <ChevronRight className="size-5" />}
+              <span className="text-foreground inline-flex size-11 items-center justify-center opacity-70 drop-shadow-[0_1px_2px_var(--background)] transition-[opacity,transform] duration-[var(--dur-fast)] group-hover/edge:scale-110 group-hover/edge:opacity-100 group-focus-visible/edge:opacity-100">
+                {side === 'left' ? <ChevronLeft className="size-7" strokeWidth={2.5} /> : <ChevronRight className="size-7" strokeWidth={2.5} />}
               </span>
             </button>
           ))}
