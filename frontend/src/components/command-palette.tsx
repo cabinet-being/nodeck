@@ -159,10 +159,10 @@ export function CommandPalette({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity duration-[var(--dur-base)] data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <DialogPrimitive.Viewport className="fixed inset-0 z-50 grid place-items-start justify-items-center overflow-y-auto p-4 pt-[12vh]">
           <DialogPrimitive.Popup
-            className="bg-popover text-popover-foreground shadow-3 w-full max-w-xl overflow-hidden rounded-[var(--radius-panel)] border outline-none transition-[opacity,transform] duration-200 ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0"
+            className="bg-popover text-popover-foreground shadow-3 w-full max-w-xl overflow-hidden rounded-[var(--radius-panel)] border outline-none transition-[opacity,transform] duration-[var(--dur-base)] ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0"
             aria-label="Search or jump to"
           >
             <DialogPrimitive.Title className="sr-only">Search or jump to</DialogPrimitive.Title>

@@ -415,7 +415,8 @@ function RelationCardRow({
       </a>
 
       {!readOnly && onRemove ? (
-        <Button type="button" variant="ghost" size="icon" onClick={onRemove}>
+        <Button type="button" variant="ghost" size="icon" onClick={onRemove}
+          aria-label={`Remove relation to ${relation.relatedCard.title ?? `card ${relation.relatedCard.id}`}`} title="Remove relation">
           <Trash2 className="size-4" />
         </Button>
       ) : (

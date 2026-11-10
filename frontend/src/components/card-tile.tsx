@@ -59,7 +59,7 @@ export function CardTile({
   return (
     <div
       className={cn(
-        'group bg-surface shadow-1 relative min-w-0 rounded-2xl border transition-[transform,box-shadow] duration-[var(--dur-fast)] ease-out hover:-translate-y-0.5 hover:shadow-2 focus-within:shadow-2',
+        'group bg-surface shadow-1 relative min-w-0 rounded-2xl border transition-[transform,box-shadow] duration-[var(--dur-fast)] ease-out motion-safe:hover:-translate-y-0.5 hover:shadow-2 focus-within:shadow-2',
         layout === 'rail' && 'w-40 shrink-0 snap-start sm:w-44',
         layout === 'brick' && 'mb-3 break-inside-avoid',
         className

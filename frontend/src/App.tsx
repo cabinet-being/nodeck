@@ -1,6 +1,10 @@
 import * as React from 'react';
 
+import { Compass } from 'lucide-react';
+
 import { AppShell } from '@/components/app-shell';
+import { EmptyState } from '@/components/empty-state';
+import { buttonVariants } from '@/components/ui/button';
 import { BulkImportPage } from '@/pages/bulk-import-page';
 import { CardDetailsPage } from '@/pages/card-details-page';
 import { CardsPage } from '@/pages/cards-page';
@@ -93,20 +97,16 @@ export function App() {
 
 function NotFoundPage({ onNavigate }: { onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void }) {
   return (
-    <div className="flex min-h-[calc(100vh-7.5rem)] items-center justify-center p-6">
-      <div className="grid gap-4 text-center">
-        <div className="text-2xl font-semibold">Page not found</div>
-        <div className="text-muted-foreground text-sm">The route you requested does not exist.</div>
-        <div className="flex items-center justify-center gap-3">
-          <a href="/gallery" onClick={onNavigate} className="text-primary text-sm font-medium">
-            Gallery
-          </a>
-          <a href="/cards" onClick={onNavigate} className="text-primary text-sm font-medium">
-            Cards
-          </a>
-        </div>
-      </div>
-    </div>
+    <EmptyState
+      icon={Compass}
+      title="Page not found"
+      className="min-h-[calc(100vh-7.5rem)]"
+      action={(
+        <a href="/" onClick={onNavigate} className={buttonVariants({ variant: 'outline' })}>
+          Go home
+        </a>
+      )}
+    />
   );
 }
 

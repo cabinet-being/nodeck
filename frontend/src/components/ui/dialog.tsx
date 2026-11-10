@@ -20,9 +20,9 @@ export function Dialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity duration-[var(--dur-base)] data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <DialogPrimitive.Viewport className="fixed inset-0 z-50 grid place-items-center overflow-y-auto p-4">
-          <DialogPrimitive.Popup className="bg-popover text-popover-foreground shadow-3 grid w-full max-w-md gap-4 rounded-[var(--radius-panel)] border p-5 outline-none transition-[opacity,transform] duration-200 ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
+          <DialogPrimitive.Popup className="bg-popover text-popover-foreground shadow-3 grid w-full max-w-md gap-4 rounded-[var(--radius-panel)] border p-5 outline-none transition-[opacity,transform] duration-[var(--dur-base)] ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0">
             <div className="flex items-start justify-between gap-4">
               <div className="grid gap-1">
                 <DialogPrimitive.Title className="text-lg font-semibold">{title}</DialogPrimitive.Title>

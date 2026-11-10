@@ -30,7 +30,7 @@ export function SetViewer({
   const openLabel = `Open card${current.title ? `: ${current.title}` : ''}`;
 
   return (
-    <div className="grid min-w-0 focus-visible:outline-none" role="region" aria-label="Set viewer" tabIndex={0}
+    <div className="grid min-w-0" role="region" aria-label="Set viewer" tabIndex={0}
       {...pager.containerProps} onClick={(event) => { if (pager.consumeSwipeClick()) event.preventDefault(); }}>
       <div {...pager.swipeProps}>
         {mainSrc ? (
@@ -57,10 +57,10 @@ export function SetViewer({
 
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
         <div className="flex items-center gap-2">
-          <button type="button" className={stageButtonClass} aria-label="Previous card" disabled={index === 0}
+          <button type="button" className={stageButtonClass} aria-label="Previous card" title="Previous card" disabled={index === 0}
             onClick={() => setSelected(index - 1)}><ChevronLeft /></button>
           <span className="text-stage-foreground/80 min-w-12 text-center text-sm tabular-nums" aria-live="polite">{index + 1} / {cards.length}</span>
-          <button type="button" className={stageButtonClass} aria-label="Next card" disabled={index >= cards.length - 1}
+          <button type="button" className={stageButtonClass} aria-label="Next card" title="Next card" disabled={index >= cards.length - 1}
             onClick={() => setSelected(index + 1)}><ChevronRight /></button>
         </div>
         {toolbar}
@@ -71,7 +71,7 @@ export function SetViewer({
           <button key={card.id} type="button" onClick={() => setSelected(cardIndex)}
             aria-label={`Card ${cardIndex + 1}${card.title ? `: ${card.title}` : ''}`}
             aria-current={cardIndex === index ? 'true' : undefined}
-            className="bg-stage-foreground/10 focus-visible:ring-ring aria-[current=true]:ring-primary h-20 w-16 shrink-0 overflow-hidden rounded-lg opacity-70 focus-visible:ring-2 focus-visible:outline-none aria-[current=true]:opacity-100 aria-[current=true]:ring-2">
+            className="bg-stage-foreground/10 focus-visible:ring-ring aria-[current=true]:ring-primary h-20 w-16 shrink-0 overflow-hidden rounded-lg opacity-70 focus-visible:ring-2 aria-[current=true]:opacity-100 aria-[current=true]:ring-2">
             {card.previewUrl || card.contentUrl
               ? <img src={resolveApiUrl(card.previewUrl || card.contentUrl!)} alt="" className="h-full w-full object-cover" loading="lazy" />
               : <span className="text-xs">{cardIndex + 1}</span>}

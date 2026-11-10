@@ -56,11 +56,11 @@ export function Rail({
             </a>
           ) : null}
           <div className="hidden items-center gap-1 transition-opacity group-focus-within/rail:opacity-100 group-hover/rail:opacity-100 pointer-fine:flex pointer-fine:opacity-0">
-            <Button type="button" size="icon-sm" variant="ghost" aria-label={`Scroll ${title} left`}
+            <Button type="button" size="icon-sm" variant="ghost" aria-label={`Scroll ${title} left`} title="Scroll left"
               disabled={cards.length === 0} onClick={() => scroll(-1)}>
               <ChevronLeft className="size-4" />
             </Button>
-            <Button type="button" size="icon-sm" variant="ghost" aria-label={`Scroll ${title} right`}
+            <Button type="button" size="icon-sm" variant="ghost" aria-label={`Scroll ${title} right`} title="Scroll right"
               disabled={cards.length === 0} onClick={() => scroll(1)}>
               <ChevronRight className="size-4" />
             </Button>

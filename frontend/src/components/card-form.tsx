@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2, Upload } from 'lucide-r
 import { cardTypes, relationTypes, type Card, type CreateRelationInput } from '@/api/cards';
 import { Button } from '@/components/ui/button';
 import { Advanced, FormActions, FormSection, relationLabel } from '@/components/form-layout';
+import { FilePicker } from '@/components/file-picker';
 import { Input } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
 
@@ -93,16 +94,14 @@ export function CardForm({
           </label>
 
           {value.type === 'media' ? (
-            <label className="grid gap-2 text-sm font-medium">
-              Media file
-              <Input
-                type="file"
+            <div className="grid gap-2">
+              <span className="text-sm font-medium">Media file</span>
+              <FilePicker
                 accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,.mov"
-                onChange={(event) =>
-                  onValueChange({ ...value, image: event.target.files?.[0] })
-                }
+                fileName={value.image?.name}
+                onFiles={(files) => onValueChange({ ...value, image: files[0] })}
               />
-            </label>
+            </div>
           ) : null}
 
           {isMultiImageCard ? (
@@ -126,16 +125,14 @@ export function CardForm({
                 <div className="grid gap-2">
                   <Upload className="text-muted-foreground mx-auto size-6" />
                   <div className="text-sm font-medium">Drop images here</div>
-                  <label className="inline-flex justify-center">
-                    <span className="sr-only">Choose images</span>
-                    <Input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      multiple
-                      className="max-w-64"
-                      onChange={(event) => addImages(Array.from(event.target.files ?? []))}
-                    />
-                  </label>
+                  <FilePicker
+                    label="Choose images"
+                    accept="image/png,image/jpeg,image/webp"
+                    multiple
+                    fileName={value.images.length > 0 ? `${value.images.length} selected` : undefined}
+                    onFiles={addImages}
+                    className="justify-center"
+                  />
                 </div>
               </div>
 

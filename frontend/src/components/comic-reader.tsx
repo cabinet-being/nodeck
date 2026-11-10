@@ -36,7 +36,7 @@ export function ComicReader({
   }
 
   return (
-    <div className="grid min-w-0 focus-visible:outline-none" role="region" aria-label="Comic reader" tabIndex={0} {...pager.containerProps}>
+    <div className="grid min-w-0" role="region" aria-label="Comic reader" tabIndex={0} {...pager.containerProps}>
       <div ref={contentRef} className="grid">
         {mode === 'page' ? (
           currentPage ? (
@@ -72,7 +72,7 @@ export function ComicReader({
       {mode === 'page' && pages.length > 0 ? (
         <div className="flex gap-2 overflow-x-auto px-3 pb-3" aria-label="Comic pages">
           {pages.map((page, index) => (
-            <button key={page.id} type="button" onClick={() => setSelectedIndex(index)} aria-label={`Page ${index + 1}${page.title ? `: ${page.title}` : ''}`} aria-current={index === pageIndex ? 'page' : undefined} className="bg-stage-foreground/10 focus-visible:ring-ring h-20 w-16 shrink-0 overflow-hidden rounded-lg opacity-70 focus-visible:ring-2 focus-visible:outline-none aria-[current=page]:opacity-100 aria-[current=page]:ring-2 aria-[current=page]:ring-primary">
+            <button key={page.id} type="button" onClick={() => setSelectedIndex(index)} aria-label={`Page ${index + 1}${page.title ? `: ${page.title}` : ''}`} aria-current={index === pageIndex ? 'page' : undefined} className="bg-stage-foreground/10 focus-visible:ring-ring h-20 w-16 shrink-0 overflow-hidden rounded-lg opacity-70 focus-visible:ring-2 aria-[current=page]:opacity-100 aria-[current=page]:ring-2 aria-[current=page]:ring-primary">
               {page.previewUrl || page.contentUrl ? <img src={resolveApiUrl(page.previewUrl || page.contentUrl!)} alt="" className="h-full w-full object-cover" loading="lazy" /> : <span className="text-xs">{index + 1}</span>}
             </button>
           ))}

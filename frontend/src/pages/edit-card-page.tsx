@@ -130,7 +130,7 @@ export function EditCardPage({
             {card.type === 'media' && !value.image ? (
               <PreviewStartControl key={card.id} card={card} onUpdated={setCard} />
             ) : null}
-            <IncomingRelations card={card} />
+            <IncomingRelations card={card} knownCards={availableCards} />
           </>
         }
       />
@@ -403,7 +403,7 @@ function CurrentMediaInfo({ card }: { card: Card }) {
   );
 }
 
-function IncomingRelations({ card }: { card: Card }) {
+function IncomingRelations({ card, knownCards }: { card: Card; knownCards: Card[] }) {
   const incomingRelations = card.incomingRelations ?? [];
 
   return (
@@ -416,7 +416,9 @@ function IncomingRelations({ card }: { card: Card }) {
                 key={relation.id}
                 className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
               >
-                <span className="font-medium">Card {relation.fromCardId}</span>
+                <span className="font-medium">
+                  {knownCards.find((item) => item.id === relation.fromCardId)?.title?.trim() || 'Untitled card'}
+                </span>
                 <Badge variant="outline">{relationLabel(relation.relationType)}</Badge>
               </div>
             ))}

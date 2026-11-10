@@ -23,7 +23,7 @@ export function PopoverContent({
       <PopoverPrimitive.Positioner align={align} side={side} sideOffset={sideOffset} className="z-50">
         <PopoverPrimitive.Popup
           className={cn(
-            'bg-popover text-popover-foreground shadow-2 min-w-48 origin-[var(--transform-origin)] rounded-xl border p-2 outline-none transition-[opacity,transform] duration-200 ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
+            'bg-popover text-popover-foreground shadow-2 min-w-48 origin-[var(--transform-origin)] rounded-xl border p-2 outline-none transition-[opacity,transform] duration-[var(--dur-base)] ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0',
             className
           )}
           {...props}

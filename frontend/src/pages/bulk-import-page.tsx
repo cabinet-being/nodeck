@@ -258,12 +258,12 @@ function hasSyncedChildren(group: ImportGroup, childCardIds: number[]) {
 type StatusPill = { label: string; icon: React.ComponentType<{ className?: string }>; tone: string };
 
 function statusPillOf(item: ImportItem): StatusPill {
-  if (item.cardId) return { label: 'Uploaded', icon: CheckCircle2, tone: 'bg-tag-character-soft text-tag-character' };
+  if (item.cardId) return { label: 'Uploaded', icon: CheckCircle2, tone: 'bg-success-soft text-success' };
   if (item.status === 'uploading') return { label: 'Uploading', icon: Loader2, tone: 'bg-primary/10 text-primary' };
-  if (item.status === 'needs-review') return { label: 'Needs review', icon: AlertTriangle, tone: 'bg-tag-meta-soft text-tag-meta' };
+  if (item.status === 'needs-review') return { label: 'Needs review', icon: AlertTriangle, tone: 'bg-warning-soft text-warning' };
   if (item.status === 'error') return { label: 'Failed', icon: XCircle, tone: 'bg-destructive/10 text-destructive' };
-  if (isBlockedDuplicate(item)) return { label: 'Duplicate', icon: Copy, tone: 'bg-tag-meta-soft text-tag-meta' };
-  if (!item.file) return { label: 'File missing', icon: FileQuestion, tone: 'bg-tag-meta-soft text-tag-meta' };
+  if (isBlockedDuplicate(item)) return { label: 'Duplicate', icon: Copy, tone: 'bg-warning-soft text-warning' };
+  if (!item.file) return { label: 'File missing', icon: FileQuestion, tone: 'bg-warning-soft text-warning' };
   return { label: 'Queued', icon: Clock, tone: 'bg-muted text-muted-foreground' };
 }
 
@@ -507,7 +507,7 @@ export function BulkImportPage() {
     const key = `media-${itemId}`;
     const cardId = parseCardId(mediaReviewIds[itemId] ?? '');
     if (cardId === null) {
-      setReviewErrors((current) => ({ ...current, [key]: 'Enter a positive whole-number card ID.' }));
+      setReviewErrors((current) => ({ ...current, [key]: 'Enter a positive whole-number card number.' }));
       return;
     }
     reconcilingRef.current = true;
@@ -518,7 +518,7 @@ export function BulkImportPage() {
       const item = itemsRef.current.find((candidate) => candidate.id === itemId && candidate.status === 'needs-review' && !candidate.cardId);
       if (!item) throw new Error('This row is no longer awaiting review.');
       if (itemsRef.current.some((candidate) => candidate.id !== itemId && candidate.cardId === cardId)) {
-        throw new Error('This card ID is already assigned to another file in the queue.');
+        throw new Error('This card number is already assigned to another file in the queue.');
       }
       if (card.type !== 'media' || card.metadata?.original_file_name !== storedUploadName(item.descriptor.name)
         || card.metadata?.file_size !== item.descriptor.size) {
@@ -543,7 +543,7 @@ export function BulkImportPage() {
     const key = `group-${groupId}`;
     const cardId = parseCardId(groupReviewIds[groupId] ?? '');
     if (cardId === null) {
-      setReviewErrors((current) => ({ ...current, [key]: 'Enter a positive whole-number card ID.' }));
+      setReviewErrors((current) => ({ ...current, [key]: 'Enter a positive whole-number card number.' }));
       return;
     }
     reconcilingRef.current = true;
@@ -554,17 +554,17 @@ export function BulkImportPage() {
       const group = groupsRef.current.find((candidate) => candidate.id === groupId && candidate.needsReview && !candidate.cardId);
       if (!group) throw new Error('This group is no longer awaiting review.');
       if (groupsRef.current.some((candidate) => candidate.id !== groupId && candidate.cardId === cardId)) {
-        throw new Error('This card ID is already assigned to another group in the queue.');
+        throw new Error('This card number is already assigned to another group in the queue.');
       }
       const members = itemsRef.current.filter((item) => item.groupId === groupId);
       const childCardIds = members.flatMap((item) => item.cardId ? [item.cardId] : []);
       if (members.length < 2 || childCardIds.length !== members.length) {
-        throw new Error('All planned group files must have uploaded card IDs before reconciliation.');
+        throw new Error('All planned group files must have uploaded card numbers before reconciliation.');
       }
       const actualIds = card.containedCards?.map((child) => child.id);
       if (card.type !== group.type || !actualIds || actualIds.length !== childCardIds.length
         || !childCardIds.every((id, index) => actualIds[index] === id)) {
-        throw new Error('Card type or ordered child card IDs do not match this planned group.');
+        throw new Error('Card type or ordered child card numbers do not match this planned group.');
       }
       const nextGroups = groupsRef.current.map((candidate) => candidate.id === groupId
         ? { ...candidate, cardId, needsReview: false, needsSync: false, syncedChildCardIds: [...childCardIds], error: undefined } : candidate);
@@ -1169,7 +1169,7 @@ export function BulkImportPage() {
           {group.error && <p role="alert" className="text-destructive text-sm">{group.error}</p>}
           {group.needsReview && <div className="flex flex-wrap items-center gap-2 text-sm">
             <a className="text-primary underline" href="/gallery">Check gallery</a>
-            <Input aria-label={`Existing card ID for group ${group.id}`} className="w-40" inputMode="numeric" placeholder="Existing group ID"
+            <Input aria-label={`Existing card number for group ${group.id}`} title="Number of the card already created for this group (shown in its address as /cards/number)" className="w-40" inputMode="numeric" placeholder="Card number"
               value={groupReviewIds[group.id] ?? ''} disabled={isRunning || !!reconciling}
               onChange={(event) => setGroupReviewIds((current) => ({ ...current, [group.id]: event.target.value }))} />
             <Button type="button" size="sm" variant="outline" disabled={isRunning || !!reconciling}
@@ -1279,7 +1279,7 @@ export function BulkImportPage() {
             {item.error && <p role="alert" className="text-destructive text-sm">{item.error}</p>}
             {item.status === 'needs-review' && <div className="flex flex-wrap items-center gap-2 text-sm">
               <a className="text-primary underline" href="/gallery">Check gallery</a>
-              <Input aria-label={`Existing card ID for ${item.descriptor.name}`} className="w-40" inputMode="numeric" placeholder="Existing media ID"
+              <Input aria-label={`Existing card number for ${item.descriptor.name}`} title="Number of the card already created for this file (shown in its address as /cards/number)" className="w-40" inputMode="numeric" placeholder="Card number"
                 value={mediaReviewIds[item.id] ?? ''} disabled={isRunning || !!reconciling}
                 onChange={(event) => setMediaReviewIds((current) => ({ ...current, [item.id]: event.target.value }))} />
               <Button type="button" size="sm" variant="outline" disabled={isRunning || !!reconciling}

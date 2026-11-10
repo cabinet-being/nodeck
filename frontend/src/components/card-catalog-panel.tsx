@@ -41,6 +41,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
   const [showAllSuggestions, setShowAllSuggestions] = React.useState(false);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = React.useState<number[]>([]);
   const [correcting, setCorrecting] = React.useState<TagSuggestion | null>(null);
+  const [openSuggestionId, setOpenSuggestionId] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     setSelectMode(false);
@@ -48,6 +49,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
     setEditingSourceId(null);
     setShowAllSuggestions(false);
     setSelectedSuggestionIds([]);
+    setOpenSuggestionId(null);
   }, [cardId]);
 
   React.useEffect(() => {
@@ -122,9 +124,10 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
 
   function renderSuggestion(suggestion: TagSuggestion) {
     const selected = selectedSuggestionIds.includes(suggestion.tagId);
+    const open = openSuggestionId === suggestion.tagId;
     return (
       <span key={suggestion.tagId}
-        className="group/s inline-flex max-w-full min-w-0 items-center gap-0.5 pointer-coarse:flex pointer-coarse:justify-between">
+        className="group/s inline-flex max-w-full min-w-0 items-center gap-0.5">
         {selectMode ? (
           <label className="inline-flex size-6 shrink-0 items-center justify-center pointer-coarse:size-11">
             <Checkbox aria-label={`Select ${suggestion.name}`} checked={selected} disabled={busy}
@@ -133,22 +136,25 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
           </label>
         ) : null}
         <Tooltip label={confidenceLabel(suggestion.confidence)} side="top">
-          <span className="inline-flex min-w-0">
+          <button type="button" aria-expanded={open} aria-label={`Review suggested tag ${suggestion.name}`}
+            className="inline-flex min-w-0 max-w-full rounded-full pointer-coarse:min-h-10"
+            onClick={() => setOpenSuggestionId(open ? null : suggestion.tagId)}>
             <NodeChip kind="tag" suggested label={suggestion.name} category={suggestion.category} origin={suggestion.origin} />
-          </span>
+          </button>
         </Tooltip>
-        <span className="inline-flex shrink-0 items-center opacity-0 transition-opacity group-focus-within/s:opacity-100 group-hover/s:opacity-100 pointer-coarse:opacity-100">
-          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11"
+        <span data-open={open}
+          className="inline-flex shrink-0 items-center opacity-0 transition-opacity group-focus-within/s:opacity-100 group-hover/s:opacity-100 pointer-coarse:hidden pointer-coarse:opacity-100 pointer-coarse:data-[open=true]:inline-flex">
+          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-10"
             aria-label={`Accept ${suggestion.name}`} title="Accept" disabled={busy}
             onClick={() => void run(() => decideTagSuggestion(cardId, suggestion.tagId, 'accepted'))}>
             <Check />
           </Button>
-          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11"
+          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-10"
             aria-label={`Reject ${suggestion.name}`} title="Reject" disabled={busy}
             onClick={() => void run(() => decideTagSuggestion(cardId, suggestion.tagId, 'rejected'))}>
             <X />
           </Button>
-          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11"
+          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-10"
             aria-label={`Correct ${suggestion.name}`} title="Replace with another tag" disabled={busy}
             onClick={() => { setCorrecting(suggestion); setMode('tag'); setSearch(''); setChoices([]); setError(null); }}>
             <Pencil />
@@ -228,7 +234,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
   const groups: ConnectionGroup[] = [
     {
       key: 'tags', label: 'Tags', icon: TagIcon, nodes: tagNodes, count: tags.length, empty: 'No tags',
-      onAdd: () => startPicker('tag'), addLabel: 'Add tag', actions: suggestionActions, stacked: true,
+      onAdd: () => startPicker('tag'), addLabel: 'Add tag', actions: suggestionActions,
       footer: !showAllTags && orderedTags.length > 8 ? (
         <Button type="button" variant="ghost" size="xs" className="justify-self-start pointer-coarse:h-11"
           onClick={() => setShowAllTags(true)}>+{orderedTags.length - 8} more</Button>
@@ -236,7 +242,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
     },
     {
       key: 'suggested', label: 'Suggested', icon: Wand2, nodes: suggestionNodes, count: unassignedSuggestions.length,
-      hideWhenEmpty: true, stacked: true,
+      hideWhenEmpty: true,
       footer: !showAllSuggestions && unassignedSuggestions.length > 8 ? (
         <Button type="button" variant="ghost" size="xs" className="justify-self-start pointer-coarse:h-11"
           onClick={() => setShowAllSuggestions(true)}>+{unassignedSuggestions.length - 8} more</Button>
