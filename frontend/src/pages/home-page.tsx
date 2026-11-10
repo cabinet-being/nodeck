@@ -1,8 +1,11 @@
 import * as React from 'react';
+import { Images } from 'lucide-react';
 
 import { listCards, type Card } from '@/api/cards';
 import { getDailyRecommendations, getRecommendations, type Recommendation } from '@/api/recommendations';
-import { CardRail } from '@/components/recommendation-rail';
+import { EmptyState } from '@/components/empty-state';
+import { Rail } from '@/components/rail';
+import { buttonVariants } from '@/components/ui/button';
 import { useLocalDay } from '@/hooks/use-local-day';
 
 export function HomePage({
@@ -61,16 +64,27 @@ export function HomePage({
     return () => { active = false; };
   }, [requestVersion, today]);
 
+  const libraryEmpty = !recentLoading && !recentError && recent.length === 0;
+
+  if (libraryEmpty) {
+    return (
+      <div className="px-4 py-6 sm:px-6 sm:py-8">
+        <EmptyState icon={Images} title="Your library is empty"
+          action={<a href="/cards/import" onClick={onNavigate} className={buttonVariants({ size: 'lg' })}>Import files</a>} />
+      </div>
+    );
+  }
+
   return (
-    <div className="grid gap-10 px-4 py-6 sm:px-6 sm:py-8">
-      <CardRail title="Recently added" cards={recent} onNavigate={onNavigate}
-        loading={recentLoading} error={recentError} onRetry={retry} viewAllHref="/gallery" />
-      <CardRail title="For you" cards={recommended.slice(0, 20).map(({ card }) => card)}
-        onNavigate={onNavigate} loading={recommendedLoading}
-        error={recommendedError} onRetry={retry} viewAllHref="/feed/recommended" />
-      <CardRail title="Today's picks" cards={daily.slice(0, 12).map(({ card }) => card)}
+    <div className="mx-auto grid max-w-screen-2xl gap-10 px-4 py-6 sm:px-6 sm:py-8">
+      <Rail title="Today's picks" cards={daily.slice(0, 12).map(({ card }) => card)}
         onNavigate={onNavigate} loading={dailyLoading} error={dailyError} onRetry={retry}
         viewAllHref="/feed/daily" />
+      <Rail title="For you" cards={recommended.slice(0, 20).map(({ card }) => card)}
+        onNavigate={onNavigate} loading={recommendedLoading}
+        error={recommendedError} onRetry={retry} viewAllHref="/feed/recommended" />
+      <Rail title="Recently added" cards={recent} onNavigate={onNavigate}
+        loading={recentLoading} error={recentError} onRetry={retry} viewAllHref="/gallery" />
     </div>
   );
 }

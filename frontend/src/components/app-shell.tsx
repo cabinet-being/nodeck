@@ -149,7 +149,7 @@ function MobileTabBar({
   return (
     <>
       <nav
-        aria-label="Primary"
+        aria-label="Tabs"
         className="bg-background/90 fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
       >
         <ul className="grid grid-cols-5">

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Images, Layers3 } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 import {
   getDailyRecommendations,
@@ -7,7 +7,10 @@ import {
   type Recommendation,
   type RecommendationMode,
 } from '@/api/recommendations';
+import { EmptyState } from '@/components/empty-state';
+import { RecommendationModeControl } from '@/components/recommendation-rail';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   useVisualCardView,
   VisualCardViewToggle,
@@ -61,24 +64,11 @@ export function FeedPage({
   }
 
   return (
-    <section className="grid gap-5 px-4 py-6 sm:px-6 sm:py-8">
+    <section className="mx-auto grid max-w-screen-2xl gap-5 px-4 py-6 sm:px-6 sm:py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">{kind === 'daily' ? "Today's picks" : 'For you'}</h1>
         <div className="flex items-center gap-2">
-          {kind === 'recommended' ? (
-            <div className="bg-muted flex rounded-lg p-1" role="group" aria-label="Recommendation scope">
-              <Button type="button" size="icon" variant={mode === 'collections' ? 'secondary' : 'ghost'}
-                aria-label="Recommend collections" title="Collections"
-                aria-pressed={mode === 'collections'} onClick={() => selectMode('collections')}>
-                <Layers3 className="size-4" />
-              </Button>
-              <Button type="button" size="icon" variant={mode === 'pages' ? 'secondary' : 'ghost'}
-                aria-label="Recommend individual pages" title="Pages"
-                aria-pressed={mode === 'pages'} onClick={() => selectMode('pages')}>
-                <Images className="size-4" />
-              </Button>
-            </div>
-          ) : null}
+          {kind === 'recommended' ? <RecommendationModeControl value={mode} onChange={selectMode} /> : null}
           <VisualCardViewToggle view={view} onChange={setView} />
         </div>
       </div>
@@ -86,12 +76,17 @@ export function FeedPage({
       {error ? (
         <div className="text-destructive flex items-center gap-2 text-sm" role="alert">
           <span>{error}</span>
-          <Button type="button" size="sm" variant="outline" onClick={retry}>Retry</Button>
+          <Button type="button" size="sm" variant="outline" onClick={retry}>Try again</Button>
         </div>
       ) : null}
-      {loading ? <p className="text-muted-foreground text-sm">Loading…</p> : null}
+      {loading ? (
+        <div role="status" aria-label="Loading"
+          className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-6">
+          {Array.from({ length: 12 }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
+        </div>
+      ) : null}
       {!loading && !error && items.length === 0 ? (
-        <p className="text-muted-foreground rounded-lg border p-6 text-center text-sm">Nothing to show yet.</p>
+        <EmptyState icon={Sparkles} title="Nothing here yet" />
       ) : null}
       {items.length > 0 ? (
         <VisualCardWall cards={items.map(({ card }) => card)} view={view} onNavigate={onNavigate} />

@@ -1,10 +1,13 @@
 import * as React from 'react';
-import { Images, Layers3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Images, Layers3, SearchX, Sparkles } from 'lucide-react';
 
 import { listCards, type Card } from '@/api/cards';
 import { getSource, getTag, type Source, type Tag } from '@/api/catalog';
-import { CatalogFilterBar, type CatalogFilters } from '@/components/catalog-filter-bar';
+import { EmptyState } from '@/components/empty-state';
+import { FilterBar, type CatalogFilters } from '@/components/filter-bar';
 import { Button } from '@/components/ui/button';
+import { Segmented } from '@/components/ui/segmented';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   useVisualCardView,
   VisualCardViewToggle,
@@ -26,7 +29,7 @@ export function CardBrowser({
   renderCaption,
   reloadKey = 0,
   onPageLoaded,
-  emptyMessage = 'No cards yet.',
+  emptyMessage = 'Nothing here yet.',
 }: {
   scope: CardBrowserScope;
   basePath: string;
@@ -141,6 +144,14 @@ export function CardBrowser({
     navigateWith(next);
   }
 
+  function clearLegacy() {
+    const next = new URLSearchParams(currentSearch);
+    next.delete('tags');
+    next.delete('source');
+    next.delete('page');
+    navigateWith(next);
+  }
+
   function goToPage(nextPage: number) {
     const next = new URLSearchParams(currentSearch);
     if (nextPage <= 1) next.delete('page');
@@ -156,43 +167,44 @@ export function CardBrowser({
         {title ?? <span />}
         <div className="flex items-center gap-2">
           {deckId === null ? (
-            <div className="bg-muted flex rounded-lg p-1" role="group" aria-label="Gallery mode">
-              <Button type="button" size="icon" variant={pagesMode ? 'ghost' : 'secondary'}
-                aria-label="Collections" title="Collections"
-                aria-pressed={!pagesMode} onClick={() => selectGalleryMode('collections')}>
-                <Layers3 className="size-4" />
-              </Button>
-              <Button type="button" size="icon" variant={pagesMode ? 'secondary' : 'ghost'}
-                aria-label="Pages" title="Pages"
-                aria-pressed={pagesMode} onClick={() => selectGalleryMode('pages')}>
-                <Images className="size-4" />
-              </Button>
-            </div>
+            <Segmented
+              ariaLabel="Show"
+              value={pagesMode ? 'pages' : 'collections'}
+              onValueChange={selectGalleryMode}
+              options={[
+                { value: 'collections', label: 'Collections', icon: <Layers3 /> },
+                { value: 'pages', label: 'Pages', icon: <Images /> },
+              ]}
+            />
           ) : null}
           <VisualCardViewToggle view={view} onChange={setView} />
         </div>
       </div>
-      <CatalogFilterBar
+      <FilterBar
         filters={{ search, tags, source }}
         legacyActive={legacyActive}
         onChange={applyFilters}
         onClearAll={clearFilters}
+        onClearLegacy={clearLegacy}
       />
       {error ? <div className="flex flex-wrap items-center gap-3" role="alert">
         <p className="text-destructive text-sm">{error}</p>
-        <Button type="button" size="sm" variant="outline" onClick={() => setRetryKey((key) => key + 1)}>Retry</Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setRetryKey((key) => key + 1)}>Try again</Button>
       </div> : null}
-      {loading ? <p className="text-muted-foreground text-sm" role="status">Loading cards…</p> : null}
-      {!loading && !error && cards.length === 0 ? (
-        <div className="text-muted-foreground grid justify-items-center gap-3 rounded-lg border p-6 text-center text-sm">
-          {filtersActive ? <>
-            <p>No matches for the current filters.</p>
-            <Button type="button" variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button>
-          </> : page > 1 ? <>
-            <p>This page is empty.</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => goToPage(1)}>Back to first page</Button>
-          </> : <p>{emptyMessage}</p>}
+      {loading ? (
+        <div role="status" aria-label="Loading"
+          className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-6">
+          {Array.from({ length: 12 }, (_, index) => <Skeleton key={index} className="aspect-square rounded-2xl" />)}
         </div>
+      ) : null}
+      {!loading && !error && cards.length === 0 ? (
+        filtersActive ? (
+          <EmptyState icon={SearchX} title="No matches"
+            action={<Button type="button" variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button>} />
+        ) : page > 1 ? (
+          <EmptyState icon={Sparkles} title="Nothing on this page"
+            action={<Button type="button" variant="outline" size="sm" onClick={() => goToPage(1)}>Back to the start</Button>} />
+        ) : <EmptyState icon={Sparkles} title={emptyMessage} />
       ) : null}
       {!loading && cards.length > 0 ? (
         <VisualCardWall
@@ -202,12 +214,12 @@ export function CardBrowser({
           renderCaption={renderCaption ? (index) => renderCaption(cards[index], index) : undefined}
         />
       ) : null}
-      {!error && (page > 1 || hasNextPage) ? <nav className="flex items-center justify-center gap-3 py-2" aria-label="Card pages">
+      {!error && (page > 1 || hasNextPage) ? <nav className="flex items-center justify-center gap-3 py-2" aria-label="Pages">
         <Button type="button" variant="outline" disabled={loading || page <= 1}
-          onClick={() => goToPage(page - 1)}>Previous</Button>
-        <span className="text-muted-foreground text-sm">Page {page}</span>
+          onClick={() => goToPage(page - 1)}><ChevronLeft className="size-4" />Previous</Button>
+        <span className="text-muted-foreground text-sm tabular-nums">Page {page}</span>
         <Button type="button" variant="outline" disabled={loading || !hasNextPage}
-          onClick={() => goToPage(page + 1)}>Next</Button>
+          onClick={() => goToPage(page + 1)}>Next<ChevronRight className="size-4" /></Button>
       </nav> : null}
     </div>
   );

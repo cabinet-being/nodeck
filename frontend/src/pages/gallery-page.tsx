@@ -12,7 +12,7 @@ export function GalleryPage({
   onNavigateTo: (path: string) => void;
 }) {
   return (
-    <section className="flex flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
+    <section className="mx-auto flex max-w-screen-2xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
       <CardBrowser
         scope={{ kind: 'all' }}
         basePath="/gallery"
@@ -21,7 +21,7 @@ export function GalleryPage({
         onNavigateTo={onNavigateTo}
         viewStorageKey="nodeck.galleryView"
         title={<h1 className="text-2xl font-semibold tracking-tight">Gallery</h1>}
-        emptyMessage="No cards yet. Import some media to get started."
+        emptyMessage="Nothing here yet"
       />
     </section>
   );
