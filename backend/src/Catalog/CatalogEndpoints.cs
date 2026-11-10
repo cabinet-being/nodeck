@@ -5,7 +5,14 @@ public static class CatalogEndpoints
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder app)
     {
         var tags = app.MapGroup("/api/tags");
-        tags.MapGet("", (CatalogRepository repository, string? search) => repository.ListTagsAsync(search));
+        tags.MapGet("", async (CatalogRepository repository, string? search, string? sort, string? category) =>
+        {
+            if (sort is not (null or "name" or "usage"))
+                return Results.BadRequest(new { error = "sort must be name or usage." });
+            if (category is not (null or "general" or "artist" or "character" or "copyright" or "meta" or "custom"))
+                return Results.BadRequest(new { error = "category must be general, artist, character, copyright, meta or custom." });
+            return Results.Ok(await repository.ListTagsAsync(search, sort == "usage", category));
+        });
         tags.MapGet("/{id:long}", async (long id, CatalogRepository repository) =>
             await repository.GetTagAsync(id) is { } tag ? Results.Ok(tag) : Results.NotFound());
         tags.MapPost("", async (TagRequest request, CatalogRepository repository) =>

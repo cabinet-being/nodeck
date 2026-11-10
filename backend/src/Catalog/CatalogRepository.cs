@@ -15,15 +15,35 @@ public sealed class CatalogRepository
             ?? throw new InvalidOperationException("Missing database connection string.");
     }
 
-    public async Task<IReadOnlyList<TagEntry>> ListTagsAsync(string? search)
+    /// <summary>Lists up to 200 tags. <paramref name="byUsage"/> puts the most used tags first;
+    /// without a search it then lists only tags that are in use.</summary>
+    public async Task<IReadOnlyList<TagEntry>> ListTagsAsync(string? search, bool byUsage = false,
+        string? category = null)
     {
         await using var connection = await OpenAsync();
         var term = NormalizeSearch(search);
+        // "custom" means user-created tags; any other value is a tag category.
+        var categoryFilter = category is null ? "" : category == "custom"
+            ? "AND tf.origin = 'user'" : "AND tf.category = @Category AND tf.origin <> 'user'";
         var candidates = term is null
-            ? """
-              SELECT id AS tag_id, 1 AS match_priority FROM tags ORDER BY name, id LIMIT 200
-              """
-            : """
+            ? byUsage
+                ? $"""
+                  SELECT tag_id, 1 AS match_priority FROM (
+                      SELECT ct.tag_id, COUNT(*) AS uses FROM card_tags ct
+                      WHERE ct.legacy_relation_id IS NULL GROUP BY ct.tag_id
+                      UNION ALL
+                      SELECT t.id, COUNT(*) FROM card_relations r JOIN tags t ON t.legacy_card_id = r.to_card_id
+                      WHERE r.relation_type = 'tagged_with' GROUP BY t.id
+                  ) used
+                  JOIN tags tf ON tf.id = used.tag_id
+                  WHERE 1 = 1 {categoryFilter}
+                  GROUP BY tag_id ORDER BY SUM(uses) DESC, tag_id LIMIT 200
+                  """
+                : $"""
+                  SELECT tf.id AS tag_id, 1 AS match_priority FROM tags tf
+                  WHERE 1 = 1 {categoryFilter} ORDER BY tf.name, tf.id LIMIT 200
+                  """
+            : $"""
               SELECT tag_id, MIN(match_priority) AS match_priority
               FROM (
                   SELECT id AS tag_id, CASE WHEN name = @Search THEN 0 ELSE 1 END AS match_priority
@@ -32,6 +52,8 @@ public sealed class CatalogRepository
                   SELECT tag_id, CASE WHEN alias = @Search THEN 0 ELSE 1 END AS match_priority
                   FROM tag_aliases WHERE alias LIKE @Prefix ESCAPE '!'
               ) matches
+              JOIN tags tf ON tf.id = matches.tag_id
+              WHERE 1 = 1 {categoryFilter}
               GROUP BY tag_id
               """;
         var prefix = term is null ? null : term
@@ -47,8 +69,8 @@ public sealed class CatalogRepository
                        WHERE r.relation_type = 'tagged_with' AND r.to_card_id = t.legacy_card_id)) AS ReferenceCount
             FROM ({candidates}) candidates
             JOIN tags t ON t.id = candidates.tag_id
-            ORDER BY candidates.match_priority, t.name, t.id LIMIT 200;
-            """, new { Search = term, Prefix = prefix })).ToList();
+            ORDER BY candidates.match_priority, {(byUsage ? "ReferenceCount DESC, " : "")}t.name, t.id LIMIT 200;
+            """, new { Search = term, Prefix = prefix, Category = category })).ToList();
         await AddAliasesAsync(connection, entries);
         return entries;
     }

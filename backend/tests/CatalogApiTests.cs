@@ -1,4 +1,12 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Dapper;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using MyApp.Api.Cards;
@@ -720,6 +728,203 @@ public sealed class CatalogApiTests
             await connection.ExecuteAsync("DELETE FROM cards WHERE id = @Id;", new { Id = cardId });
             foreach (var tagId in tagIds)
                 await connection.ExecuteAsync("DELETE FROM tags WHERE id = @Id;", new { Id = tagId });
+        }
+    }
+
+    [DatabaseFact]
+    public async Task TagListSortsByNameByDefaultAndByUsageOnRequest()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        await using var api = await TagApi.StartAsync(host.Configuration);
+        var catalog = new CatalogRepository(host.Configuration);
+        var assignments = new CardCatalogRepository(host.Configuration);
+        var heavy = (await catalog.CreateTagAsync(new TagRequest("zz-heavy", null))).Id;
+        var middle = (await catalog.CreateTagAsync(new TagRequest("mm-middle", null))).Id;
+        var light = (await catalog.CreateTagAsync(new TagRequest("aa-light", null))).Id;
+        var unused = (await catalog.CreateTagAsync(new TagRequest("bb-unused", null))).Id;
+        var legacy = (await catalog.CreateTagAsync(new TagRequest("cc-legacy", null))).Id;
+        var cards = new List<long>();
+        for (var i = 0; i < 6; i++) cards.Add(await host.InsertCardAsync("media", $"usage-{i}"));
+        foreach (var card in cards.Take(3)) await assignments.SetTagAsync(card, heavy);
+        foreach (var card in cards.Take(2)) await assignments.SetTagAsync(card, middle);
+        await assignments.SetTagAsync(cards[0], light);
+        // Legacy usage (tagged_with to the legacy tag card) counts too: 4 links beat every catalog tag.
+        var legacyCard = await host.InsertCardAsync("tag", "legacy tag card");
+        await host.Connection.ExecuteAsync("UPDATE tags SET legacy_card_id = @Card WHERE id = @Tag;",
+            new { Card = legacyCard, Tag = legacy });
+        foreach (var card in cards.Take(4))
+            await host.Connection.ExecuteAsync("""
+                INSERT INTO card_relations (from_card_id, to_card_id, relation_type, properties, metadata)
+                VALUES (@From, @To, 'tagged_with', JSON_OBJECT(), JSON_OBJECT());
+                """, new { From = card, To = legacyCard });
+
+        var byDefault = await api.ListAsync("");
+        var byName = await api.ListAsync("sort=name");
+        var byUsage = await api.ListAsync("sort=usage");
+
+        var nameOrder = new[] { light, unused, legacy, middle, heavy };
+        Assert.Equal(nameOrder, byDefault.Select(t => t.Id).ToArray());
+        Assert.Equal(nameOrder, byName.Select(t => t.Id).ToArray());
+        // Unused tags are left out of the usage list without a search.
+        Assert.Equal(new[] { legacy, heavy, middle, light }, byUsage.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { 4, 3, 2, 1 }, byUsage.Select(t => t.ReferenceCount).ToArray());
+        Assert.Contains(unused, byDefault.Select(t => t.Id));
+    }
+
+    [DatabaseFact]
+    public async Task UsageSortWithSearchKeepsExactMatchFirstThenUsageAndFindsUnusedTags()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        await using var api = await TagApi.StartAsync(host.Configuration);
+        var catalog = new CatalogRepository(host.Configuration);
+        var assignments = new CardCatalogRepository(host.Configuration);
+        var exact = (await catalog.CreateTagAsync(new TagRequest("rock", null))).Id;
+        var popular = (await catalog.CreateTagAsync(new TagRequest("rock-popular", null))).Id;
+        var fewer = (await catalog.CreateTagAsync(new TagRequest("rock-fewer", null))).Id;
+        var unused = (await catalog.CreateTagAsync(new TagRequest("rock-aaa-unused", null))).Id;
+        var unrelated = (await catalog.CreateTagAsync(new TagRequest("jazz", null))).Id;
+        var cards = new List<long>();
+        for (var i = 0; i < 4; i++) cards.Add(await host.InsertCardAsync("media", $"search-usage-{i}"));
+        await assignments.SetTagAsync(cards[0], exact);
+        foreach (var card in cards.Take(3)) await assignments.SetTagAsync(card, popular);
+        foreach (var card in cards.Take(2)) await assignments.SetTagAsync(card, fewer);
+        foreach (var card in cards) await assignments.SetTagAsync(card, unrelated);
+
+        var byUsage = await api.ListAsync("search=rock&sort=usage");
+        var byName = await api.ListAsync("search=rock");
+
+        Assert.Equal(new[] { exact, popular, fewer, unused }, byUsage.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { exact, unused, fewer, popular }, byName.Select(t => t.Id).ToArray());
+        Assert.DoesNotContain(unrelated, byUsage.Select(t => t.Id));
+        Assert.Equal(0, byUsage.Single(t => t.Id == unused).ReferenceCount);
+    }
+
+    [DatabaseFact]
+    public async Task InvalidTagSortIsRejected()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        await using var api = await TagApi.StartAsync(host.Configuration);
+
+        foreach (var query in new[] { "sort=popular", "sort=", "sort=USAGE" })
+        {
+            using var response = await api.Client.GetAsync("/api/tags?" + query);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using var body = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("sort must be name or usage.", body!.RootElement.GetProperty("error").GetString());
+        }
+        using var ok = await api.Client.GetAsync("/api/tags?sort=usage");
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+    }
+
+    [DatabaseFact]
+    public async Task CategoryFilterAppliesWithBothSortsAndSearch()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        await using var api = await TagApi.StartAsync(host.Configuration);
+        var catalog = new CatalogRepository(host.Configuration);
+        var assignments = new CardCatalogRepository(host.Configuration);
+        async Task<long> ImportedAsync(string name, string category) =>
+            await host.Connection.ExecuteScalarAsync<long>("""
+                INSERT INTO tags (name, canonical_key, category, origin)
+                VALUES (@Name, @Key, @Category, 'danbooru');
+                SELECT LAST_INSERT_ID();
+                """, new { Name = name, Key = "danbooru:" + name, Category = category });
+        var artistZ = await ImportedAsync("artist-zed", "artist");
+        var artistM = await ImportedAsync("artist-mid", "artist");
+        var artistUnused = await ImportedAsync("artist-unused", "artist");
+        var character = await ImportedAsync("char-one", "character");
+        // A user tag whose category is also 'artist' must not pass the artist filter (origin 'user').
+        var userArtist = await ImportedAsync("user-fake-artist", "artist");
+        await host.Connection.ExecuteAsync("UPDATE tags SET origin = 'user' WHERE id = @Id;", new { Id = userArtist });
+        var custom = (await catalog.CreateTagAsync(new TagRequest("my-custom", null))).Id;
+        var customUnused = (await catalog.CreateTagAsync(new TagRequest("aaa-custom-unused", null))).Id;
+        var cards = new List<long>();
+        for (var i = 0; i < 4; i++) cards.Add(await host.InsertCardAsync("media", $"category-{i}"));
+        foreach (var card in cards.Take(1)) await assignments.SetTagAsync(card, artistZ);
+        foreach (var card in cards.Take(3)) await assignments.SetTagAsync(card, artistM);
+        foreach (var card in cards) await assignments.SetTagAsync(card, character);
+        foreach (var card in cards) await assignments.SetTagAsync(card, userArtist);
+        foreach (var card in cards.Take(2)) await assignments.SetTagAsync(card, custom);
+
+        var artistsByUsage = await api.ListAsync("category=artist&sort=usage");
+        var artistsByName = await api.ListAsync("category=artist");
+        var artistSearch = await api.ListAsync("category=artist&search=artist&sort=usage");
+        var customByUsage = await api.ListAsync("category=custom&sort=usage");
+        var customByName = await api.ListAsync("category=custom");
+        var characterSearch = await api.ListAsync("category=character&search=artist");
+
+        // Only that category's used tags, most used first.
+        Assert.Equal(new[] { artistM, artistZ }, artistsByUsage.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { artistM, artistUnused, artistZ }, artistsByName.Select(t => t.Id).ToArray());
+        // With search the unused matching tag is found again, still within the category and in usage order.
+        Assert.Equal(new[] { artistM, artistZ, artistUnused }, artistSearch.Select(t => t.Id).ToArray());
+        // Custom means user-created tags only: includes the user-origin 'artist' row, never imported ones.
+        Assert.Equal(new[] { userArtist, custom }, customByUsage.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { customUnused, custom, userArtist }, customByName.Select(t => t.Id).ToArray());
+        Assert.Empty(characterSearch);
+        Assert.DoesNotContain(character, artistsByName.Select(t => t.Id));
+    }
+
+    [DatabaseFact]
+    public async Task InvalidTagCategoryIsRejected()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        await using var api = await TagApi.StartAsync(host.Configuration);
+
+        foreach (var query in new[] { "category=bogus", "category=", "category=Artist" })
+        {
+            using var response = await api.Client.GetAsync("/api/tags?" + query);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using var body = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            Assert.Equal("category must be general, artist, character, copyright, meta or custom.",
+                body!.RootElement.GetProperty("error").GetString());
+        }
+        foreach (var valid in new[] { "general", "artist", "character", "copyright", "meta", "custom" })
+        {
+            using var ok = await api.Client.GetAsync($"/api/tags?category={valid}");
+            Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        }
+    }
+
+    private sealed record TagRow(long Id, string Name, int ReferenceCount);
+
+    /// <summary>Minimal Kestrel host mapping only the catalog endpoints over a given configuration.</summary>
+    private sealed class TagApi : IAsyncDisposable
+    {
+        private readonly WebApplication _app;
+        public HttpClient Client { get; }
+
+        private TagApi(WebApplication app, HttpClient client) { _app = app; Client = client; }
+
+        public static async Task<TagApi> StartAsync(IConfiguration configuration)
+        {
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.Configuration.AddConfiguration(configuration);
+            builder.Services.AddScoped<CatalogRepository>();
+            builder.Services.AddScoped<CardCatalogRepository>();
+            var app = builder.Build();
+            app.MapCatalogEndpoints();
+            await app.StartAsync();
+            var address = app.Services.GetRequiredService<IServer>().Features
+                .Get<IServerAddressesFeature>()!.Addresses.Single();
+            return new TagApi(app, new HttpClient { BaseAddress = new Uri(address) });
+        }
+
+        public async Task<TagRow[]> ListAsync(string query)
+        {
+            using var response = await Client.GetAsync("/api/tags?" + query);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var body = await response.Content.ReadFromJsonAsync<JsonDocument>();
+            return body!.RootElement.EnumerateArray().Select(e => new TagRow(
+                e.GetProperty("id").GetInt64(), e.GetProperty("name").GetString()!,
+                e.GetProperty("referenceCount").GetInt32())).ToArray();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Client.Dispose();
+            await _app.DisposeAsync();
         }
     }
 
