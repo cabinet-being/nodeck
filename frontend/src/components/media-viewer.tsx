@@ -1,8 +1,8 @@
 import * as React from 'react';
-import { Expand, Maximize2, Minimize2, Shrink } from 'lucide-react';
+import { Download, Expand, Maximize2, Minimize2, Shrink } from 'lucide-react';
 
 import { resolveApiUrl } from '@/api/cards';
-import { Button } from '@/components/ui/button';
+import { stageButtonClass } from '@/components/media-stage';
 import { cn } from '@/lib/utils';
 
 type MediaViewerProps = {
@@ -14,11 +14,13 @@ type MediaViewerProps = {
   fallbackSrc?: string | null;
   contentRef?: React.Ref<HTMLDivElement>;
   className?: string;
-  /** Extra controls rendered in the toolbar. */
+  /** Extra controls rendered in the overlay toolbar. */
   toolbar?: React.ReactNode;
+  /** When set, the overlay toolbar offers a download link for the original file. */
+  originalUrl?: string | null;
 };
 
-export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef, className, toolbar }: MediaViewerProps) {
+export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef, className, toolbar, originalUrl }: MediaViewerProps) {
   const frameRef = React.useRef<HTMLDivElement>(null);
   const [actualSize, setActualSize] = React.useState(false);
   const [fullscreen, setFullscreen] = React.useState(false);
@@ -41,31 +43,38 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
   const imageSrc = failed && fallbackSrc ? fallbackSrc : src;
 
   return (
-    <div ref={frameRef} className={cn('grid min-w-0 gap-2', fullscreen && 'bg-background h-dvh content-start p-2', className)}>
-      <div className="flex flex-wrap items-center justify-end gap-2">
+    <div ref={frameRef} className={cn('bg-stage text-stage-foreground relative min-w-0', fullscreen && 'h-dvh', className)}>
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
         {toolbar}
         {kind === 'image' ? (
-          <Button type="button" size="sm" variant="outline" aria-pressed={actualSize} onClick={() => setActualSize((value) => !value)}
-            aria-label={actualSize ? 'Fit image to screen' : 'Show image at actual size'}>
-            {actualSize ? <Shrink className="size-4" /> : <Expand className="size-4" />}
-            {actualSize ? 'Fit' : 'Actual size'}
-          </Button>
+          <button type="button" className={stageButtonClass} aria-pressed={actualSize} onClick={() => setActualSize((value) => !value)}
+            aria-label={actualSize ? 'Fit image to screen' : 'Show image at actual size'}
+            title={actualSize ? 'Fit to screen' : 'Actual size'}>
+            {actualSize ? <Shrink /> : <Expand />}
+          </button>
         ) : null}
         {canFullscreen ? (
-          <Button type="button" size="sm" variant="outline" onClick={toggleFullscreen}
-            aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
-            {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-          </Button>
+          <button type="button" className={stageButtonClass} onClick={toggleFullscreen}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+            {fullscreen ? <Minimize2 /> : <Maximize2 />}
+          </button>
+        ) : null}
+        {originalUrl ? (
+          <a href={resolveApiUrl(originalUrl)} download className={stageButtonClass}
+            aria-label="Download original" title="Download original">
+            <Download />
+          </a>
         ) : null}
       </div>
       <div
         ref={contentRef}
         className={cn(
-          'bg-muted flex items-center justify-center rounded-xl',
+          'flex items-center justify-center',
           kind === 'image' && actualSize ? 'overflow-auto' : 'overflow-hidden',
-          fullscreen ? 'min-h-0 flex-1' : 'min-h-[20rem] sm:min-h-[28rem]',
+          fullscreen ? 'h-full' : 'min-h-[16rem] sm:min-h-[28rem]',
         )}
-        style={fullscreen ? { maxHeight: 'calc(100dvh - 4rem)' } : { maxHeight: 'calc(100dvh - 8rem)' }}
+        style={fullscreen ? undefined : { maxHeight: 'calc(100dvh - 7rem)' }}
       >
         {kind === 'video' ? (
           <video
@@ -74,7 +83,7 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
             controls
             playsInline
             preload="metadata"
-            className={cn('max-w-full object-contain', fullscreen ? 'max-h-[calc(100dvh-4rem)]' : 'max-h-[calc(100dvh-8rem)]')}
+            className={cn('max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]')}
           />
         ) : (
           <img
@@ -84,7 +93,7 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
             className={cn(
               actualSize
                 ? 'max-h-none max-w-none'
-                : cn('max-w-full object-contain', fullscreen ? 'max-h-[calc(100dvh-4rem)]' : 'max-h-[calc(100dvh-8rem)]'),
+                : cn('max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]'),
             )}
           />
         )}

@@ -8,8 +8,12 @@ import {
   removeCardFromDeck,
   type DeckSummary,
 } from '@/api/decks';
+import { Layers } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Skeleton } from '@/components/ui/skeleton';
 
 type MembershipState = {
   cardId: number;
@@ -17,7 +21,19 @@ type MembershipState = {
   memberIds: Set<number>;
 };
 
-export function DeckMembershipControl({ cardId }: { cardId: number }) {
+export function DeckMembershipControl({
+  cardId,
+  open: openProp,
+  onOpenChange,
+  onMembershipChange,
+}: {
+  cardId: number;
+  /** Controlled open state; the popover manages itself when omitted. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Called after a deck was added, removed or created so listings of the card's decks can refresh. */
+  onMembershipChange?: () => void;
+}) {
   const [state, setState] = React.useState<MembershipState | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [saveError, setSaveError] = React.useState<string | null>(null);
@@ -26,7 +42,9 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
   const [search, setSearch] = React.useState('');
   const [newTitle, setNewTitle] = React.useState('');
   const [creating, setCreating] = React.useState(false);
-  const [opened, setOpened] = React.useState(false);
+  const [innerOpen, setInnerOpen] = React.useState(false);
+  const opened = openProp ?? innerOpen;
+  const setOpened = (next: boolean) => { setInnerOpen(next); onOpenChange?.(next); };
   const currentCardId = React.useRef(cardId);
   currentCardId.current = cardId;
 
@@ -68,6 +86,7 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
         ? await removeCardFromDeck(deckId, cardId)
         : await addCardToDeck(deckId, cardId);
       if (currentCardId.current !== cardId) return;
+      onMembershipChange?.();
 
       setState((current) => {
         if (!current || current.cardId !== cardId) return current;
@@ -101,6 +120,7 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
     try {
       const created = await createDeck({ title, cards: [{ cardId }] });
       if (currentCardId.current !== cardId) return;
+      onMembershipChange?.();
       setState((current) => {
         if (!current || current.cardId !== cardId) return current;
         const memberIds = new Set(current.memberIds);
@@ -132,12 +152,17 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
     : [];
 
   return (
-    <details className="rounded-lg border" aria-label="Deck membership"
-      onToggle={(event) => setOpened(event.currentTarget.open)}>
-      <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Decks</summary>
-      <div className="border-t p-4">
+    <Popover open={opened} onOpenChange={(next) => setOpened(next)}>
+      <PopoverTrigger render={<Button type="button" variant="outline" aria-label="Add to deck" />}>
+        <Layers className="size-4" /> Deck
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)]" aria-label="Deck membership">
+      <div>
         {!visibleState && !loadError ? (
-          <p className="text-muted-foreground text-sm" role="status">Loading decks...</p>
+          <div className="grid gap-2" role="status" aria-label="Loading decks">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
         ) : null}
         {!visibleState && loadError ? (
           <div className="space-y-2">
@@ -174,6 +199,7 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
                     type="button"
                     variant={isMember ? 'outline' : 'secondary'}
                     size="sm"
+                    className="pointer-coarse:h-11"
                     disabled={savingId !== null}
                     aria-label={savingId === deck.id
                       ? `Saving ${deck.title}`
@@ -204,6 +230,7 @@ export function DeckMembershipControl({ cardId }: { cardId: number }) {
         ) : null}
         {saveError ? <p className="text-destructive mt-2 text-sm" role="alert">{saveError}</p> : null}
       </div>
-    </details>
+      </PopoverContent>
+    </Popover>
   );
 }

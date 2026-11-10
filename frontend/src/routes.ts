@@ -38,7 +38,7 @@ export const routes: { primary: RouteItem[]; library: RouteItem[]; create: Route
 
 export function isRouteActive(currentPath: string, path: string) {
   if (path === '/') return currentPath === '/';
-  if (path === '/cards') return currentPath === '/cards' || /^\/cards\/\d+(\/edit)?$/.test(currentPath);
+  if (path === '/cards') return currentPath === '/cards';
   if (path === '/decks') return currentPath === '/decks' || /^\/decks\/\d+(\/edit)?$/.test(currentPath);
   return currentPath === path || currentPath.startsWith(`${path}/`);
 }

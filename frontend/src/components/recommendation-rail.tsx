@@ -10,8 +10,10 @@ export { Rail as CardRail, type RailCard } from '@/components/rail';
 export function RecommendationRail({
   contextCardId,
   onNavigate,
+  title = 'Recommended',
 }: {
   contextCardId?: number;
+  title?: string;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const [mode, setMode] = React.useState<RecommendationMode>('collections');
@@ -35,7 +37,7 @@ export function RecommendationRail({
   }, [contextCardId, mode, requestVersion]);
 
   return (
-    <Rail title="Recommended" cards={items.map(({ card }) => card)} onNavigate={onNavigate}
+    <Rail title={title} cards={items.map(({ card }) => card)} onNavigate={onNavigate}
       loading={loading} error={error} onRetry={retry}
       viewAllHref={`/feed/recommended?mode=${mode}${contextCardId ? `&contextCardId=${contextCardId}` : ''}`}
       controls={<RecommendationModeControl value={mode} onChange={setMode} />}

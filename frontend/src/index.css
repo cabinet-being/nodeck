@@ -40,6 +40,8 @@
     --color-foreground: var(--foreground);
     --color-background: var(--background);
     --color-surface: var(--surface);
+    --color-stage: var(--stage);
+    --color-stage-foreground: var(--stage-foreground);
     --color-surface-foreground: var(--foreground);
     --color-grid-dot: var(--grid-dot);
     --color-tag-general: var(--tag-general);
@@ -74,6 +76,8 @@
     --background: oklch(0.985 0.003 260);
     --foreground: oklch(0.2 0.02 265);
     --surface: oklch(1 0 0);
+    --stage: oklch(0.18 0.01 265);
+    --stage-foreground: oklch(0.96 0.005 265);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.2 0.02 265);
     --popover: oklch(1 0 0);
@@ -130,6 +134,8 @@
     --background: oklch(0.16 0.01 265);
     --foreground: oklch(0.96 0.005 265);
     --surface: oklch(0.205 0.012 265);
+    --stage: oklch(0.12 0.008 265);
+    --stage-foreground: oklch(0.96 0.005 265);
     --card: oklch(0.205 0.012 265);
     --card-foreground: oklch(0.96 0.005 265);
     --popover: oklch(0.225 0.013 265);

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check, ChevronDown, Pencil, Plus, Save, X } from 'lucide-react';
+import { Check, ExternalLink, Globe, MoreHorizontal, Pencil, Save, Tag as TagIcon, Wand2, X } from 'lucide-react';
 
 import {
   correctTagSuggestion, createSource, createTag, decideTagSuggestion, decideTagSuggestions, deleteCardSource, deleteCardTag,
@@ -7,14 +7,22 @@ import {
   setCardSource, setCardTag, type CardSource, type CardTag, type Source, type Tag,
   type TagSuggestion,
 } from '@/api/catalog';
-import { TagChip } from '@/components/tag-chip';
+import { ConnectionStrip, type ConnectionGroup } from '@/components/connection-strip';
+import { NodeChip } from '@/components/node-chip';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
+import { Tooltip } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
-export function CardCatalogPanel({ cardId, metadata }: {
+export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigate }: {
   cardId: number;
   metadata: Record<string, unknown>;
+  /** Groups appended after Sources (for example Decks and Related cards). */
+  extraGroups?: ConnectionGroup[];
+  onNavigate?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const [tags, setTags] = React.useState<CardTag[]>([]);
   const [suggestions, setSuggestions] = React.useState<TagSuggestion[]>([]);
@@ -27,14 +35,17 @@ export function CardCatalogPanel({ cardId, metadata }: {
   const [sourceDrafts, setSourceDrafts] = React.useState<Record<number, string>>({});
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [suggestionsOpen, setSuggestionsOpen] = React.useState(false);
+  const [selectMode, setSelectMode] = React.useState(false);
+  const [showAllTags, setShowAllTags] = React.useState(false);
+  const [editingSourceId, setEditingSourceId] = React.useState<number | null>(null);
   const [showAllSuggestions, setShowAllSuggestions] = React.useState(false);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = React.useState<number[]>([]);
   const [correcting, setCorrecting] = React.useState<TagSuggestion | null>(null);
-  const suggestionsId = React.useId();
 
   React.useEffect(() => {
-    setSuggestionsOpen(false);
+    setSelectMode(false);
+    setShowAllTags(false);
+    setEditingSourceId(null);
     setShowAllSuggestions(false);
     setSelectedSuggestionIds([]);
   }, [cardId]);
@@ -84,129 +95,165 @@ export function CardCatalogPanel({ cardId, metadata }: {
       setSelectedSuggestionIds([]);
   }
 
-  const technical = [
-    metadata.media_type,
-    metadata.has_audio === true ? 'audio' : null,
-    typeof metadata.width === 'number' && typeof metadata.height === 'number'
-      ? `${metadata.width} × ${metadata.height}` : null,
-  ].filter((value): value is string => typeof value === 'string');
-  const reviewedTags = tags.filter((tag) => tag.assignmentSource !== 'auto');
-  const automaticTags = tags.filter((tag) => tag.assignmentSource === 'auto');
+  const suggestionById = new Map(suggestions.map((suggestion) => [suggestion.tagId, suggestion]));
+  const assignedIds = new Set(tags.map((tag) => tag.id));
+  const settledTags = tags.filter((tag) => !suggestionById.has(tag.id));
+  const pendingTags = tags.filter((tag) => suggestionById.has(tag.id));
+  const orderedTags = [...settledTags, ...pendingTags];
+  const visibleTags = showAllTags ? orderedTags : orderedTags.slice(0, 8);
+  const unassignedSuggestions = suggestions.filter((suggestion) => !assignedIds.has(suggestion.tagId));
+  const visibleSuggestions = showAllSuggestions ? unassignedSuggestions : unassignedSuggestions.slice(0, 8);
+  const file = fileSummary(metadata);
+
+  function startPicker(next: 'tag' | 'source') {
+    setMode(next); setSearch(''); setChoices([]); setSourceUrl(''); setError(null);
+  }
+
+  function chipHref(tagId: number) {
+    return onNavigate ? `/gallery?catalog_tags=${tagId}` : undefined;
+  }
+
+  const tagNodes = visibleTags.map((tag) => {
+    const pending = suggestionById.get(tag.id);
+    if (pending) return renderSuggestion(pending);
+    return <NodeChip key={`t${tag.id}`} kind="tag" label={tag.name} category={tag.category} origin={tag.origin}
+      href={chipHref(tag.id)} onNavigate={onNavigate} onRemove={() => { if (!busy) void run(() => deleteCardTag(cardId, tag.id)); }} />;
+  });
+
+  function renderSuggestion(suggestion: TagSuggestion) {
+    const selected = selectedSuggestionIds.includes(suggestion.tagId);
+    return (
+      <span key={suggestion.tagId}
+        className="group/s inline-flex max-w-full min-w-0 items-center gap-0.5 pointer-coarse:flex pointer-coarse:justify-between">
+        {selectMode ? (
+          <label className="inline-flex size-6 shrink-0 items-center justify-center pointer-coarse:size-11">
+            <Checkbox aria-label={`Select ${suggestion.name}`} checked={selected} disabled={busy}
+              onCheckedChange={(checked) => setSelectedSuggestionIds((current) => checked
+                ? [...current, suggestion.tagId] : current.filter((id) => id !== suggestion.tagId))} />
+          </label>
+        ) : null}
+        <Tooltip label={confidenceLabel(suggestion.confidence)} side="top">
+          <span className="inline-flex min-w-0">
+            <NodeChip kind="tag" suggested label={suggestion.name} category={suggestion.category} origin={suggestion.origin} />
+          </span>
+        </Tooltip>
+        <span className="inline-flex shrink-0 items-center opacity-0 transition-opacity group-focus-within/s:opacity-100 group-hover/s:opacity-100 pointer-coarse:opacity-100">
+          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11"
+            aria-label={`Accept ${suggestion.name}`} title="Accept" disabled={busy}
+            onClick={() => void run(() => decideTagSuggestion(cardId, suggestion.tagId, 'accepted'))}>
+            <Check />
+          </Button>
+          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11"
+            aria-label={`Reject ${suggestion.name}`} title="Reject" disabled={busy}
+            onClick={() => void run(() => decideTagSuggestion(cardId, suggestion.tagId, 'rejected'))}>
+            <X />
+          </Button>
+          <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11"
+            aria-label={`Correct ${suggestion.name}`} title="Replace with another tag" disabled={busy}
+            onClick={() => { setCorrecting(suggestion); setMode('tag'); setSearch(''); setChoices([]); setError(null); }}>
+            <Pencil />
+          </Button>
+        </span>
+      </span>
+    );
+  }
+
+  const suggestionNodes = visibleSuggestions.map(renderSuggestion);
+
+  const suggestionActions = suggestions.length > 0 ? (
+    <>
+      <span className="bg-primary/10 text-primary rounded-full px-2 py-0.5 text-xs font-medium tabular-nums">{suggestions.length} to review</span>
+      {selectMode ? (
+        <>
+          <Button type="button" size="sm" variant="secondary" className="pointer-coarse:h-11"
+            disabled={busy || selectedSuggestionIds.length === 0}
+            onClick={() => void reviewMany('accepted', selectedSuggestionIds)}>Accept ({selectedSuggestionIds.length})</Button>
+          <Button type="button" size="sm" variant="secondary" className="pointer-coarse:h-11"
+            disabled={busy || selectedSuggestionIds.length === 0}
+            onClick={() => void reviewMany('rejected', selectedSuggestionIds)}>Reject ({selectedSuggestionIds.length})</Button>
+          <Button type="button" size="sm" variant="ghost" className="pointer-coarse:h-11"
+            onClick={() => { setSelectMode(false); setSelectedSuggestionIds([]); }}>Done</Button>
+        </>
+      ) : (
+        <>
+          <Button type="button" size="sm" variant="ghost" className="pointer-coarse:h-11"
+            onClick={() => setSelectMode(true)}>Select</Button>
+          <Menu>
+            <MenuTrigger render={<Button type="button" size="icon-sm" variant="ghost" className="pointer-coarse:size-11"
+              aria-label="Review all suggestions" disabled={busy} />}>
+              <MoreHorizontal className="size-4" />
+            </MenuTrigger>
+            <MenuContent>
+              <MenuItem onClick={() => void reviewMany('accepted')}><Check /> Accept all</MenuItem>
+              <MenuItem onClick={() => void reviewMany('rejected')}><X /> Reject all</MenuItem>
+            </MenuContent>
+          </Menu>
+        </>
+      )}
+    </>
+  ) : null;
+
+  const sourceNodes = sources.map((source) => (
+    <React.Fragment key={source.id}>
+      <span className="inline-flex max-w-full min-w-0 items-center gap-0.5">
+        <NodeChip kind="source" label={source.name}
+          onRemove={() => { if (!busy) void run(() => deleteCardSource(cardId, source.id)); }} />
+        {source.originalUrl ? (
+          <a href={source.originalUrl} target="_blank" rel="noreferrer noopener" aria-label={`Open original for ${source.name}`}
+            title="Open original"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-6 items-center justify-center rounded-md pointer-coarse:size-11">
+            <ExternalLink className="size-3.5" />
+          </a>
+        ) : null}
+        <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-11"
+          aria-label={`Edit URL for ${source.name}`} title="Edit original URL" aria-expanded={editingSourceId === source.id}
+          onClick={() => setEditingSourceId((current) => current === source.id ? null : source.id)}>
+          <Pencil />
+        </Button>
+      </span>
+      {editingSourceId === source.id ? (
+        <div className="flex w-full gap-2">
+          <Input aria-label={`Original URL for ${source.name}`} value={sourceDrafts[source.id] ?? ''}
+            onChange={(event) => setSourceDrafts((current) => ({ ...current, [source.id]: event.target.value }))}
+            placeholder="Original URL" />
+          <Button type="button" size="icon" variant="outline" aria-label={`Save URL for ${source.name}`}
+            disabled={busy} onClick={() => void run(() => setCardSource(cardId, source.id, sourceDrafts[source.id] ?? '')).then((ok) => { if (ok) setEditingSourceId(null); })}>
+            <Save className="size-4" />
+          </Button>
+        </div>
+      ) : null}
+    </React.Fragment>
+  ));
+
+  const groups: ConnectionGroup[] = [
+    {
+      key: 'tags', label: 'Tags', icon: TagIcon, nodes: tagNodes, count: tags.length, empty: 'No tags',
+      onAdd: () => startPicker('tag'), addLabel: 'Add tag', actions: suggestionActions, stacked: true,
+      footer: !showAllTags && orderedTags.length > 8 ? (
+        <Button type="button" variant="ghost" size="xs" className="justify-self-start pointer-coarse:h-11"
+          onClick={() => setShowAllTags(true)}>+{orderedTags.length - 8} more</Button>
+      ) : null,
+    },
+    {
+      key: 'suggested', label: 'Suggested', icon: Wand2, nodes: suggestionNodes, count: unassignedSuggestions.length,
+      hideWhenEmpty: true, stacked: true,
+      footer: !showAllSuggestions && unassignedSuggestions.length > 8 ? (
+        <Button type="button" variant="ghost" size="xs" className="justify-self-start pointer-coarse:h-11"
+          onClick={() => setShowAllSuggestions(true)}>+{unassignedSuggestions.length - 8} more</Button>
+      ) : null,
+    },
+    {
+      key: 'sources', label: 'Sources', icon: Globe, nodes: sourceNodes, empty: 'No sources',
+      onAdd: () => startPicker('source'), addLabel: 'Add source',
+    },
+    ...extraGroups,
+  ];
 
   return (
-    <section className="grid gap-4 rounded-lg border p-4">
-      {technical.length > 0 ? <div className="flex flex-wrap gap-2" aria-label="File properties">
-        {technical.map((value) => <span key={value}
-          className="rounded-full border border-orange-500/40 bg-orange-500/10 px-2.5 py-1 text-xs font-medium text-orange-700 dark:text-orange-300">
-          {value}
-        </span>)}
-      </div> : null}
-
-      <div className="grid gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Tags</h2>
-          <Button type="button" size="icon-sm" variant="ghost" aria-label="Add tag"
-            onClick={() => { setMode('tag'); setSearch(''); setChoices([]); setError(null); }}><Plus className="size-4" /></Button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {reviewedTags.map((tag) => <span key={tag.id} className="inline-flex items-center gap-1">
-            <TagChip name={tag.name} category={tag.category} origin={tag.origin} />
-            <Button type="button" size="icon-xs" variant="ghost"
-              aria-label={`Remove ${tag.name}`} title="Remove tag"
-              disabled={busy} onClick={() => run(() => deleteCardTag(cardId, tag.id))}><X className="size-3" /></Button>
-          </span>)}
-          {automaticTags.slice(0, 6).map((tag) => <span key={tag.id}
-            title="Added automatically; awaiting review"><TagChip name={tag.name} category={tag.category} origin={tag.origin} /></span>)}
-          {automaticTags.length > 6 ? <Button type="button" variant="ghost" size="xs"
-            onClick={() => { setSuggestionsOpen(true); setShowAllSuggestions(true); }}>
-            +{automaticTags.length - 6} automatic
-          </Button> : null}
-          {tags.length === 0 ? <span className="text-muted-foreground text-xs">No tags</span> : null}
-        </div>
-      </div>
-
-      {suggestions.length > 0 ? <div className="grid gap-2" aria-label="Suggested tags">
-        <h3>
-          <Button type="button" variant="ghost" size="sm" className="w-full justify-between px-2"
-            aria-expanded={suggestionsOpen} aria-controls={suggestionsId}
-            onClick={() => setSuggestionsOpen((open) => !open)}>
-            <span>Automatic tags <span className="text-muted-foreground">({suggestions.length} to review)</span></span>
-            <ChevronDown className={`size-4 transition-transform ${suggestionsOpen ? 'rotate-180' : ''}`} />
-          </Button>
-        </h3>
-        <div id={suggestionsId} className={suggestionsOpen ? 'grid gap-2' : ''}>
-          {suggestionsOpen ? <>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" disabled={busy}
-                onClick={() => void reviewMany('accepted')}>Approve all</Button>
-              <Button type="button" variant="outline" size="sm" disabled={busy}
-                onClick={() => void reviewMany('rejected')}>Reject all</Button>
-              {selectedSuggestionIds.length > 0 ? <>
-                <Button type="button" variant="secondary" size="sm" disabled={busy}
-                  onClick={() => void reviewMany('accepted', selectedSuggestionIds)}>Approve selected ({selectedSuggestionIds.length})</Button>
-                <Button type="button" variant="secondary" size="sm" disabled={busy}
-                  onClick={() => void reviewMany('rejected', selectedSuggestionIds)}>Reject selected ({selectedSuggestionIds.length})</Button>
-              </> : null}
-            </div>
-            <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto">
-            {(showAllSuggestions ? suggestions : suggestions.slice(0, 8)).map((suggestion) => <span key={suggestion.tagId}
-            className="inline-flex items-center gap-1 rounded-full border px-1.5 py-1"
-            title={suggestion.modelKey ? `Suggested by ${suggestion.modelKey}` : undefined}>
-            <input type="checkbox" className="ml-1" aria-label={`Select ${suggestion.name}`}
-              checked={selectedSuggestionIds.includes(suggestion.tagId)} disabled={busy}
-              onChange={(event) => setSelectedSuggestionIds((current) => event.target.checked
-                ? [...current, suggestion.tagId] : current.filter((id) => id !== suggestion.tagId))} />
-            <TagChip name={suggestion.name} category={suggestion.category} origin={suggestion.origin} />
-            <span className="text-muted-foreground text-xs">{Math.round(suggestion.confidence * 100)}%</span>
-            <Button type="button" size="icon-xs" variant="ghost"
-              aria-label={`Accept ${suggestion.name}`} disabled={busy}
-              onClick={() => run(() => decideTagSuggestion(cardId, suggestion.tagId, 'accepted'))}>
-              <Check className="size-3" />
-            </Button>
-            <Button type="button" size="icon-xs" variant="ghost"
-              aria-label={`Reject ${suggestion.name}`} disabled={busy}
-              onClick={() => run(() => decideTagSuggestion(cardId, suggestion.tagId, 'rejected'))}>
-              <X className="size-3" />
-            </Button>
-            <Button type="button" size="icon-xs" variant="ghost"
-              aria-label={`Correct ${suggestion.name}`} title="Replace with another tag" disabled={busy}
-              onClick={() => { setCorrecting(suggestion); setMode('tag'); setSearch(''); setChoices([]); setError(null); }}>
-              <Pencil className="size-3" />
-            </Button>
-            </span>)}
-            </div>
-            {!showAllSuggestions && suggestions.length > 8 ? <Button type="button" variant="ghost" size="sm"
-              className="justify-self-start" onClick={() => setShowAllSuggestions(true)}>
-              Show all {suggestions.length} suggestions
-            </Button> : null}
-          </> : null}
-        </div>
-      </div> : null}
-
-      <div className="grid gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold">Sources</h2>
-          <Button type="button" size="icon-sm" variant="ghost" aria-label="Add source"
-            onClick={() => { setMode('source'); setSearch(''); setChoices([]); setSourceUrl(''); setError(null); }}><Plus className="size-4" /></Button>
-        </div>
-        {sources.map((source) => <div key={source.id} className="grid gap-2 rounded-lg border p-2">
-          <div className="flex items-center justify-between gap-2 text-sm">
-            <span className="font-medium">{source.name}</span>
-            <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove ${source.name}`}
-              disabled={busy} onClick={() => run(() => deleteCardSource(cardId, source.id))}><X className="size-3" /></Button>
-          </div>
-          <div className="flex gap-2">
-            <Input aria-label={`Original URL for ${source.name}`} value={sourceDrafts[source.id] ?? ''}
-              onChange={(event) => setSourceDrafts((current) => ({ ...current, [source.id]: event.target.value }))}
-              placeholder="Original URL" />
-            <Button type="button" size="icon" variant="outline" aria-label={`Save URL for ${source.name}`}
-              disabled={busy} onClick={() => run(() => setCardSource(cardId, source.id, sourceDrafts[source.id] ?? ''))}>
-              <Save className="size-4" />
-            </Button>
-          </div>
-        </div>)}
-        {sources.length === 0 ? <span className="text-muted-foreground text-xs">No sources</span> : null}
-      </div>
+    <>
+      <ConnectionStrip groups={groups} footer={file ? (
+        <NodeChip kind="file" size="sm" label={file} className={cn('border-transparent bg-transparent px-0 font-normal text-muted-foreground')} />
+      ) : null} />
       {error && !mode ? <p className="text-destructive text-xs">{error}</p> : null}
 
       <Dialog open={mode !== null} title={correcting ? `Correct ${correcting.name}` : mode === 'tag' ? 'Add tag' : 'Add source'}
@@ -244,8 +291,41 @@ export function CardCatalogPanel({ cardId, metadata }: {
               }, true)}>Create “{search.trim()}”</Button> : null}
         </div>
       </Dialog>
-    </section>
+    </>
   );
+}
+
+
+function fileSummary(metadata: Record<string, unknown>): string | null {
+  const parts: string[] = [];
+  if (typeof metadata.width === 'number' && typeof metadata.height === 'number') parts.push(`${metadata.width}×${metadata.height}`);
+  if (typeof metadata.media_type === 'string') parts.push(metadata.media_type);
+  if (typeof metadata.file_size === 'number') parts.push(formatBytes(metadata.file_size));
+  if (typeof metadata.duration === 'number' && metadata.duration > 0) parts.push(formatDuration(metadata.duration));
+  const codecs = [metadata.video_codec, metadata.audio_codec].filter((value): value is string => typeof value === 'string' && value !== '');
+  if (codecs.length > 0) parts.push(codecs.join('/'));
+  else if (metadata.has_audio === true) parts.push('audio');
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function formatDuration(seconds: number) {
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+function confidenceLabel(confidence: number) {
+  if (confidence >= 0.8) return 'Suggested · high confidence';
+  if (confidence >= 0.5) return 'Suggested · medium confidence';
+  return 'Suggested · low confidence';
 }
 
 function message(cause: unknown) {

@@ -187,7 +187,7 @@ function RouteContent({
   const cardMatch = currentPath.match(/^\/cards\/(\d+)$/);
 
   if (cardMatch) {
-    return <CardDetailsPage cardId={Number(cardMatch[1])} onNavigate={onNavigate} />;
+    return <CardDetailsPage cardId={Number(cardMatch[1])} onNavigate={onNavigate} onNavigateTo={onNavigateTo} />;
   }
 
   const deckMatch = currentPath.match(/^\/decks\/(\d+)$/);

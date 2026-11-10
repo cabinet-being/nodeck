@@ -1,30 +1,39 @@
 import * as React from 'react';
+import { ImageOff } from 'lucide-react';
 
-import { getCard, getCardRelations, resolveApiUrl, type Card, type CardRelations } from '@/api/cards';
-import { FavoriteToggle } from '@/components/favorite-toggle';
-import { DailyVote } from '@/components/daily-vote';
-import { CardCatalogPanel } from '@/components/card-catalog-panel';
-import { MediaViewer } from '@/components/media-viewer';
-import { SetViewer } from '@/components/set-viewer';
-import { Button } from '@/components/ui/button';
+import { getCard, getCardRelations, type Card, type CardRelations } from '@/api/cards';
+import { ActionBar } from '@/components/action-bar';
+import { CardDetailsContent, CardInspector } from '@/components/card-inspector';
 import { ComicReader } from '@/components/comic-reader';
-import { DeckMembershipControl } from '@/components/deck-membership-control';
+import { DeleteCardDialog } from '@/components/delete-card-dialog';
+import { EmptyState } from '@/components/empty-state';
+import { MediaStage } from '@/components/media-stage';
+import { MediaViewer } from '@/components/media-viewer';
 import { RecommendationRail } from '@/components/recommendation-rail';
-import { Card as UiCard, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  useVisualCardView,
-  VisualCardViewToggle,
-  VisualCardWall,
-} from '@/components/visual-card-wall';
-import { RelationDashboard } from '@/components/relation-dashboard';
+import { SetViewer } from '@/components/set-viewer';
+import { buttonVariants } from '@/components/ui/button';
+import { Segmented } from '@/components/ui/segmented';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useVisualCardView, VisualCardViewToggle, VisualCardWall } from '@/components/visual-card-wall';
 import { useCardViewTracking } from '@/hooks/use-card-view-tracking';
+
+type PageProps = {
+  card: Card;
+  relations: CardRelations;
+  onRelationsChange: (relations: CardRelations) => void;
+  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onNavigateTo?: (path: string) => void;
+  onFavoriteChange: (isFavorite: boolean) => void;
+};
 
 export function CardDetailsPage({
   cardId,
   onNavigate,
+  onNavigateTo,
 }: {
   cardId: number;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+  onNavigateTo?: (path: string) => void;
 }) {
   const [card, setCard] = React.useState<Card | null>(null);
   const [relations, setRelations] = React.useState<CardRelations | null>(null);
@@ -51,296 +60,179 @@ export function CardDetailsPage({
   }, [cardId]);
 
   if (error) {
-    return <div className="text-destructive p-6 text-sm">{error}</div>;
+    return (
+      <EmptyState
+        icon={ImageOff}
+        title={error}
+        action={<a href="/gallery" onClick={onNavigate} className={buttonVariants({ variant: 'outline' })}>Back to gallery</a>}
+      />
+    );
   }
 
   if (!card || card.id !== cardId || !relations) {
-    return <div className="text-muted-foreground p-6 text-sm">Loading</div>;
+    return <CardPageSkeleton />;
   }
 
   function updateFavorite(isFavorite: boolean) {
     setCard((current) => (current ? { ...current, isFavorite } : current));
   }
 
-  if (card.type === 'comic') {
-    return (
-      <ComicDetails
-        card={card}
-        relations={relations}
-        onRelationsChange={setRelations}
-        onNavigate={onNavigate}
-        onFavoriteChange={updateFavorite}
-      />
-    );
-  }
+  const props: PageProps = {
+    card,
+    relations,
+    onRelationsChange: setRelations,
+    onNavigate,
+    onNavigateTo,
+    onFavoriteChange: updateFavorite,
+  };
 
-  if (card.type === 'set') {
-    return (
-      <SetDetails
-        card={card}
-        relations={relations}
-        onRelationsChange={setRelations}
-        onNavigate={onNavigate}
-        onFavoriteChange={updateFavorite}
-      />
-    );
-  }
+  if (card.type === 'comic') return <ComicDetails {...props} />;
+  if (card.type === 'set') return <SetDetails {...props} />;
+  if (card.type === 'tag' || card.type === 'source') return <TextCardDetails {...props} />;
+  return <MediaDetails {...props} />;
+}
 
-  if (card.type === 'tag' || card.type === 'source') {
-    return (
-      <TextCardDetails
-        card={card}
-        relations={relations}
-        onRelationsChange={setRelations}
-        onNavigate={onNavigate}
-        onFavoriteChange={updateFavorite}
-      />
-    );
-  }
-
+function CardPageSkeleton() {
   return (
-    <MediaDetails
-      card={card}
-      relations={relations}
-      onRelationsChange={setRelations}
-      onNavigate={onNavigate}
-      onFavoriteChange={updateFavorite}
-    />
+    <div className="mx-auto grid w-full max-w-screen-2xl gap-6 sm:px-6 sm:py-6 lg:grid-cols-[minmax(0,1fr)_22rem]" role="status" aria-label="Loading card">
+      <Skeleton className="aspect-[4/3] w-full sm:rounded-[var(--radius-panel)]" />
+      <div className="grid content-start gap-4 px-4 sm:px-0">
+        <Skeleton className="h-7 w-2/3" />
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    </div>
   );
 }
 
-function MediaDetails({
-  card,
-  relations,
-  onRelationsChange,
-  onNavigate,
-  onFavoriteChange,
+/** Stage on the left, inspector on the right (stacked on narrow screens), Similar rail under the stage. */
+function CardLayout({
+  stage,
+  inspector,
+  similar,
 }: {
-  card: Card;
-  relations: CardRelations;
-  onRelationsChange: (relations: CardRelations) => void;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  onFavoriteChange: (isFavorite: boolean) => void;
+  stage: React.ReactNode;
+  inspector: React.ReactNode;
+  similar: React.ReactNode;
 }) {
+  return (
+    <section className="mx-auto grid w-full max-w-screen-2xl gap-6 pb-8 sm:px-6 sm:pt-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:grid-rows-[auto_1fr]">
+      <div className="min-w-0 lg:col-start-1 lg:row-start-1">{stage}</div>
+      <div className="px-4 sm:px-0 lg:sticky lg:top-[4.5rem] lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100dvh-5.5rem)] lg:self-start lg:overflow-y-auto">
+        {inspector}
+      </div>
+      <div className="min-w-0 px-4 sm:px-0 lg:col-start-1 lg:row-start-2">{similar}</div>
+    </section>
+  );
+}
+
+function MediaDetails(props: PageProps) {
+  const { card, onNavigate } = props;
   const isVideo = card.metadata.media_type === 'video';
   const videoUrl = card.playbackUrl || card.contentUrl;
   const contentRef = useCardViewTracking(card.id, 'media');
 
   return (
-    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="grid min-w-0 gap-2">
+    <CardLayout
+      stage={
+        <MediaStage>
           {videoUrl && isVideo ? (
-            <MediaViewer kind="video" src={videoUrl} alt={card.title ?? ''} posterUrl={card.posterUrl} contentRef={contentRef} />
+            <MediaViewer kind="video" src={videoUrl} alt={card.title ?? ''} posterUrl={card.posterUrl}
+              contentRef={contentRef} originalUrl={card.contentUrl} />
           ) : null}
           {card.contentUrl && !isVideo ? (
-            <MediaViewer kind="image" src={card.contentUrl} alt={card.title ?? ''} contentRef={contentRef} />
+            <MediaViewer kind="image" src={card.contentUrl} alt={card.title ?? ''}
+              contentRef={contentRef} originalUrl={card.contentUrl} />
           ) : null}
-
-          {isVideo && card.contentUrl ? (
-            <a href={resolveApiUrl(card.contentUrl)} className="text-primary w-fit text-sm underline">
-              Original file
-            </a>
-          ) : null}
-        </div>
-
-        <CardAside card={card} onFavoriteChange={onFavoriteChange} />
-      </div>
-
-      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
-      <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
-    </section>
+        </MediaStage>
+      }
+      inspector={<CardInspector {...props} originalUrl={card.contentUrl} />}
+      similar={<RecommendationRail title="Similar" contextCardId={card.id} onNavigate={onNavigate} />}
+    />
   );
 }
 
-function ComicDetails({
-  card,
-  relations,
-  onRelationsChange,
-  onNavigate,
-  onFavoriteChange,
-}: {
-  card: Card;
-  relations: CardRelations;
-  onRelationsChange: (relations: CardRelations) => void;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  onFavoriteChange: (isFavorite: boolean) => void;
-}) {
-  const containedCards = card.containedCards ?? [];
+function ComicDetails(props: PageProps) {
+  const { card, onNavigate } = props;
   const contentRef = useCardViewTracking(card.id, 'collection');
 
   return (
-    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <ComicReader key={card.id} pages={containedCards} contentRef={contentRef} onNavigate={onNavigate} />
-
-        <CardAside card={card} onFavoriteChange={onFavoriteChange} />
-      </div>
-
-      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
-      <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
-    </section>
+    <CardLayout
+      stage={
+        <MediaStage>
+          <ComicReader key={card.id} pages={card.containedCards ?? []} contentRef={contentRef} onNavigate={onNavigate} />
+        </MediaStage>
+      }
+      inspector={<CardInspector {...props} />}
+      similar={<RecommendationRail title="Similar" contextCardId={card.id} onNavigate={onNavigate} />}
+    />
   );
 }
 
-function SetDetails({
-  card,
-  relations,
-  onRelationsChange,
-  onNavigate,
-  onFavoriteChange,
-}: {
-  card: Card;
-  relations: CardRelations;
-  onRelationsChange: (relations: CardRelations) => void;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  onFavoriteChange: (isFavorite: boolean) => void;
-}) {
+function SetDetails(props: PageProps) {
+  const { card, onNavigate } = props;
   const containedCards = card.containedCards ?? [];
   const [wall, setWall] = React.useState(false);
   const contentRef = useCardViewTracking(card.id, 'collection');
   const [view, setView] = useVisualCardView('nodeck.setView');
 
-  return (
-    <section className="grid gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="grid min-w-0 gap-4">
-          {wall ? (
-            <>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button type="button" size="sm" variant="outline" onClick={() => setWall(false)}>Viewer</Button>
-                <VisualCardViewToggle view={view} onChange={setView} />
-              </div>
-              <div ref={contentRef}>
-                <VisualCardWall cards={containedCards} view={view} density="compact" onNavigate={onNavigate} />
-              </div>
-            </>
-          ) : (
-            <SetViewer
-              key={card.id}
-              cards={containedCards}
-              contentRef={contentRef}
-              onNavigate={onNavigate}
-              toolbar={<Button type="button" size="sm" variant="outline" onClick={() => setWall(true)}>Wall</Button>}
-            />
-          )}
-        </div>
-
-        <CardAside card={card} onFavoriteChange={onFavoriteChange} />
-      </div>
-
-      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
-      <RecommendationRail contextCardId={card.id} onNavigate={onNavigate} />
-    </section>
+  const modeSwitch = (
+    <Segmented
+      ariaLabel="Set layout"
+      value={wall ? 'grid' : 'viewer'}
+      onValueChange={(value) => setWall(value === 'grid')}
+      options={[{ value: 'viewer', label: 'Viewer' }, { value: 'grid', label: 'Grid' }]}
+    />
   );
-}
 
-function TextCardDetails({
-  card,
-  relations,
-  onRelationsChange,
-  onNavigate,
-  onFavoriteChange,
-}: {
-  card: Card;
-  relations: CardRelations;
-  onRelationsChange: (relations: CardRelations) => void;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-  onFavoriteChange: (isFavorite: boolean) => void;
-}) {
   return (
-    <section className="mx-auto grid w-full max-w-6xl gap-4 px-4 py-6 sm:px-6 sm:py-8">
-      <UiCard>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle>{card.title}</CardTitle>
-            <div className="flex items-center gap-2">
-              <FavoriteToggle cardId={card.id} isFavorite={card.isFavorite} onChange={onFavoriteChange} />
+    <CardLayout
+      stage={
+        wall ? (
+          <div className="grid gap-4 px-4 sm:px-0">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {modeSwitch}
+              <VisualCardViewToggle view={view} onChange={setView} />
+            </div>
+            <div ref={contentRef}>
+              <VisualCardWall cards={containedCards} view={view} density="compact" onNavigate={onNavigate} />
             </div>
           </div>
-        </CardHeader>
-      </UiCard>
-      <MoreSection card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
-    </section>
+        ) : (
+          <MediaStage>
+            <SetViewer key={card.id} cards={containedCards} contentRef={contentRef} onNavigate={onNavigate} toolbar={modeSwitch} />
+          </MediaStage>
+        )
+      }
+      inspector={<CardInspector {...props} />}
+      similar={<RecommendationRail title="Similar" contextCardId={card.id} onNavigate={onNavigate} />}
+    />
   );
 }
 
-function CardAside({
-  card,
-  onFavoriteChange,
-}: {
-  card: Card;
-  onFavoriteChange: (isFavorite: boolean) => void;
-}) {
-  return (
-    <aside className="grid content-start gap-4">
-      <UiCard className="rounded-xl">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <CardTitle className="line-clamp-2">{card.title || card.type}</CardTitle>
-            <div className="flex items-center gap-2">
-              <FavoriteToggle cardId={card.id} isFavorite={card.isFavorite} onChange={onFavoriteChange} />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <DailyVote key={card.id} cardId={card.id} />
-        </CardContent>
-      </UiCard>
+/** Legacy tag and source cards: no media, so the relation dashboard is the main content. */
+function TextCardDetails({ card, relations, onRelationsChange, onNavigate, onNavigateTo, onFavoriteChange }: PageProps) {
+  const [deleting, setDeleting] = React.useState(false);
 
-      <CardCatalogPanel cardId={card.id} metadata={card.metadata} />
-      <DeckMembershipControl key={card.id} cardId={card.id} />
-    </aside>
-  );
-}
-
-function MoreSection({
-  card,
-  relations,
-  onRelationsChange,
-  onNavigate,
-}: {
-  card: Card;
-  relations: CardRelations;
-  onRelationsChange: (relations: CardRelations) => void;
-  onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-}) {
   return (
-    <details className="rounded-lg border">
-      <summary className="focus-visible:ring-ring cursor-pointer rounded-lg px-4 py-3 text-sm font-medium focus-visible:ring-2 focus-visible:outline-none">
-        More: relations and technical details
-      </summary>
-      <div className="grid gap-4 border-t p-3">
-        <RelationDashboard
-          card={card}
-          relations={relations}
-          onRelationsChange={onRelationsChange}
+    <section className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-6 sm:px-6 sm:py-8">
+      <div className="grid gap-2">
+        <h1 className="line-clamp-3 text-xl font-semibold tracking-tight">{card.title || 'Untitled'}</h1>
+        <ActionBar
+          cardId={card.id}
+          isFavorite={card.isFavorite}
+          onFavoriteChange={onFavoriteChange}
+          editHref={`/cards/${card.id}/edit`}
           onNavigate={onNavigate}
+          onDelete={() => setDeleting(true)}
         />
-        <JsonPanel title="Properties" value={card.properties} />
-        <JsonPanel title="Metadata" value={card.metadata} />
       </div>
-    </details>
-  );
-}
-
-function JsonPanel({
-  title,
-  value,
-}: {
-  title: string;
-  value: Record<string, unknown> | null;
-}) {
-  return (
-    <UiCard>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <pre className="bg-muted/50 max-h-72 overflow-auto rounded-lg p-3 text-xs">
-          {JSON.stringify(value ?? {}, null, 2)}
-        </pre>
-      </CardContent>
-    </UiCard>
+      <CardDetailsContent card={card} relations={relations} onRelationsChange={onRelationsChange} onNavigate={onNavigate} />
+      <DeleteCardDialog
+        card={deleting ? card : null}
+        onClose={() => setDeleting(false)}
+        onDeleted={() => { setDeleting(false); onNavigateTo?.('/gallery'); }}
+      />
+    </section>
   );
 }

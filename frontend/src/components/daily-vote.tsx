@@ -1,13 +1,10 @@
 import * as React from 'react';
 
 import { getDailyVote, putDailyVote, type DailyVote as DailyVoteState } from '@/api/cards';
-import { Button } from '@/components/ui/button';
+import { ThumbsDown, ThumbsUp } from 'lucide-react';
 
-const choices = [
-  { value: 1, label: 'Up' },
-  { value: 0, label: 'Neutral' },
-  { value: -1, label: 'Down' },
-] as const;
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export function DailyVote({ cardId }: { cardId: number }) {
   const [vote, setVote] = React.useState<DailyVoteState | null>(null);
@@ -49,25 +46,34 @@ export function DailyVote({ cardId }: { cardId: number }) {
     }
   }
 
+  const current = vote?.value ?? 0;
+
+  // Pressing the active thumb again resets the vote to 0.
+  const thumbs = [
+    { value: 1 as const, label: 'Vote up today', Icon: ThumbsUp },
+    { value: -1 as const, label: 'Vote down today', Icon: ThumbsDown },
+  ];
+
   return (
-    <div className="grid gap-2" aria-label="Daily vote">
-      <div className="text-sm font-medium">Today’s vote</div>
-      <div className="flex flex-wrap gap-2">
-        {choices.map(({ value, label }) => (
+    <div className="flex items-center gap-1" role="group" aria-label="Daily vote">
+      {thumbs.map(({ value, label, Icon }) => {
+        const active = current === value;
+        return (
           <Button
             key={value}
             type="button"
-            size="sm"
-            variant={vote?.value === value ? 'secondary' : 'outline'}
-            aria-pressed={vote?.value === value}
+            size="icon"
+            variant={active ? 'secondary' : 'ghost'}
+            aria-pressed={active}
+            aria-label={label}
+            title={label}
             disabled={loading || saving}
-            onClick={() => choose(value)}
+            onClick={() => void choose(active ? 0 : value)}
           >
-            {label}
+            <Icon className={cn('size-4', active && 'fill-current')} />
           </Button>
-        ))}
-      </div>
-      {loading ? <span className="text-muted-foreground text-xs">Loading vote…</span> : null}
+        );
+      })}
       {error ? <span className="text-destructive text-xs" role="alert">{error}</span> : null}
     </div>
   );
