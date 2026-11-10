@@ -29,6 +29,7 @@ type ImportItem = {
   sha256?: string;
   hashSkipped?: boolean;
   duplicateCardIds?: number[];
+  duplicateOfName?: string;
   uploadAnyway?: boolean;
   metadataStatus?: MetadataStatus;
   metadataError?: string;
@@ -110,7 +111,8 @@ function readDraft(): { draft: SavedDraft | null; warning: string | null } {
         || (item.assignedTagIds !== undefined && (!Array.isArray(item.assignedTagIds)
           || !item.assignedTagIds.every(isPositiveId)))) throw new Error('Invalid saved item');
       if ((item.sha256 !== undefined && (typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)))
-        || (item.duplicateCardIds !== undefined && (!Array.isArray(item.duplicateCardIds) || !item.duplicateCardIds.every(isPositiveId)))) throw new Error('Invalid saved hash');
+        || (item.duplicateCardIds !== undefined && (!Array.isArray(item.duplicateCardIds) || !item.duplicateCardIds.every(isPositiveId)))
+        || (item.duplicateOfName !== undefined && typeof item.duplicateOfName !== 'string')) throw new Error('Invalid saved hash');
       if (item.fingerprint !== undefined && (typeof item.fingerprint !== 'string'
         || !/^sample-sha256-v1:[a-f0-9]{64}$/.test(item.fingerprint))) throw new Error('Invalid sampled fingerprint');
     }
@@ -182,8 +184,8 @@ async function tryFullHash(file: File): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
-function isBlockedDuplicate(item: Pick<ImportItem, 'duplicateCardIds' | 'uploadAnyway' | 'cardId'>) {
-  return !item.cardId && !!item.duplicateCardIds?.length && !item.uploadAnyway;
+function isBlockedDuplicate(item: Pick<ImportItem, 'duplicateCardIds' | 'duplicateOfName' | 'uploadAnyway' | 'cardId'>) {
+  return !item.cardId && (!!item.duplicateCardIds?.length || !!item.duplicateOfName) && !item.uploadAnyway;
 }
 
 function mediaTypeLabel(descriptor: FileDescriptor): 'Image' | 'GIF' | 'Video' {
@@ -953,6 +955,19 @@ export function BulkImportPage() {
     }
     if (stopRequested()) return;
     const hashed = eligible.filter((item) => item.sha256);
+    // Same content twice in one batch: keep the first row, hold later ones until the user confirms.
+    const firstByHash = new Map<string, string>();
+    for (const item of working) {
+      if (item.sha256 && (item.cardId || item.creationKey || item.uploadAnyway) && !firstByHash.has(item.sha256)) {
+        firstByHash.set(item.sha256, item.descriptor.name);
+      }
+    }
+    for (const item of hashed) {
+      const first = firstByHash.get(item.sha256!);
+      item.duplicateOfName = first;
+      if (!first) firstByHash.set(item.sha256!, item.descriptor.name);
+      updateItem(item.id, { duplicateOfName: item.duplicateOfName });
+    }
     if (hashed.length > 0) {
       try {
         setCurrentStep('Checking for duplicates on the server');
@@ -1142,6 +1157,12 @@ export function BulkImportPage() {
               {item.hashSkipped && !item.sha256 && <p className="text-muted-foreground text-xs">File is larger than 1 GiB; it was not checked for server duplicates.</p>}
               {!!item.duplicateCardIds?.length && !item.cardId && <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span role="status">Duplicate of {item.duplicateCardIds.map((id, index) => <React.Fragment key={id}>{index > 0 && ', '}<a className="text-primary underline" href={`/cards/${id}`}>#{id}</a></React.Fragment>)}</span>
+                {!item.uploadAnyway && <Button type="button" size="sm" variant="outline" disabled={isRunning} aria-label={`Upload ${item.descriptor.name} anyway`}
+                  onClick={() => updateItem(item.id, { uploadAnyway: true })}>Upload anyway</Button>}
+                {item.uploadAnyway && <span className="text-muted-foreground">Will upload anyway.</span>}
+              </div>}
+              {!!item.duplicateOfName && !item.duplicateCardIds?.length && !item.cardId && <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span role="status">Same content as {item.duplicateOfName} in this batch</span>
                 {!item.uploadAnyway && <Button type="button" size="sm" variant="outline" disabled={isRunning} aria-label={`Upload ${item.descriptor.name} anyway`}
                   onClick={() => updateItem(item.id, { uploadAnyway: true })}>Upload anyway</Button>}
                 {item.uploadAnyway && <span className="text-muted-foreground">Will upload anyway.</span>}
