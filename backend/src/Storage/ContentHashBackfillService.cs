@@ -66,7 +66,14 @@ public sealed class ContentHashBackfillService : BackgroundService
                 try
                 {
                     var hash = await HashFileAsync(path, cancellationToken);
-                    if (hash is null) { skipped++; continue; }
+                    if (hash is null)
+                    {
+                        skipped++;
+                        _logger.LogWarning(
+                            "Content hash backfill skipped card {CardId}: original file {Path} is missing or outside app data.",
+                            id, path);
+                        continue;
+                    }
                     await connection.ExecuteAsync(new CommandDefinition(
                         "UPDATE cards SET content_sha256 = @Hash WHERE id = @Id AND content_sha256 IS NULL;",
                         new { Hash = hash, Id = id }, cancellationToken: cancellationToken));
