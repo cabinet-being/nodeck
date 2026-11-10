@@ -765,9 +765,9 @@ public sealed class CatalogApiTests
         var nameOrder = new[] { light, unused, legacy, middle, heavy };
         Assert.Equal(nameOrder, byDefault.Select(t => t.Id).ToArray());
         Assert.Equal(nameOrder, byName.Select(t => t.Id).ToArray());
-        // Unused tags are left out of the usage list without a search.
-        Assert.Equal(new[] { legacy, heavy, middle, light }, byUsage.Select(t => t.Id).ToArray());
-        Assert.Equal(new[] { 4, 3, 2, 1 }, byUsage.Select(t => t.ReferenceCount).ToArray());
+        // Unused user tags are listed after the used ones (count 0) so new custom tags stay visible.
+        Assert.Equal(new[] { legacy, heavy, middle, light, unused }, byUsage.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { 4, 3, 2, 1, 0 }, byUsage.Select(t => t.ReferenceCount).ToArray());
         Assert.Contains(unused, byDefault.Select(t => t.Id));
     }
 
@@ -833,7 +833,7 @@ public sealed class CatalogApiTests
         var artistM = await ImportedAsync("artist-mid", "artist");
         var artistUnused = await ImportedAsync("artist-unused", "artist");
         var character = await ImportedAsync("char-one", "character");
-        // A user tag whose category is also 'artist' must not pass the artist filter (origin 'user').
+        // A user tag with category 'artist' passes the artist filter: the filter is by category only.
         var userArtist = await ImportedAsync("user-fake-artist", "artist");
         await host.Connection.ExecuteAsync("UPDATE tags SET origin = 'user' WHERE id = @Id;", new { Id = userArtist });
         var custom = (await catalog.CreateTagAsync(new TagRequest("my-custom", null))).Id;
@@ -854,13 +854,13 @@ public sealed class CatalogApiTests
         var characterSearch = await api.ListAsync("category=character&search=artist");
 
         // Only that category's used tags, most used first.
-        Assert.Equal(new[] { artistM, artistZ }, artistsByUsage.Select(t => t.Id).ToArray());
-        Assert.Equal(new[] { artistM, artistUnused, artistZ }, artistsByName.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { userArtist, artistM, artistZ }, artistsByUsage.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { artistM, artistUnused, artistZ, userArtist }, artistsByName.Select(t => t.Id).ToArray());
         // With search the unused matching tag is found again, still within the category and in usage order.
         Assert.Equal(new[] { artistM, artistZ, artistUnused }, artistSearch.Select(t => t.Id).ToArray());
-        // Custom means user-created tags only: includes the user-origin 'artist' row, never imported ones.
-        Assert.Equal(new[] { userArtist, custom }, customByUsage.Select(t => t.Id).ToArray());
-        Assert.Equal(new[] { customUnused, custom, userArtist }, customByName.Select(t => t.Id).ToArray());
+        // Custom means category 'custom'; unused user tags are listed by usage too (count 0, last).
+        Assert.Equal(new[] { custom, customUnused }, customByUsage.Select(t => t.Id).ToArray());
+        Assert.Equal(new[] { customUnused, custom }, customByName.Select(t => t.Id).ToArray());
         Assert.Empty(characterSearch);
         Assert.DoesNotContain(character, artistsByName.Select(t => t.Id));
     }

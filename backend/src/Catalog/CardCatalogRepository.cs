@@ -76,6 +76,7 @@ public sealed class CardCatalogRepository
     private static async Task SetTagCoreAsync(MySqlConnection connection, MySqlTransaction transaction,
         long cardId, long tagId)
     {
+        await RejectSystemTagAsync(connection, transaction, cardId, tagId);
         var legacyCardId = await connection.ExecuteScalarAsync<long?>(
             "SELECT legacy_card_id FROM tags WHERE id = @TagId;", new { TagId = tagId }, transaction);
         if (legacyCardId is null)
@@ -124,6 +125,15 @@ public sealed class CardCatalogRepository
             """, new { CardId = cardId, TagId = tagId }, transaction);
     }
 
+    private static async Task RejectSystemTagAsync(MySqlConnection connection, MySqlTransaction transaction,
+        long cardId, long tagId)
+    {
+        if (await connection.ExecuteScalarAsync<long>("""
+            SELECT COUNT(*) FROM tags WHERE id = @TagId AND origin = 'system';
+            """, new { TagId = tagId }, transaction) > 0)
+            throw new CatalogConflictException("Meta tags are set from the file.");
+    }
+
     public async Task CorrectSuggestionAsync(long cardId, long tagId, long replacementTagId)
     {
         if (replacementTagId <= 0 || replacementTagId == tagId)
@@ -165,6 +175,7 @@ public sealed class CardCatalogRepository
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         await RequireCardAsync(connection, cardId, transaction);
+        await RejectSystemTagAsync(connection, transaction, cardId, tagId);
         var legacyCardId = await connection.ExecuteScalarAsync<long?>(
             "SELECT legacy_card_id FROM tags WHERE id = @TagId;", new { TagId = tagId }, transaction);
         int affected;

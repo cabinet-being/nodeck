@@ -96,6 +96,7 @@ public sealed partial class CardRepository
             if (creationRequest is not null)
                 await CompleteCreationRequestAsync(connection, transaction, creationRequest, parentId);
             await transaction.CommitAsync();
+            await SyncMetaTagsAsync(connection, createdCardIds.ToArray());
 
             var containedCards = createdCardIds
                 .Skip(1)
@@ -198,6 +199,7 @@ public sealed partial class CardRepository
             if (type is not ("comic" or "set")) throw new InvalidOperationException("Only comic and set cards have children.");
             await ReplaceCollectionChildrenAsync(connection, transaction, id, type, childCardIds);
             await transaction.CommitAsync();
+            await SyncMetaTagsAsync(connection, id);
         }
         catch
         {

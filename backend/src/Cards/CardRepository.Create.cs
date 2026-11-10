@@ -92,6 +92,8 @@ public sealed partial class CardRepository
             if (creationRequest is not null)
                 await CompleteCreationRequestAsync(connection, transaction, creationRequest, cardId);
             await transaction.CommitAsync();
+            if (data.Type == "media" && assets is not null)
+                await SyncMetaTagsAsync(connection, cardId);
 
             return new CardCreationResult(CardCreationStatus.Created, BuildCreatedCardDetails(
                 cardId,

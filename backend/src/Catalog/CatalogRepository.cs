@@ -16,15 +16,13 @@ public sealed class CatalogRepository
     }
 
     /// <summary>Lists up to 200 tags. <paramref name="byUsage"/> puts the most used tags first;
-    /// without a search it then lists only tags that are in use.</summary>
+    /// without a search it then lists tags that are in use plus every user-created tag.</summary>
     public async Task<IReadOnlyList<TagEntry>> ListTagsAsync(string? search, bool byUsage = false,
         string? category = null)
     {
         await using var connection = await OpenAsync();
         var term = NormalizeSearch(search);
-        // "custom" means user-created tags; any other value is a tag category.
-        var categoryFilter = category is null ? "" : category == "custom"
-            ? "AND tf.origin = 'user'" : "AND tf.category = @Category AND tf.origin <> 'user'";
+        var categoryFilter = category is null ? "" : "AND tf.category = @Category";
         var candidates = term is null
             ? byUsage
                 ? $"""
@@ -34,10 +32,12 @@ public sealed class CatalogRepository
                       UNION ALL
                       SELECT t.id, COUNT(*) FROM card_relations r JOIN tags t ON t.legacy_card_id = r.to_card_id
                       WHERE r.relation_type = 'tagged_with' GROUP BY t.id
+                      UNION ALL
+                      SELECT u.id, 0 FROM tags u WHERE u.origin = 'user'
                   ) used
                   JOIN tags tf ON tf.id = used.tag_id
                   WHERE 1 = 1 {categoryFilter}
-                  GROUP BY tag_id ORDER BY SUM(uses) DESC, tag_id LIMIT 200
+                  GROUP BY tag_id ORDER BY SUM(uses) DESC, MIN(tf.name), tag_id LIMIT 200
                   """
                 : $"""
                   SELECT tf.id AS tag_id, 1 AS match_priority FROM tags tf
@@ -94,6 +94,7 @@ public sealed class CatalogRepository
     public async Task<TagEntry> CreateTagAsync(TagRequest request)
     {
         var (name, aliases) = ValidateTag(request);
+        var category = ValidateCategory(request.Category) ?? "custom";
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         try
@@ -101,9 +102,9 @@ public sealed class CatalogRepository
             await EnsureTagWordsAvailableAsync(connection, transaction, name, aliases, null);
             var id = await connection.ExecuteScalarAsync<long>("""
                 INSERT INTO tags (name, canonical_key, category, origin)
-                VALUES (@Name, @Key, 'custom', 'user');
+                VALUES (@Name, @Key, @Category, 'user');
                 SELECT LAST_INSERT_ID();
-                """, new { Name = name, Key = "user-tag:" + name.ToLowerInvariant() }, transaction);
+                """, new { Name = name, Key = "user-tag:" + name.ToLowerInvariant(), Category = category }, transaction);
             await InsertAliasesAsync(connection, transaction, id, aliases);
             await transaction.CommitAsync();
             return (await GetTagAsync(id))!;
@@ -117,23 +118,41 @@ public sealed class CatalogRepository
     public async Task<TagEntry?> UpdateTagAsync(long id, TagRequest request)
     {
         var (name, aliases) = ValidateTag(request);
+        var requestedCategory = ValidateCategory(request.Category);
         await using var connection = await OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         try
         {
             var existing = await connection.QuerySingleOrDefaultAsync<TagProtectionRow>(
-                "SELECT legacy_card_id AS LegacyCardId, category, origin FROM tags WHERE id = @Id FOR UPDATE;",
+                "SELECT legacy_card_id AS LegacyCardId, name, category, origin FROM tags WHERE id = @Id FOR UPDATE;",
                 new { Id = id }, transaction);
             if (existing is null)
                 return null;
-            if (existing.LegacyCardId is not null || existing.Category != "custom" || existing.Origin != "user")
+            if (existing.Origin == "system")
+                throw new CatalogConflictException("Meta tags are managed automatically.");
+            if (existing.LegacyCardId is not null || existing.Origin is not ("user" or "danbooru"))
                 throw new CatalogConflictException("This tag is managed by the legacy catalog or an import.");
+
+            var category = requestedCategory ?? existing.Category;
+            if (existing.Origin == "danbooru")
+            {
+                var storedAliases = (await connection.QueryAsync<string>(
+                    "SELECT alias FROM tag_aliases WHERE tag_id = @Id;", new { Id = id }, transaction)).ToArray();
+                if (name != existing.Name || !aliases.ToHashSet(StringComparer.Ordinal)
+                        .SetEquals(storedAliases))
+                    throw new CatalogConflictException("Imported tag names cannot be changed.");
+                await connection.ExecuteAsync("UPDATE tags SET category = @Category WHERE id = @Id;",
+                    new { Id = id, Category = category }, transaction);
+                await transaction.CommitAsync();
+                return await GetTagAsync(id);
+            }
 
             await EnsureTagWordsAvailableAsync(connection, transaction, name, aliases, id);
             await connection.ExecuteAsync("""
-                UPDATE tags SET name = @Name, canonical_key = @Key WHERE id = @Id;
+                UPDATE tags SET name = @Name, canonical_key = @Key, category = @Category WHERE id = @Id;
                 DELETE FROM tag_aliases WHERE tag_id = @Id;
-                """, new { Id = id, Name = name, Key = "user-tag:" + name.ToLowerInvariant() }, transaction);
+                """, new { Id = id, Name = name, Category = category, Key = "user-tag:" + name.ToLowerInvariant() },
+                transaction);
             await InsertAliasesAsync(connection, transaction, id, aliases);
             await transaction.CommitAsync();
             return await GetTagAsync(id);
@@ -149,7 +168,7 @@ public sealed class CatalogRepository
         await using var connection = await OpenAsync();
         var affected = await connection.ExecuteAsync("""
             DELETE FROM tags WHERE id = @Id AND legacy_card_id IS NULL
-                AND category = 'custom' AND origin = 'user'
+                AND origin = 'user'
                 AND NOT EXISTS (SELECT 1 FROM card_tags WHERE tag_id = @Id);
             """, new { Id = id });
         if (affected > 0) return true;
@@ -264,6 +283,14 @@ public sealed class CatalogRepository
         return normalized;
     }
 
+    private static string? ValidateCategory(string? category)
+    {
+        if (category is null) return null;
+        if (category is not ("general" or "artist" or "character" or "copyright" or "meta" or "custom"))
+            throw new CatalogValidationException("category must be general, artist, character, copyright, meta or custom.");
+        return category;
+    }
+
     private static (string Name, string[] Aliases) ValidateTag(TagRequest request)
     {
         var name = ValidateName(request.Name);
@@ -320,6 +347,7 @@ public sealed class CatalogRepository
     private sealed class TagProtectionRow
     {
         public long? LegacyCardId { get; set; }
+        public string Name { get; set; } = "";
         public string Category { get; set; } = "";
         public string Origin { get; set; } = "";
     }

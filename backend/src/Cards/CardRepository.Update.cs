@@ -129,6 +129,8 @@ public sealed partial class CardRepository
 
             await transaction.CommitAsync();
             committed = true;
+            if (data.Assets is not null && card.Type == "media")
+                await SyncMetaTagsAsync(connection, id);
 
             try
             {

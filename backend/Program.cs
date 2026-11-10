@@ -97,6 +97,7 @@ if (!importingDanbooru && !analyzingCard && !seedingWdTags)
     builder.Services.AddHostedService<ImageAnalysisWorker>();
     builder.Services.AddHostedService<SpeechAnalysisWorker>();
     builder.Services.AddHostedService<ContentHashBackfillService>();
+    builder.Services.AddHostedService<MyApp.Api.Catalog.SystemMetaTagBackfillService>();
     builder.Services.AddHostedService<OrphanScanService>();
 }
 builder.Services.AddSingleton<CardDatabaseInitializer>();

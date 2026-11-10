@@ -1,6 +1,6 @@
 namespace MyApp.Api.Catalog;
 
-public sealed record TagRequest(string? Name, string[]? Aliases);
+public sealed record TagRequest(string? Name, string[]? Aliases, string? Category = null);
 public sealed record SourceRequest(string? Name);
 
 public sealed class TagEntry
