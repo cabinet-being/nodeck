@@ -309,13 +309,13 @@ The archive carries no `.env`, no `volumes/mysql_data`, and no user data, so unp
 
 ## Installing on ZimaOS
 
-nodeck installs on ZimaOS (and CasaOS) through the dashboard by importing one compose file, the same way as other custom apps. ZimaOS pulls the image `ghcr.io/cabinet-being/nodeck:latest` (published by GitHub Actions for every release) and `mysql:8.4`; no SSH, archive or build is needed. Menu names may differ between ZimaOS versions, and this path has not yet been tested on a real device (see the journal in `docs/product-plan.md`).
+nodeck installs on ZimaOS (and CasaOS) through the dashboard by importing one compose file, the same way as other custom apps. ZimaOS pulls the image `ghcr.io/cabinet-being/nodeck:latest` (published by GitHub Actions for every release) and `mysql:8.4`; no SSH, archive or build is needed. Tested on ZimaOS 1.6.1; menu names may differ in other versions.
 
 **Requirements.** ZimaOS on x86_64 (the image is amd64 only); about 2 GB of free RAM recommended; about 1.5 GB of disk for the images plus about 520 MB for models and space for your library; internet access.
 
 1. Open [`docker-compose.zima.yml`](docker-compose.zima.yml) and copy its whole content (or download the file).
 2. In the ZimaOS dashboard click **+** in the apps area, choose **Install a customized app**, then click the **Import** icon in the top right corner of the dialog and paste the content (or upload the file).
-3. Replace **every** `change-me` with your own password: `MYSQL_PASSWORD` in both services and `MYSQL_ROOT_PASSWORD`. Use letters and digits; the same password in all three places is fine. Do this before the first start: MySQL keeps the first password it starts with, and the stack refuses to start while a password is `change-me`.
+3. Replace **every** `change-me` with your own password: `MYSQL_PASSWORD` in both services and `MYSQL_ROOT_PASSWORD`. Use letters and digits; the same password in all three places is fine. Do this before the first start: MySQL keeps the first password it starts with, and nodeck refuses to start while a password is `change-me`. When you reinstall over an existing `/DATA/AppData/nodeck`, use the same password as before.
 4. Optionally change the host port `5080` (avoid 80 and 443, which ZimaOS uses), `TZ`, or the `/DATA/AppData/nodeck` paths if your AppData folder lives on another disk (for example `/ZimaOS-HD/AppData`).
 5. Click **Install**. When both containers run, open nodeck from its dashboard tile or at `http://ZIMA-IP:5080`.
 
@@ -339,8 +339,9 @@ docker exec nodeck-mysql sh -c 'exec mysqldump -u"$MYSQL_USER" -p"$MYSQL_PASSWOR
 
 **Troubleshooting.**
 
-- `nodeck-mysql` stops right after start with a message about `change-me`: a password in the compose file is still the placeholder. Edit the app's settings, set the passwords and save.
-- nodeck cannot connect to MySQL after you changed a password: MySQL kept the first one. Put the original password back.
+- nodeck stops right after start with a message about `change-me`: a password in the compose file is still the placeholder. Edit the app's settings, set the passwords and save.
+- nodeck keeps restarting with `Access denied for user 'nodeck'`: MySQL kept the password from its first start (for example from an earlier install). Put that password back. If the library is still empty, you can instead stop the app and move `/DATA/AppData/nodeck/mysql` aside; MySQL then starts fresh with the current password.
+- nodeck keeps restarting with `Unable to connect to any of the specified MySQL hosts`: the containers cannot see each other. The compose file must keep its `networks` section; without it ZimaOS puts both containers on Docker's default `bridge` network, where names do not resolve. Reinstall from the current [`docker-compose.zima.yml`](docker-compose.zima.yml).
 - Port already in use: change the host side of `5080:8080`.
 - The app does not open or tagging never starts: look at the container logs in the dashboard (or `docker logs nodeck` over SSH); model download progress is logged there.
 - Slow or killed containers: check free memory; about 2 GB is recommended, and image analysis and video transcoding use several CPU cores.

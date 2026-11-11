@@ -3,7 +3,8 @@
 #
 # Before you press Install, replace EVERY "change-me" below with your own password
 # (letters and digits; the same password in all places is fine). MySQL stores the
-# password on its first start; the stack refuses to start while it is "change-me".
+# password on its first start; nodeck refuses to start while it is "change-me".
+# (No "$" anywhere in this file: ZimaOS substitutes variables when it stores it.)
 #
 # Data lives in /DATA/AppData/nodeck:
 #   data/cards    originals you uploaded (one folder per card)
@@ -55,19 +56,6 @@ services:
     image: mysql:8.4
     container_name: nodeck-mysql
     restart: unless-stopped
-    # Refuse to initialise the database with the placeholder password: MySQL keeps the
-    # first password it starts with, so fixing it later would no longer match.
-    entrypoint:
-      - sh
-      - -c
-      - |
-        for value in "$$MYSQL_PASSWORD" "$$MYSQL_ROOT_PASSWORD"; do
-          if [ "$$value" = "change-me" ]; then
-            echo "Replace every change-me in the nodeck compose file with a real password." >&2
-            exit 1
-          fi
-        done
-        exec docker-entrypoint.sh mysqld
     environment:
       TZ: UTC
       MYSQL_DATABASE: nodeck
