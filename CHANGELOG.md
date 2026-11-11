@@ -2,6 +2,17 @@
 
 All notable changes to nodeck are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] — 2026-11-11
+
+### Changed
+
+- **Images are tagged first.** The automatic tagging queue now analyses still images before videos and GIFs. An image takes about a second, a video minutes (many frames), so after a bulk import images get their tags within the hour instead of waiting behind every earlier video.
+
+### Fixed
+
+- **ZimaOS import.** ZimaOS put the imported containers on Docker's default `bridge` network, where nodeck could not find `nodeck-mysql` and restarted forever. `docker-compose.zima.yml` now declares its own network. It also no longer contains `$` (ZimaOS substitutes variables when it stores the file, which emptied the MySQL `change-me` check; nodeck itself still refuses the placeholder).
+- README troubleshooting for the ZimaOS install covers the two failures above. The install is now tested on ZimaOS 1.6.1.
+
 ## [0.1.1] — 2026-11-11
 
 ### Added

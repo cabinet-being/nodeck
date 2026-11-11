@@ -54,6 +54,26 @@ public sealed class ImageAnalysisQueueTests
     }
 
     [DatabaseFact]
+    public async Task StillImagesAreClaimedBeforeEarlierVideosAndGifs()
+    {
+        await using var scope = await QueueScope.CreateAsync();
+        var video = await scope.CreateAsync("video");
+        var gif = await scope.CreateAsync("gif");
+        var image = await scope.CreateAsync("image");
+
+        var claimed = new List<long>();
+        for (var i = 0; i < 3; i++)
+        {
+            var lease = await scope.Queue.ClaimAsync(default);
+            Assert.NotNull(lease);
+            claimed.Add(lease.CardId);
+        }
+
+        Assert.Equal([image, video, gif], claimed);
+        Assert.Null(await scope.Queue.ClaimAsync(default));
+    }
+
+    [DatabaseFact]
     public async Task ReplacementInvalidatesOldLeaseAndPendingSuggestionBeforeNewResultCanPublish()
     {
         await using var scope = await QueueScope.CreateAsync();

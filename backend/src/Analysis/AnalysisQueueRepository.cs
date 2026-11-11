@@ -64,11 +64,19 @@ public sealed class AnalysisQueueRepository
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var row = await connection.QuerySingleOrDefaultAsync<JobRow>(new CommandDefinition("""
-            SELECT card_id AS CardId, revision, attempts
-            FROM card_image_analysis_jobs
-            WHERE (state = 'pending' AND available_at_utc <= UTC_TIMESTAMP(6))
-               OR (state = 'leased' AND lease_until_utc <= UTC_TIMESTAMP(6))
-            ORDER BY available_at_utc, card_id LIMIT 1 FOR UPDATE SKIP LOCKED;
+            SELECT j.card_id AS CardId, j.revision, j.attempts
+            FROM card_image_analysis_jobs j
+            LEFT JOIN cards c ON c.id = j.card_id
+            WHERE (j.state = 'pending' AND j.available_at_utc <= UTC_TIMESTAMP(6))
+               OR (j.state = 'leased' AND j.lease_until_utc <= UTC_TIMESTAMP(6))
+            -- Still images take about a second, videos and GIFs minutes (many frames):
+            -- analyse images first so a bulk import gets tags quickly.
+            ORDER BY CASE
+                    WHEN JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.media_type')) = 'image'
+                     AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.mime_type')), '') <> 'image/gif'
+                    THEN 0 ELSE 1 END,
+                j.available_at_utc, j.card_id
+            LIMIT 1 FOR UPDATE OF j SKIP LOCKED;
             """, transaction: transaction, cancellationToken: cancellationToken));
         if (row is null)
         {
