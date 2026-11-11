@@ -6,7 +6,7 @@ namespace MyApp.Api.Tests;
 
 /// <summary>
 /// Fixtures create tables with CREATE TABLE IF NOT EXISTS, which leaves a long-lived shared test database on an
-/// older cards schema. Bring an existing cards table up to migration 12 once per test run (no-op on a fresh one).
+/// older schema. Bring existing tables up to migration 13 once per test run (no-op on a fresh one).
 /// </summary>
 internal static class SharedTestDatabaseUpgrade
 {
@@ -34,5 +34,10 @@ internal static class SharedTestDatabaseUpgrade
             WHERE table_schema = DATABASE() AND table_name = 'cards' AND index_name = 'idx_cards_content_sha256';
             """) == 0)
             connection.Execute("ALTER TABLE cards ADD INDEX idx_cards_content_sha256 (content_sha256);");
+        if (connection.ExecuteScalar<long>("""
+            SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()
+              AND table_name IN ('card_image_analysis_jobs', 'card_tag_suggestions', 'card_tag_decisions');
+            """) == 3)
+            MyApp.Api.Analysis.LearnedTags.LearnedTagSchema.ApplyAsync(connection).GetAwaiter().GetResult();
     }
 }

@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS card_tag_suggestions (
     KEY idx_card_tag_suggestions_card_state (card_id, state),
     CONSTRAINT chk_card_tag_suggestions_state CHECK (state IN ('pending', 'accepted', 'rejected')),
     CONSTRAINT chk_card_tag_suggestions_confidence CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
-    CONSTRAINT chk_card_tag_suggestions_source CHECK (suggestion_source IN ('visual', 'speech', 'custom')),
+    CONSTRAINT chk_card_tag_suggestions_source CHECK (suggestion_source IN ('visual', 'speech', 'custom', 'learned')),
     CONSTRAINT fk_card_tag_suggestions_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
     CONSTRAINT fk_card_tag_suggestions_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS card_image_analysis_jobs (
     lease_token VARCHAR(36) NULL,
     lease_until_utc DATETIME(6) NULL,
     last_error VARCHAR(512) NULL,
+    priority TINYINT NOT NULL DEFAULT 0,
     KEY idx_card_image_analysis_jobs_state_available (state, available_at_utc),
     CONSTRAINT chk_card_image_analysis_jobs_state CHECK (state IN ('pending', 'leased', 'done', 'failed')),
     CONSTRAINT chk_card_image_analysis_jobs_attempts CHECK (attempts >= 0),
@@ -144,9 +145,49 @@ CREATE TABLE IF NOT EXISTS card_tag_decisions (
     KEY idx_card_tag_decisions_card (card_id),
     KEY idx_card_tag_decisions_suggested (suggested_tag_id, decision),
     CONSTRAINT chk_card_tag_decisions_decision CHECK (decision IN ('accepted', 'rejected', 'corrected')),
-    CONSTRAINT chk_card_tag_decisions_source CHECK (suggestion_source IS NULL OR suggestion_source IN ('visual', 'speech', 'custom')),
+    CONSTRAINT chk_card_tag_decisions_source CHECK (suggestion_source IS NULL OR suggestion_source IN ('visual', 'speech', 'custom', 'learned')),
     CONSTRAINT chk_card_tag_decisions_confidence CHECK (confidence IS NULL OR confidence BETWEEN 0 AND 1),
     CONSTRAINT fk_card_tag_decisions_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
     CONSTRAINT fk_card_tag_decisions_suggested FOREIGN KEY (suggested_tag_id) REFERENCES tags(id) ON DELETE SET NULL,
     CONSTRAINT fk_card_tag_decisions_chosen FOREIGN KEY (chosen_tag_id) REFERENCES tags(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS card_visual_features (
+    card_id BIGINT NOT NULL PRIMARY KEY,
+    revision VARCHAR(36) NOT NULL,
+    model_key VARCHAR(128) NOT NULL,
+    dimension INT NOT NULL,
+    features MEDIUMBLOB NOT NULL,
+    scored_generation BIGINT NULL,
+    updated_at_utc DATETIME(6) NOT NULL,
+    KEY idx_card_visual_features_model_scored (model_key, scored_generation),
+    CONSTRAINT chk_card_visual_features_dimension CHECK (dimension > 0),
+    CONSTRAINT fk_card_visual_features_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS learned_tag_models (
+    tag_id BIGINT NOT NULL PRIMARY KEY,
+    feature_model_key VARCHAR(128) NOT NULL,
+    dimension INT NOT NULL,
+    weights MEDIUMBLOB NOT NULL,
+    bias DOUBLE NOT NULL,
+    threshold DECIMAL(6,5) NULL,
+    positives INT NOT NULL,
+    negatives INT NOT NULL,
+    hard_negatives INT NOT NULL,
+    cv_precision DECIMAL(6,5) NULL,
+    cv_recall DECIMAL(6,5) NULL,
+    generation BIGINT NOT NULL,
+    trained_at_utc DATETIME(6) NOT NULL,
+    CONSTRAINT chk_learned_tag_models_threshold CHECK (threshold IS NULL OR threshold BETWEEN 0 AND 1),
+    CONSTRAINT fk_learned_tag_models_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS learned_tag_state (
+    id TINYINT NOT NULL PRIMARY KEY,
+    generation BIGINT NOT NULL,
+    feature_model_key VARCHAR(128) NOT NULL,
+    fingerprint CHAR(64) NOT NULL,
+    trained_at_utc DATETIME(6) NOT NULL,
+    CONSTRAINT chk_learned_tag_state_singleton CHECK (id = 1)
 );

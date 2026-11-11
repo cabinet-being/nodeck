@@ -69,9 +69,10 @@ public sealed class AnalysisQueueRepository
             LEFT JOIN cards c ON c.id = j.card_id
             WHERE (j.state = 'pending' AND j.available_at_utc <= UTC_TIMESTAMP(6))
                OR (j.state = 'leased' AND j.lease_until_utc <= UTC_TIMESTAMP(6))
-            -- Still images take about a second, videos and GIFs minutes (many frames):
-            -- analyse images first so a bulk import gets tags quickly.
-            ORDER BY CASE
+            -- Background backfill jobs (priority 1) wait for every regular job. Still images take
+            -- about a second, videos and GIFs minutes (many frames): analyse images first so a bulk
+            -- import gets tags quickly.
+            ORDER BY j.priority, CASE
                     WHEN JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.media_type')) = 'image'
                      AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.metadata, '$.mime_type')), '') <> 'image/gif'
                     THEN 0 ELSE 1 END,
@@ -126,6 +127,9 @@ public sealed class AnalysisQueueRepository
         }
         await CardCatalogRepository.UpsertSuggestionsAsync(connection, transaction, lease.CardId,
             prepared.Proposals, cancellationToken);
+        if (prepared.Features is not null && prepared.FeatureModelKey is not null)
+            await LearnedTags.LearnedTagRepository.SaveFeaturesAsync(connection, transaction, lease.CardId,
+                lease.Revision, prepared.FeatureModelKey, prepared.Features, cancellationToken);
         await connection.ExecuteAsync(new CommandDefinition("""
             UPDATE card_image_analysis_jobs SET state = 'done', lease_token = NULL,
                 lease_until_utc = NULL, last_error = NULL WHERE card_id = @CardId;

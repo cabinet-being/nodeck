@@ -54,7 +54,10 @@ public sealed class WdViTTagger : IVisualTagger
         }
     }
 
-    public IReadOnlyList<VisualTagPrediction> Predict(string imagePath)
+    public IReadOnlyList<VisualTagPrediction> Predict(string imagePath) => Analyze(imagePath).Predictions;
+
+    /// <summary>Thresholded predictions plus the sparse vector of all label probabilities.</summary>
+    public VisualTagAnalysis Analyze(string imagePath)
     {
         var pixels = PrepareImage(imagePath, _inputSize);
         lock (_gate)
@@ -88,7 +91,8 @@ public sealed class WdViTTagger : IVisualTagger
                 predictions.Add(new VisualTagPrediction(label.DanbooruId,
                     decimal.Round((decimal)score, 5, MidpointRounding.AwayFromZero), label.Category));
             }
-            return predictions.OrderByDescending(item => item.Confidence).ToArray();
+            return new VisualTagAnalysis(predictions.OrderByDescending(item => item.Confidence).ToArray(),
+                VisualFeatureVector.FromProbabilities(scores));
         }
     }
 

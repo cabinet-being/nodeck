@@ -1,5 +1,6 @@
 using MySqlConnector;
 using MyApp.Api.Analysis;
+using MyApp.Api.Analysis.LearnedTags;
 using MyApp.Api.Cards;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
@@ -115,11 +116,13 @@ builder.Services.AddScoped<RecommendationRepository>();
 builder.Services.Configure<RecommendationOptions>(builder.Configuration.GetSection(RecommendationOptions.SectionName));
 builder.Services.AddSingleton<AnalysisQueueRepository>();
 builder.Services.AddSingleton<SpeechAnalysisQueueRepository>();
+builder.Services.AddSingleton<LearnedTagRepository>();
 if (!importingDanbooru && !analyzingCard && !seedingWdTags)
 {
     builder.Services.AddHostedService<ModelDownloadService>();
     builder.Services.AddHostedService<ImageAnalysisWorker>();
     builder.Services.AddHostedService<SpeechAnalysisWorker>();
+    builder.Services.AddHostedService<LearnedTagWorker>();
     builder.Services.AddHostedService<ContentHashBackfillService>();
     builder.Services.AddHostedService<MyApp.Api.Catalog.SystemMetaTagBackfillService>();
     builder.Services.AddHostedService<OrphanScanService>();
@@ -262,6 +265,8 @@ app.MapFavoriteEndpoints();
 app.MapInterestEndpoints();
 app.MapRecommendationEndpoints();
 app.MapCatalogEndpoints();
+app.MapGet("/api/learned-tags", async (LearnedTagRepository repository, CancellationToken cancellationToken) =>
+    Results.Ok(await repository.GetStatusAsync(cancellationToken)));
 
 if (serveFrontend)
 {

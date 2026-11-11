@@ -2,6 +2,17 @@
 
 All notable changes to nodeck are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Learned custom tags.** nodeck learns each of your custom tags from the cards that already carry it (at least 5, added by hand or accepted) and proposes it on other cards. The visual analysis now keeps every card's WD label probabilities as features; a per-tag classifier trained on them proposes a tag only where cross-validation on your examples shows at least 80 % estimated precision. Proposals use the source `learned` and go through the usual review: Accept, Reject, Correct, and Accept all work as before, and rejected or corrected proposals teach the model as negative examples. Models retrain in the background when examples change. `GET /api/learned-tags` shows each tag's examples, threshold, precision, and recall.
+- **Background backfill for older cards.** Media analysed before this version, or never analysed, is re-analysed with low priority so it can serve as examples and receive learned tags; new uploads always go first. `NODECK_LEARNED_TAGS_BACKFILL=false` stops it, and `NODECK_LEARNED_TAGS=false` turns learned tags off.
+
+### Changed
+
+- Schema migration 13 (`learned-custom-tags-v1`): analysis job priority, the `learned` suggestion source, and tables for features and models. Like every migration on a populated library, it needs a current backup first (see README, Database upgrades and recovery); the backup script is unchanged.
+
 ## [0.1.2] — 2026-11-11
 
 ### Changed

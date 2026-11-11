@@ -260,7 +260,7 @@ public sealed partial class CardRepository
             ON DUPLICATE KEY UPDATE
                 revision = VALUES(revision), state = 'pending', attempts = 0,
                 available_at_utc = UTC_TIMESTAMP(6), lease_token = NULL,
-                lease_until_utc = NULL, last_error = NULL;
+                lease_until_utc = NULL, last_error = NULL, priority = 0;
             """, new { CardId = cardId, Revision = Guid.NewGuid().ToString("D") }, transaction);
     }
 }

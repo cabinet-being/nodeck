@@ -10,7 +10,8 @@ namespace MyApp.Api.Analysis;
 public sealed record CardImageAnalysisResult(
     long CardId, int Predictions, int MatchedTags, int SubmittedSuggestions);
 public sealed record PreparedCardImageAnalysis(
-    CardImageAnalysisResult Result, IReadOnlyList<TagSuggestionProposal> Proposals, string Metadata);
+    CardImageAnalysisResult Result, IReadOnlyList<TagSuggestionProposal> Proposals, string Metadata,
+    VisualFeatureVector? Features = null, string? FeatureModelKey = null);
 
 /// <summary>Runs uploaded media through a local visual tagger outside the upload transaction.</summary>
 public sealed class CardImageAnalysisService
@@ -59,9 +60,10 @@ public sealed class CardImageAnalysisService
         var originalHash = await HashFileAsync(originalPath, cancellationToken);
         var previewHash = asset.MediaType == "image"
             ? await HashFileAsync(previewPath, cancellationToken) : null;
-        var predictions = asset.MediaType == "image"
-            ? _tagger.Predict(previewPath)
+        var analysis = asset.MediaType == "image"
+            ? _tagger.Analyze(previewPath)
             : await PredictAnimatedAsync(originalPath, asset.DurationSeconds!.Value, cancellationToken);
+        var predictions = analysis.Predictions;
         cancellationToken.ThrowIfCancellationRequested();
         if (predictions.Any(item => item.DanbooruId <= 0 || item.Confidence is < 0 or > 1))
             throw new InvalidOperationException("The visual tagger returned an invalid prediction.");
@@ -99,7 +101,7 @@ public sealed class CardImageAnalysisService
         cancellationToken.ThrowIfCancellationRequested();
         return new PreparedCardImageAnalysis(
             new CardImageAnalysisResult(cardId, predictions.Count, matched.Length, proposals.Length),
-            proposals, asset.Metadata);
+            proposals, asset.Metadata, analysis.Features, analysis.Features is null ? null : _tagger.ModelKey);
     }
 
     private static string? CategoryName(int category) => category switch
@@ -107,7 +109,7 @@ public sealed class CardImageAnalysisService
         0 => "general", 1 => "artist", 3 => "copyright", 4 => "character", 5 => "meta", _ => null
     };
 
-    private async Task<IReadOnlyList<VisualTagPrediction>> PredictAnimatedAsync(
+    private async Task<VisualTagAnalysis> PredictAnimatedAsync(
         string originalPath, double durationSeconds, CancellationToken cancellationToken)
     {
         var clock = Stopwatch.StartNew();
@@ -115,26 +117,29 @@ public sealed class CardImageAnalysisService
         if (sampled.Frames.Count is < 1 or > 40)
             throw new InvalidOperationException("The video sampler returned an invalid frame count.");
 
-        var predictionsByPath = new Dictionary<string, IReadOnlyList<VisualTagPrediction>>(StringComparer.Ordinal);
+        var analysisByPath = new Dictionary<string, VisualTagAnalysis>(StringComparer.Ordinal);
         var framePredictions = new List<(int Segment, VisualTagPrediction Prediction)>();
         foreach (var frame in sampled.Frames)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (frame.IsSceneCandidate && clock.Elapsed >= TimeSpan.FromMinutes(3))
                 continue;
-            if (!predictionsByPath.TryGetValue(frame.Path, out var predictions))
+            if (!analysisByPath.TryGetValue(frame.Path, out var analysis))
             {
-                predictions = _tagger.Predict(frame.Path);
-                predictionsByPath.Add(frame.Path, predictions);
+                analysis = _tagger.Analyze(frame.Path);
+                analysisByPath.Add(frame.Path, analysis);
             }
-            framePredictions.AddRange(predictions.Select(prediction => (frame.SegmentIndex, prediction)));
+            framePredictions.AddRange(analysis.Predictions.Select(prediction => (frame.SegmentIndex, prediction)));
         }
 
         if (framePredictions.Any(item => item.Prediction.DanbooruId <= 0 ||
             item.Prediction.Confidence is < 0 or > 1))
             throw new InvalidOperationException("The visual tagger returned an invalid prediction.");
 
-        return framePredictions
+        // Frames without a feature vector make the combined vector incomplete, so keep none.
+        var features = analysisByPath.Count > 0 && analysisByPath.Values.All(item => item.Features is not null)
+            ? VisualFeatureVector.MaxOf(analysisByPath.Values.Select(item => item.Features)) : null;
+        var combined = framePredictions
             .GroupBy(item => (item.Prediction.DanbooruId, item.Prediction.Category))
             .Select(group =>
             {
@@ -147,6 +152,7 @@ public sealed class CardImageAnalysisService
                 return new VisualTagPrediction(group.Key.DanbooruId, score, group.Key.Category);
             })
             .ToArray();
+        return new VisualTagAnalysis(combined, features);
     }
 
     private async Task<CardAsset> ReadAssetAsync(MySqlConnection connection, long cardId, CancellationToken ct)

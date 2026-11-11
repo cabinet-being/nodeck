@@ -221,6 +221,13 @@ public sealed class CatalogDatabaseInitializer
             """);
     }
 
+    public async Task InitializeLearnedTagsAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await MyApp.Api.Analysis.LearnedTags.LearnedTagSchema.ApplyAsync(connection);
+    }
+
     public async Task InitializeImageAnalysisJobsAsync()
     {
         await using var connection = new MySqlConnection(_connectionString);
