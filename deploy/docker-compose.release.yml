@@ -7,6 +7,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Default: Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env};
       NODECK_APP_DATA: /app/data
+      NODECK_MAX_UPLOAD_MB: ${NODECK_MAX_UPLOAD_MB:-8192}
       NODECK_MIGRATION_BACKUP_MANIFEST: ${NODECK_MIGRATION_BACKUP_MANIFEST:-}
     ports:
       - "${BACKEND_HTTP_PORT}:8080"

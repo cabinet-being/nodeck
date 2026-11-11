@@ -2,6 +2,12 @@
 
 All notable changes to nodeck are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Uploads larger than about 30 MB (typical videos) were rejected with HTTP 413 because the server kept the framework's default request limit. The limit is now 8 GB and can be changed with `NODECK_MAX_UPLOAD_MB`.
+
 ## [0.1.0] — 2026-11-11
 
 First release.

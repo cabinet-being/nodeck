@@ -90,6 +90,7 @@ if (builder.Configuration.GetConnectionString("Default") is { } defaultConnectio
         "MYSQL_PASSWORD is still the placeholder \"change-me\". Set real passwords in .env " +
         "(for example: tr -dc A-Za-z0-9 </dev/urandom | head -c 24) and recreate the stack.");
 
+builder.AddUploadLimits();
 builder.Services.AddScoped<CardRepository>();
 builder.Services.AddScoped<DeckRepository>();
 builder.Services.AddScoped<CatalogRepository>();

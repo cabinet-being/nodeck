@@ -110,6 +110,7 @@ tr -dc A-Za-z0-9 </dev/urandom | head -c 24
 | --- | --- | --- |
 | `BACKEND_HTTP_PORT` | `5080` | Host port for the UI and API. |
 | `MYSQL_BIND_ADDRESS` | `127.0.0.1` | Address MySQL is published on. `0.0.0.0` exposes MySQL to the whole LAN (for desktop DB tools); use strong passwords. |
+| `NODECK_MAX_UPLOAD_MB` | `8192` | Largest upload request in MB: one file, or all pages of a comic or set together. |
 | `MYSQL_HOST_PORT` | `3306` in the repository, `33306` in the release bundle | Host port for MySQL; change it if the port is taken. |
 | `TZ` | `UTC` | Time zone of both containers. |
 

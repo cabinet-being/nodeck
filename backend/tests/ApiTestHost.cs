@@ -42,7 +42,7 @@ internal sealed class ApiTestHost : IAsyncDisposable
         Client = client;
     }
 
-    public static async Task<ApiTestHost> CreateAsync()
+    public static async Task<ApiTestHost> CreateAsync(IDictionary<string, string?>? settings = null)
     {
         var builder = new MySqlConnectionStringBuilder(
             Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!);
@@ -85,6 +85,8 @@ internal sealed class ApiTestHost : IAsyncDisposable
             host.WebHost.UseUrls("http://127.0.0.1:0");
             host.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 { ["ConnectionStrings:Default"] = builder.ConnectionString, ["NODECK_APP_DATA"] = appDataRoot });
+            if (settings is not null) host.Configuration.AddInMemoryCollection(settings);
+            host.AddUploadLimits();
             host.Services.AddScoped<CardRepository>();
             host.Services.AddSingleton<AnalysisQueueRepository>();
             host.Services.AddSingleton<SpeechAnalysisQueueRepository>();
@@ -94,7 +96,9 @@ internal sealed class ApiTestHost : IAsyncDisposable
             app.Use(async (context, next) =>
             {
                 try { await next(context); }
-                catch (Exception exception) when (!context.RequestAborted.IsCancellationRequested)
+                // Bad requests (such as an oversized body) keep Kestrel's own status code, as in production.
+                catch (Exception exception) when (!context.RequestAborted.IsCancellationRequested &&
+                    exception is not BadHttpRequestException)
                 {
                     context.Response.StatusCode = 500;
                     await context.Response.WriteAsync(exception.ToString());
