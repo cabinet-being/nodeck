@@ -111,6 +111,7 @@ tr -dc A-Za-z0-9 </dev/urandom | head -c 24
 | `BACKEND_HTTP_PORT` | `5080` | Host port for the UI and API. |
 | `MYSQL_BIND_ADDRESS` | `127.0.0.1` | Address MySQL is published on. `0.0.0.0` exposes MySQL to the whole LAN (for desktop DB tools); use strong passwords. |
 | `NODECK_MAX_UPLOAD_MB` | `8192` | Largest upload request in MB: one file, or all pages of a comic or set together. |
+| `NODECK_MODEL_AUTO_DOWNLOAD` | `true` | Download the tagging and speech models on start when they are missing. |
 | `MYSQL_HOST_PORT` | `3306` in the repository, `33306` in the release bundle | Host port for MySQL; change it if the port is taken. |
 | `TZ` | `UTC` | Time zone of both containers. |
 
@@ -212,6 +213,8 @@ Every actual accept, reject, correction, and removal of an assigned tag is appen
 
 ## Local image tagging
 
+Since 0.1.1 the backend downloads the pinned WD tagger and Whisper models itself on start when they are missing (about 520 MB, SHA-256 verified, retried while offline) and seeds the WD vocabulary once they are there, so no manual step is needed. Set `NODECK_MODEL_AUTO_DOWNLOAD=false` to turn this off and use the scripts below instead.
+
 Install the pinned [WD ViT Tagger v3](https://huggingface.co/SmilingWolf/wd-vit-tagger-v3) ONNX model and labels into the backend data volume, then seed its general and character Danbooru tags from `selected_tags.csv`. The script checks both SHA-256 hashes. The model is about 362 MB; it runs locally on CPU. After the normal `docker compose up --build` setup, run:
 
 ```bash
@@ -302,140 +305,80 @@ scripts/library-backup-docker.sh restore ./backups/nodeck-YYYYMMDDTHHMMSSZ-XXXXX
 
 The archive carries no `.env`, no `volumes/mysql_data`, and no user data, so unpacking a newer version over an existing install does not overwrite them. Only amd64 is built. The target host needs only Docker.
 
+**Published image.** `.github/workflows/docker.yml` builds the same image on GitHub Actions. A push to `main` publishes `ghcr.io/cabinet-being/nodeck:main`; a tag `vX.Y.Z` (which must match `VERSION`) publishes `:X.Y.Z` and moves `:latest`, which `docker-compose.zima.yml` uses. The GHCR package must be public for ZimaOS to pull it without logging in.
+
 ## Installing on ZimaOS
 
-These steps install a release bundle on a ZimaOS device with only Docker. Menu names come from the ZimaOS documentation and may differ between ZimaOS versions. This procedure has not yet been tested on a real ZimaOS device (see the journal in `docs/product-plan.md`).
+nodeck installs on ZimaOS (and CasaOS) through the dashboard by importing one compose file, the same way as other custom apps. ZimaOS pulls the image `ghcr.io/cabinet-being/nodeck:latest` (published by GitHub Actions for every release) and `mysql:8.4`; no SSH, archive or build is needed. Menu names may differ between ZimaOS versions, and this path has not yet been tested on a real device (see the journal in `docs/product-plan.md`).
 
-**Requirements.** ZimaOS on x86_64 (the image is amd64 only); about 2 GB of free RAM recommended; about 1.5 GB of disk for the image plus space for your library; internet access to pull the MySQL image and download models.
+**Requirements.** ZimaOS on x86_64 (the image is amd64 only); about 2 GB of free RAM recommended; about 1.5 GB of disk for the images plus about 520 MB for models and space for your library; internet access.
 
-1. Open a terminal on the device. In ZimaOS enable **Settings → Developer Mode → SSH Access** (or use the web terminal), connect over SSH, then become root:
+1. Open [`docker-compose.zima.yml`](docker-compose.zima.yml) and copy its whole content (or download the file).
+2. In the ZimaOS dashboard click **+** in the apps area, choose **Install a customized app**, then click the **Import** icon in the top right corner of the dialog and paste the content (or upload the file).
+3. Replace **every** `change-me` with your own password: `MYSQL_PASSWORD` in both services and `MYSQL_ROOT_PASSWORD`. Use letters and digits; the same password in all three places is fine. Do this before the first start: MySQL keeps the first password it starts with, and the stack refuses to start while a password is `change-me`.
+4. Optionally change the host port `5080` (avoid 80 and 443, which ZimaOS uses), `TZ`, or the `/DATA/AppData/nodeck` paths if your AppData folder lives on another disk (for example `/ZimaOS-HD/AppData`).
+5. Click **Install**. When both containers run, open nodeck from its dashboard tile or at `http://ZIMA-IP:5080`.
 
-```bash
-sudo -i
-```
+On the first start nodeck creates its database and downloads the tagging and speech models (about 520 MB) in the background into `/DATA/AppData/nodeck/data/models`. You can use the app right away; automatic tags appear once the download finishes. Set `NODECK_MODEL_AUTO_DOWNLOAD` to `false` to skip the download.
 
-2. Find the AppData folder. It is commonly `/DATA/AppData`; some devices keep it on another disk, such as `/ZimaOS-HD/AppData`. Check in the **Files** app. Put `nodeck-0.1.0-amd64.tar.gz` there: either upload it through the Files app, or download it if it is hosted somewhere:
-
-```bash
-cd /DATA/AppData
-curl -L -o nodeck-0.1.0-amd64.tar.gz https://YOUR-HOST/nodeck-0.1.0-amd64.tar.gz
-```
-
-3. Unpack it and enter the folder:
+**Updating.** Releases move the `latest` image tag. Use the app's update action in the dashboard if your ZimaOS version offers one. Otherwise, over SSH (`sudo -i` first):
 
 ```bash
-cd /DATA/AppData && tar -xzf nodeck-0.1.0-amd64.tar.gz && cd nodeck
+docker pull ghcr.io/cabinet-being/nodeck:latest
 ```
 
-4. Optionally verify the files (skip this if `sha256sum` is not installed):
+Then recreate the container, for example by opening the app's settings in the dashboard and saving them. Your data stays in `/DATA/AppData/nodeck`. When the release notes say an update changes the database schema, follow their steps: nodeck refuses to migrate a populated library without a verified backup (see **Database upgrades and recovery**).
+
+**Backing up.** Copy `/DATA/AppData/nodeck/data` (originals and settings; `cache` and `models` can be skipped) and save a database dump. Over SSH:
 
 ```bash
-sha256sum -c SHA256SUMS
+docker exec nodeck-mysql sh -c 'exec mysqldump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines "$MYSQL_DATABASE"' > /DATA/AppData/nodeck/backups/nodeck-$(date +%F).sql
 ```
 
-5. Load the image into Docker:
-
-```bash
-docker load -i images/nodeck-app-0.1.0-amd64.tar
-```
-
-6. Create `.env` from the template:
-
-```bash
-cp .env.example .env
-```
-
-7. Put two generated passwords into `.env`. This command replaces both placeholders (the passwords are written to the file, so you do not need to remember them):
-
-```bash
-sed -i "s/^MYSQL_PASSWORD=.*/MYSQL_PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)/; s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)/" .env
-```
-
-To edit by hand instead, run `nano .env`. Also pick `BACKEND_HTTP_PORT`: avoid 80 and 443, which ZimaOS uses; the default `5080` is fine if it is free. Set the passwords before the first start, because MySQL stores them on first start (see **Passwords and ports**).
-
-8. Start the stack:
-
-```bash
-docker compose up -d
-```
-
-9. Check that both containers are running and the app answers (replace `5080` if you changed `BACKEND_HTTP_PORT`):
-
-```bash
-docker compose ps
-```
-
-```bash
-curl -s http://127.0.0.1:5080/health
-```
-
-Then open `http://ZIMA-IP:5080` in a browser, with `ZIMA-IP` being the device's address.
-
-10. Install the tagging and speech models (about 500 MB, roughly a minute on a good connection). No restart is needed; tagging starts automatically:
-
-```bash
-bash scripts/install-models.sh all
-```
-
-**Management.** Installed from the command line, the app is not managed by the ZimaOS dashboard, the same as other CLI-installed apps. Start and stop it with `docker compose` inside the folder (`docker compose stop`, `docker compose up -d`). `restart: unless-stopped` brings it back after a reboot.
-
-**Updating.** Back up first:
-
-```bash
-bash scripts/library-backup-docker.sh backup ./backups
-```
-
-Unpack the new archive over the same folder (it contains no data, `.env` or backups), and load the new image:
-
-```bash
-cd /DATA/AppData && tar -xzf nodeck-NEW-VERSION-amd64.tar.gz && cd nodeck
-docker load -i images/nodeck-app-NEW-VERSION-amd64.tar
-```
-
-When the release notes say a schema migration is needed, set `NODECK_MIGRATION_BACKUP_MANIFEST` in `.env` to `/app/migration-backup/<backup directory name>/manifest.txt`. The API refuses to migrate a populated database without a verified backup: it checks the manifest, the database name, schema version, row counts and checksums first (see **Database upgrades and recovery**). Then restart:
-
-```bash
-docker compose up -d
-```
-
-**Restoring.** The backup script stops the backend itself when it runs; run the restore with the backend stopped:
-
-```bash
-docker compose stop backend
-bash scripts/library-backup-docker.sh restore ./backups/<backup directory name> --confirm-restore
-```
-
-The restore leaves the backend stopped; start it again when you are done:
-
-```bash
-docker compose up -d
-```
-
-**Uninstalling.** Stop and remove the containers:
-
-```bash
-docker compose down
-```
-
-Delete the `nodeck` folder only if you also want to delete your library.
+**Uninstalling.** Uninstall the app in the dashboard. The `/DATA/AppData/nodeck` folder stays; delete it only if you also want to delete your library.
 
 **Troubleshooting.**
 
-- Port already in use: change `BACKEND_HTTP_PORT` (or `MYSQL_HOST_PORT`) in `.env`, then run `docker compose up -d` again.
-- An error mentioning `change-me`: a password in `.env` is still the placeholder. If MySQL already started once with a real password, do not change it later.
-- The app does not open: look at the log with `docker compose logs backend` (and `docker compose logs mysql`).
+- `nodeck-mysql` stops right after start with a message about `change-me`: a password in the compose file is still the placeholder. Edit the app's settings, set the passwords and save.
+- nodeck cannot connect to MySQL after you changed a password: MySQL kept the first one. Put the original password back.
+- Port already in use: change the host side of `5080:8080`.
+- The app does not open or tagging never starts: look at the container logs in the dashboard (or `docker logs nodeck` over SSH); model download progress is logged there.
 - Slow or killed containers: check free memory; about 2 GB is recommended, and image analysis and video transcoding use several CPU cores.
+
+### Alternative: release bundle over SSH
+
+`scripts/build-release.sh` produces an archive with the image, a compose file and Docker-only helper scripts (see **Building a release**). Use it for a device without access to GHCR. Installed this way, the app is managed from the command line and does not appear in the dashboard.
+
+1. Enable **Settings → Developer Mode → SSH Access**, connect, and run `sudo -i`.
+2. Put the archive into the AppData folder (`/DATA/AppData`, or the folder shown in the **Files** app), unpack it, and load the image:
+
+```bash
+cd /DATA/AppData && tar -xzf nodeck-VERSION-amd64.tar.gz && cd nodeck
+docker load -i images/nodeck-app-VERSION-amd64.tar
+```
+
+3. Create `.env` with two generated passwords and start the stack:
+
+```bash
+cp .env.example .env
+sed -i "s/^MYSQL_PASSWORD=.*/MYSQL_PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)/; s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)/" .env
+docker compose up -d
+```
+
+4. Open `http://ZIMA-IP:5080` (`BACKEND_HTTP_PORT` in `.env`). Models download automatically on the first start.
+
+To update, back up with `bash scripts/library-backup-docker.sh backup ./backups`, unpack the new archive over the same folder (it contains no data, `.env` or backups), `docker load` the new image and run `docker compose up -d`. To restore, run `docker compose stop backend`, then `bash scripts/library-backup-docker.sh restore ./backups/<backup directory name> --confirm-restore`, then `docker compose up -d`. `docker compose down` removes the containers; the folder keeps your library.
 
 ## Where your data lives (and what you may touch)
 
-Everything is stored as plain folders next to `docker-compose.yml` (for example `/DATA/AppData/nodeck`):
+With the ZimaOS import, data lives in `/DATA/AppData/nodeck`: `data/` holds what the table below calls `volumes/app_data/`, `mysql/` is `volumes/mysql_data`, and `backups/` is `backups/`. With the release bundle or a source checkout, everything is stored as plain folders next to `docker-compose.yml` (for example `/DATA/AppData/nodeck`):
 
 | Path | What it holds | Notes |
 | --- | --- | --- |
 | `volumes/app_data/cards/<id>/original.<ext>` | The original file as uploaded, renamed by card id. | The mapping card to file, titles, tags and decks live in MySQL. |
 | `volumes/app_data/cache/cards/<id>/` | Previews and posters. | Regenerable. |
 | `volumes/app_data/uploads`, `tmp` | Uploads in progress. | |
-| `volumes/app_data/models` | WD tagger and Whisper models. | Re-downloadable with `scripts/install-models.sh`. |
+| `volumes/app_data/models` | WD tagger and Whisper models. | Downloaded again automatically when missing. |
 | `volumes/app_data/config`, `user-data` | Application settings and user data. | |
 | `volumes/mysql_data` | MySQL internal files. | Binary. Do not copy or edit while MySQL runs. |
 | `backups/` | Backup snapshots and SQL dumps. | |
@@ -444,9 +387,9 @@ Everything is stored as plain folders next to `docker-compose.yml` (for example 
 
 **Safe while the app runs:** reading or copying originals and previews, and reading SQL dumps.
 
-**Not safe:** deleting or renaming files under `cards/` (the database still points at them; delete cards in the app instead) and touching `mysql_data`. To move the database use `scripts/export-db.sh` or a backup, never a copy of `mysql_data`. Copying files into `cards/` does not import them; use the **Import** page.
+**Not safe:** deleting or renaming files under `cards/` (the database still points at them; delete cards in the app instead) and touching `mysql_data`. To move the database use a SQL dump or a backup, never a copy of `mysql_data`. Copying files into `cards/` does not import them; use the **Import** page.
 
-**Moving to another app.** Originals are plain files. `scripts/export-db.sh` gives a readable SQL dump (tables `cards`, `tags`, `card_tags`, `decks`, and others) to map card ids to titles, tags and decks. Desktop database tools can also connect when `MYSQL_BIND_ADDRESS=0.0.0.0` is set in `.env` (port `MYSQL_HOST_PORT`, user and password from `.env`).
+**Moving to another app.** Originals are plain files. A SQL dump (`scripts/export-db.sh`, or the `mysqldump` command under **Backing up**) has the tables `cards`, `tags`, `card_tags`, `decks` and others to map card ids to titles, tags and decks. Desktop database tools can connect too: with the release bundle set `MYSQL_BIND_ADDRESS=0.0.0.0` in `.env` (port `MYSQL_HOST_PORT`); with the ZimaOS import add a port such as `3306:3306` to `nodeck-mysql` in the app's settings. Use the user and password you set.
 
 ## Project Structure
 
