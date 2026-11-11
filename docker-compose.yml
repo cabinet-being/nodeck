@@ -51,7 +51,9 @@ services:
       - ./database/init:/docker-entrypoint-initdb.d:ro
       - ./volumes/mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      # TCP, not the socket: during first initialisation MySQL runs a temporary server
+      # without networking, which must not count as ready.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
       interval: 10s
       timeout: 5s
       retries: 10

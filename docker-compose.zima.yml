@@ -1,0 +1,106 @@
+# nodeck for ZimaOS (and CasaOS): import this file in the dashboard
+# (App Store → "+" → Install a customized app → Import icon in the top right).
+#
+# Before you press Install, replace EVERY "change-me" below with your own password
+# (letters and digits; the same password in all places is fine). MySQL stores the
+# password on its first start; the stack refuses to start while it is "change-me".
+#
+# Data lives in /DATA/AppData/nodeck:
+#   data/cards    originals you uploaded (one folder per card)
+#   data/cache    previews (rebuilt when missing)
+#   data/models   ML models, downloaded automatically on first start (~520 MB)
+#   backups       library backups
+#   mysql         MySQL files (binary; do not edit while it runs)
+name: nodeck
+
+services:
+  nodeck:
+    image: ghcr.io/cabinet-being/nodeck:latest
+    container_name: nodeck
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      ASPNETCORE_URLS: http://+:8080
+      MYSQL_HOST: nodeck-mysql
+      MYSQL_DATABASE: nodeck
+      MYSQL_USER: nodeck
+      MYSQL_PASSWORD: change-me
+      NODECK_APP_DATA: /app/data
+      NODECK_MAX_UPLOAD_MB: "8192"
+      NODECK_MODEL_AUTO_DOWNLOAD: "true"
+    ports:
+      - "5080:8080"
+    volumes:
+      - /DATA/AppData/nodeck/data:/app/data
+      - /DATA/AppData/nodeck/backups:/app/migration-backup:ro
+    depends_on:
+      nodeck-mysql:
+        condition: service_healthy
+    x-casaos:
+      ports:
+        - container: "8080"
+          description:
+            en_us: Web UI and API
+      volumes:
+        - container: /app/data
+          description:
+            en_us: Originals, previews and ML models
+        - container: /app/migration-backup
+          description:
+            en_us: Backups (read-only; needed to upgrade a library with a new schema)
+
+  nodeck-mysql:
+    image: mysql:8.4
+    container_name: nodeck-mysql
+    restart: unless-stopped
+    # Refuse to initialise the database with the placeholder password: MySQL keeps the
+    # first password it starts with, so fixing it later would no longer match.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        for value in "$$MYSQL_PASSWORD" "$$MYSQL_ROOT_PASSWORD"; do
+          if [ "$$value" = "change-me" ]; then
+            echo "Replace every change-me in the nodeck compose file with a real password." >&2
+            exit 1
+          fi
+        done
+        exec docker-entrypoint.sh mysqld
+    environment:
+      TZ: UTC
+      MYSQL_DATABASE: nodeck
+      MYSQL_USER: nodeck
+      MYSQL_PASSWORD: change-me
+      MYSQL_ROOT_PASSWORD: change-me
+    volumes:
+      - /DATA/AppData/nodeck/mysql:/var/lib/mysql
+    healthcheck:
+      # TCP, not the socket: during first initialisation MySQL runs a temporary server
+      # without networking, which must not count as ready.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    x-casaos:
+      volumes:
+        - container: /var/lib/mysql
+          description:
+            en_us: MySQL database files
+
+x-casaos:
+  architectures:
+    - amd64
+  main: nodeck
+  author: cabinet-being
+  developer: cabinet-being
+  category: Media
+  icon: https://raw.githubusercontent.com/cabinet-being/nodeck/main/deploy/zimaos/icon.svg
+  index: /
+  port_map: "5080"
+  scheme: http
+  title:
+    en_us: nodeck
+  tagline:
+    en_us: Media library of cards, tags and decks
+  description:
+    en_us: Self-hosted media library with local image tagging, decks and recommendations.
