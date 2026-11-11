@@ -11,6 +11,8 @@ WORKDIR /src
 COPY backend/MyApp.Api.csproj ./
 RUN dotnet restore
 COPY backend/ ./
+# Embedded into the assembly as the base schema (see MyApp.Api.csproj).
+COPY database/init/ /database/init/
 RUN dotnet publish -c Release -o /app/publish --no-restore
 
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS whisper-build

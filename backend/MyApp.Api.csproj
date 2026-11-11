@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Base schema, applied by SchemaMigrationRunner to an empty database. -->
+    <EmbeddedResource Include="../database/init/*.sql" LogicalName="nodeck.schema.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="MyApp.Api.Tests" />
   </ItemGroup>
 

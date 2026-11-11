@@ -83,6 +83,21 @@ if (importingDanbooru)
 
 var builder = WebApplication.CreateBuilder(importingDanbooru || analyzingCard || seedingWdTags ? [] : args);
 
+// A single compose file (such as the ZimaOS import) gives the app the same MYSQL_* variables as the
+// MySQL service instead of a connection string, so the password is written only once per service.
+if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Default")) &&
+    builder.Configuration["MYSQL_HOST"] is { Length: > 0 } mysqlHost)
+{
+    builder.Configuration["ConnectionStrings:Default"] = new MySqlConnectionStringBuilder
+    {
+        Server = mysqlHost,
+        Port = uint.TryParse(builder.Configuration["MYSQL_PORT"], out var mysqlPort) ? mysqlPort : 3306,
+        Database = builder.Configuration["MYSQL_DATABASE"] is { Length: > 0 } database ? database : "nodeck",
+        UserID = builder.Configuration["MYSQL_USER"] is { Length: > 0 } user ? user : "nodeck",
+        Password = builder.Configuration["MYSQL_PASSWORD"] ?? "",
+    }.ConnectionString;
+}
+
 // Refuse to run with the placeholder password shipped in .env.example.
 if (builder.Configuration.GetConnectionString("Default") is { } defaultConnection &&
     new MySqlConnectionStringBuilder(defaultConnection).Password == "change-me")
@@ -102,6 +117,7 @@ builder.Services.AddSingleton<AnalysisQueueRepository>();
 builder.Services.AddSingleton<SpeechAnalysisQueueRepository>();
 if (!importingDanbooru && !analyzingCard && !seedingWdTags)
 {
+    builder.Services.AddHostedService<ModelDownloadService>();
     builder.Services.AddHostedService<ImageAnalysisWorker>();
     builder.Services.AddHostedService<SpeechAnalysisWorker>();
     builder.Services.AddHostedService<ContentHashBackfillService>();
@@ -125,6 +141,28 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// MySQL may still be starting (for example on the first start of a fresh install): wait for it
+// instead of crashing and relying on the container restart policy.
+if (app.Configuration.GetConnectionString("Default") is { Length: > 0 } startupConnection)
+{
+    var deadline = DateTime.UtcNow.AddMinutes(2);
+    for (var attempt = 1; ; attempt++)
+    {
+        try
+        {
+            await using var probe = new MySqlConnection(startupConnection);
+            await probe.OpenAsync();
+            break;
+        }
+        catch (MySqlException exception) when (DateTime.UtcNow < deadline &&
+            exception.ErrorCode is MySqlErrorCode.UnableToConnectToHost or MySqlErrorCode.UnknownDatabase)
+        {
+            if (attempt == 1) app.Logger.LogInformation("Waiting for MySQL to accept connections...");
+            await Task.Delay(TimeSpan.FromSeconds(2));
+        }
+    }
+}
 
 using (var scope = app.Services.CreateScope())
 {

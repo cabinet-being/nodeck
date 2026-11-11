@@ -15,6 +15,40 @@ namespace MyApp.Api.Tests;
 public sealed class SchemaMigrationTests
 {
     [DatabaseFact]
+    public async Task EmptyDatabaseGetsTheBaseSchemaAndAllMigrations()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+
+        await CreateRunner(schema.Configuration).InitializeAsync();
+
+        foreach (var table in new[] { "cards", "card_relations", "tags", "decks", "schema_migrations" })
+            Assert.True(await schema.TableExistsAsync(table), table);
+        await using var connection = await schema.OpenAsync();
+        var cardId = await connection.ExecuteScalarAsync<long>("""
+            INSERT INTO cards (type, title, metadata)
+            VALUES ('media', 'bootstrap', JSON_OBJECT('created_at', '2026-11-11T00:00:00Z'));
+            SELECT LAST_INSERT_ID();
+            """);
+        Assert.True(cardId > 0);
+
+        // A second start sees a current schema and changes nothing.
+        await CreateRunner(schema.Configuration).InitializeAsync();
+    }
+
+    [DatabaseFact]
+    public async Task PartiallyCreatedDatabaseIsNotBootstrapped()
+    {
+        await using var schema = await IsolatedSchema.CreateAsync();
+        await using var connection = await schema.OpenAsync();
+        await connection.ExecuteAsync("CREATE TABLE unrelated (id INT PRIMARY KEY);");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateRunner(schema.Configuration).InitializeAsync());
+        Assert.Contains("Base card tables are missing", error.Message);
+        Assert.False(await schema.TableExistsAsync("cards"));
+    }
+
+    [DatabaseFact]
     public async Task PopulatedUnversionedDatabaseRefusesMigrationBeforeAnySchemaWrite()
     {
         await using var schema = await IsolatedSchema.CreateAsync();

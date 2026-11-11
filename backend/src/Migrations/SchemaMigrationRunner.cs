@@ -72,6 +72,8 @@ public sealed class SchemaMigrationRunner
 
         try
         {
+            if (!await TableExistsAsync(connection, "cards") && await IsEmptyDatabaseAsync(connection))
+                await CreateBaseSchemaAsync(connection);
             if (!await TableExistsAsync(connection, "cards") ||
                 !await TableExistsAsync(connection, "card_relations"))
                 throw new InvalidOperationException("Base card tables are missing. Initialize the database before starting the API.");
@@ -208,6 +210,37 @@ public sealed class SchemaMigrationRunner
         return (await connection.QueryAsync<MigrationRow>(
             "SELECT version, name, checksum FROM schema_migrations ORDER BY version;")).ToList();
     }
+
+    private static Task<bool> IsEmptyDatabaseAsync(MySqlConnection connection) =>
+        connection.ExecuteScalarAsync<bool>(
+            "SELECT COUNT(*) = 0 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE();");
+
+    /// <summary>
+    /// Creates the base tables from the SQL files in database/init, embedded in the assembly. MySQL's
+    /// own init directory is not available when the stack is installed from a single compose file
+    /// (for example through the ZimaOS import dialog), so an empty database is set up here instead.
+    /// </summary>
+    private async Task CreateBaseSchemaAsync(MySqlConnection connection)
+    {
+        var assembly = typeof(SchemaMigrationRunner).Assembly;
+        var resources = assembly.GetManifestResourceNames()
+            .Where(name => name.StartsWith(BaseSchemaResourcePrefix, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (resources.Length == 0)
+            throw new InvalidOperationException("The base schema SQL is missing from the build.");
+        _logger.LogInformation("Empty database: creating the base schema from {Count} files.", resources.Length);
+        foreach (var resource in resources)
+        {
+            await using var stream = assembly.GetManifestResourceStream(resource)!;
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            var sql = await reader.ReadToEndAsync();
+            foreach (var statement in sql.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                await connection.ExecuteAsync(statement);
+        }
+    }
+
+    internal const string BaseSchemaResourcePrefix = "nodeck.schema.";
 
     private static Task<bool> TableExistsAsync(MySqlConnection connection, string table) =>
         connection.ExecuteScalarAsync<bool>("""
