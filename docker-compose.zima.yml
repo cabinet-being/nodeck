@@ -33,6 +33,8 @@ services:
     volumes:
       - /DATA/AppData/nodeck/data:/app/data
       - /DATA/AppData/nodeck/backups:/app/migration-backup:ro
+    networks:
+      - nodeck
     depends_on:
       nodeck-mysql:
         condition: service_healthy
@@ -72,6 +74,8 @@ services:
       MYSQL_USER: nodeck
       MYSQL_PASSWORD: change-me
       MYSQL_ROOT_PASSWORD: change-me
+    networks:
+      - nodeck
     volumes:
       - /DATA/AppData/nodeck/mysql:/var/lib/mysql
     healthcheck:
@@ -86,6 +90,12 @@ services:
         - container: /var/lib/mysql
           description:
             en_us: MySQL database files
+
+# An explicit network: without it ZimaOS attaches both containers to Docker's default
+# "bridge", where nodeck cannot find nodeck-mysql by name.
+networks:
+  nodeck:
+    driver: bridge
 
 x-casaos:
   architectures:
