@@ -46,6 +46,8 @@ public sealed record ContainedCardResponse(
 {
     public string? PlaybackUrl { get; init; }
     public string? PosterUrl { get; init; }
+    /// <summary>"image", "gif" or "video" from the media metadata; null when unknown.</summary>
+    public string? MediaType { get; init; }
 }
 
 public sealed record RelationCardSummary(

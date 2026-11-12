@@ -220,12 +220,12 @@ public static class CardEndpoints
 
                 if (images.Count < 2)
                 {
-                    return Results.BadRequest(new { error = $"{type} cards require at least two images." });
+                    return Results.BadRequest(new { error = $"{type} cards require at least two files." });
                 }
 
                 var createdCollection = await repository.CreateCollectionAsync(
                     new CreateCardCollectionData(type, title, propertiesJson, metadata, images, relations),
-                    previewService.SaveImageAndCreatePreviewAsync,
+                    previewService.SaveMediaAndCreatePreviewAsync,
                     previewService.DeleteCardFiles);
 
                 return Results.Created($"/api/cards/{createdCollection.Id}", createdCollection);

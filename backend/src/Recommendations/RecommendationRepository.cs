@@ -185,6 +185,7 @@ public sealed class RecommendationRepository
             contextTags = (await connection.QueryAsync<long>(new CommandDefinition(
                 "SELECT DISTINCT tag_id FROM card_tags WHERE card_id IN @Ids ORDER BY tag_id LIMIT 100;",
                 new { Ids = contextMembers.ToArray() }, cancellationToken: cancellationToken))).ToHashSet();
+            candidateIds.UnionWith(await GetContextCandidatesAsync(connection, contextTags, cancellationToken));
         }
 
         // Build a bounded preference profile from actual assigned tags. Repeated daily
@@ -236,14 +237,12 @@ public sealed class RecommendationRepository
         }
         double ContextWeight(long tagId) => contextTags.Contains(tagId) ? o.ContextTagWeight : 0;
 
-        var strongestContextTags = contextTags
-            .OrderByDescending(tagId => Math.Max(ContextWeight(tagId), tagWeights.GetValueOrDefault(tagId)))
-            .ThenBy(tagId => tagId).Take(4);
-        var strongestProfileTags = tagWeights.Where(pair => pair.Value > 0 &&
+        // With a context card its shared tags already supplied the candidates (see
+        // GetContextCandidatesAsync); the profile then only adds a few cards of its own.
+        var strongestTags = tagWeights.Where(pair => pair.Value > 0 &&
                 !contextTags.Contains(pair.Key))
             .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key)
-            .Take(contextTags.Count > 0 ? 4 : 8).Select(pair => pair.Key);
-        var strongestTags = strongestContextTags.Concat(strongestProfileTags).ToArray();
+            .Take(contextTags.Count > 0 ? 2 : 8).Select(pair => pair.Key).ToArray();
         foreach (var tagId in strongestTags)
         {
             var related = await connection.QueryAsync<long>(new CommandDefinition("""
@@ -331,34 +330,7 @@ public sealed class RecommendationRepository
         // Every candidate tag needs a specificity: affinity is a mean over all of a card's tags.
         var involvedTags = scoringTagWeights.Keys.Concat(contextTags)
             .Concat(tagsByCard.Values.SelectMany(tags => tags)).Distinct().ToArray();
-        var specificity = new Dictionary<long, double>();
-        if (involvedTags.Length > 0)
-        {
-            var topLevelCount = Math.Max(1, await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
-                SELECT COUNT(*) FROM cards c
-                WHERE c.type IN ('media', 'comic', 'set')
-                  AND NOT EXISTS (SELECT 1 FROM card_relations r
-                                  WHERE r.to_card_id = c.id AND r.relation_type = 'contains');
-                """, cancellationToken: cancellationToken)));
-            var frequencies = (await connection.QueryAsync<TagFrequencyRow>(new CommandDefinition("""
-                SELECT ct.tag_id AS TagId, COUNT(DISTINCT ct.card_id) AS Df
-                FROM card_tags ct WHERE ct.tag_id IN @Ids GROUP BY ct.tag_id;
-                """, new { Ids = involvedTags }, cancellationToken: cancellationToken)))
-                .ToDictionary(row => row.TagId, row => row.Df);
-            var categories = (await connection.QueryAsync<TagCategoryRow>(new CommandDefinition(
-                "SELECT id AS TagId, category AS Category FROM tags WHERE id IN @Ids;",
-                new { Ids = involvedTags }, cancellationToken: cancellationToken)))
-                .ToDictionary(row => row.TagId, row => row.Category);
-            foreach (var tagId in involvedTags)
-            {
-                var multiplier = categories.TryGetValue(tagId, out var category) &&
-                    o.CategoryMultipliers.TryGetValue(category, out var mapped)
-                        ? mapped : o.UnknownCategoryMultiplier;
-                specificity[tagId] = multiplier *
-                    Math.Log(1 + (double)topLevelCount / (1 + frequencies.GetValueOrDefault(tagId))) /
-                    Math.Log(1 + topLevelCount);
-            }
-        }
+        var specificity = await GetSpecificityAsync(connection, involvedTags, cancellationToken);
         double Spec(long tagId) => specificity.GetValueOrDefault(tagId);
 
         // Affinity: specificity-weighted mean of the card's tags' profile weights, each
@@ -366,6 +338,8 @@ public sealed class RecommendationRepository
         // for almost every card of a familiar genre and stopped telling cards apart.
         // Leave-one-out: a card's own share of the profile is removed first.
         var profileMax = scoringTagWeights.Values.Select(Math.Abs).DefaultIfEmpty(0).Max();
+        // "Similar" is about the context card; the viewer's taste only breaks near-ties.
+        var affinityWeight = o.WAffinity * (contextTags.Count > 0 ? o.ContextAffinityFactor : 1.0);
         var contextSpecTotal = contextTags.Sum(Spec);
         foreach (var (cardId, tags) in tagsByCard)
         {
@@ -384,7 +358,7 @@ public sealed class RecommendationRepository
                 // The prior shrinks sparsely tagged cards toward zero: one shared generic tag
                 // must not look like a perfect match.
                 if (specTotal > 0)
-                    scores[cardId] += o.WAffinity * o.AffinityScale * weighted / (specTotal + o.AffinitySpecPrior);
+                    scores[cardId] += affinityWeight * o.AffinityScale * weighted / (specTotal + o.AffinitySpecPrior);
             }
             if (contextSpecTotal > 0)
                 scores[cardId] += o.WContext * o.ContextScale *
@@ -530,6 +504,72 @@ public sealed class RecommendationRepository
         return rankedIds.Where(byId.ContainsKey)
             .Select(id => new RecommendationItem(ToSummary(byId[id]), Math.Round(selectedScores[id], 3)))
             .ToArray();
+    }
+
+    /// <summary>
+    /// Specificity of each tag: inverse document frequency over top-level cards, scaled by
+    /// the tag category (rarer tags and informative categories count more).
+    /// </summary>
+    private async Task<Dictionary<long, double>> GetSpecificityAsync(MySqlConnection connection,
+        long[] tagIds, CancellationToken cancellationToken)
+    {
+        var o = _options;
+        var specificity = new Dictionary<long, double>();
+        if (tagIds.Length == 0) return specificity;
+        var topLevelCount = Math.Max(1, await connection.ExecuteScalarAsync<long>(new CommandDefinition("""
+            SELECT COUNT(*) FROM cards c
+            WHERE c.type IN ('media', 'comic', 'set')
+              AND NOT EXISTS (SELECT 1 FROM card_relations r
+                              WHERE r.to_card_id = c.id AND r.relation_type = 'contains');
+            """, cancellationToken: cancellationToken)));
+        var frequencies = (await connection.QueryAsync<TagFrequencyRow>(new CommandDefinition("""
+            SELECT ct.tag_id AS TagId, COUNT(DISTINCT ct.card_id) AS Df
+            FROM card_tags ct WHERE ct.tag_id IN @Ids GROUP BY ct.tag_id;
+            """, new { Ids = tagIds }, cancellationToken: cancellationToken)))
+            .ToDictionary(row => row.TagId, row => row.Df);
+        var categories = (await connection.QueryAsync<TagCategoryRow>(new CommandDefinition(
+            "SELECT id AS TagId, category AS Category FROM tags WHERE id IN @Ids;",
+            new { Ids = tagIds }, cancellationToken: cancellationToken)))
+            .ToDictionary(row => row.TagId, row => row.Category);
+        foreach (var tagId in tagIds)
+        {
+            var multiplier = categories.TryGetValue(tagId, out var category) &&
+                o.CategoryMultipliers.TryGetValue(category, out var mapped)
+                    ? mapped : o.UnknownCategoryMultiplier;
+            specificity[tagId] = multiplier *
+                Math.Log(1 + (double)topLevelCount / (1 + frequencies.GetValueOrDefault(tagId))) /
+                Math.Log(1 + topLevelCount);
+        }
+        return specificity;
+    }
+
+    /// <summary>
+    /// Cards that share the most specific tags with the context card, best first. Each tag
+    /// counts with its specificity, so a shared artist or character outweighs many shared
+    /// generic tags, and every card in the library can be found, not only the newest ones.
+    /// </summary>
+    private async Task<IEnumerable<long>> GetContextCandidatesAsync(MySqlConnection connection,
+        IReadOnlyCollection<long> contextTags, CancellationToken cancellationToken)
+    {
+        if (contextTags.Count == 0) return [];
+        var specificity = await GetSpecificityAsync(connection, contextTags.ToArray(), cancellationToken);
+        var weights = specificity.Where(pair => pair.Value > 0)
+            .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key)
+            .Take(_options.ContextCandidateTagLimit)
+            .Select(pair => new { t = pair.Key, w = Math.Round(pair.Value, 6) })
+            .ToArray();
+        if (weights.Length == 0) return [];
+        return await connection.QueryAsync<long>(new CommandDefinition("""
+            SELECT ct.card_id
+            FROM card_tags ct
+            JOIN JSON_TABLE(@Weights, '$[*]' COLUMNS (
+                tag_id BIGINT PATH '$.t', weight DOUBLE PATH '$.w')) jt ON jt.tag_id = ct.tag_id
+            JOIN cards c ON c.id = ct.card_id AND c.type IN ('media', 'comic', 'set')
+            GROUP BY ct.card_id
+            ORDER BY SUM(jt.weight) DESC, ct.card_id DESC
+            LIMIT @Limit;
+            """, new { Weights = System.Text.Json.JsonSerializer.Serialize(weights),
+                Limit = _options.ContextCandidateLimit }, cancellationToken: cancellationToken));
     }
 
     private async Task<HashSet<long>> GetAvailableIdsAsync(MySqlConnection connection, long[] ids,

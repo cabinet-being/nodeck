@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { resolveApiUrl, type ContainedCard } from '@/api/cards';
+import { containedVideoUrl, resolveApiUrl, type ContainedCard } from '@/api/cards';
 import { usePagerInput } from '@/hooks/use-pager-input';
 import { parsePositiveInt, useUrlState } from '@/hooks/use-url-state';
 import { StagePager } from '@/components/stage-pager';
@@ -44,7 +44,12 @@ export function ComicReader({
         {mode === 'page' ? (
           currentPage ? (
             <div {...pager.swipeProps} className="relative flex min-h-[16rem] items-center justify-center overflow-hidden sm:min-h-[28rem]">
-              {currentPage.contentUrl ? <img src={resolveApiUrl(currentPage.contentUrl)} alt={currentPage.title ?? `Page ${pageIndex + 1}`} className="max-h-[calc(100dvh-7rem)] max-w-full object-contain" /> : <span className="p-4 text-sm">Page {pageIndex + 1}</span>}
+              {containedVideoUrl(currentPage) ? (
+                <video key={currentPage.id} src={resolveApiUrl(containedVideoUrl(currentPage)!)} controls playsInline preload="metadata"
+                  poster={currentPage.posterUrl ? resolveApiUrl(currentPage.posterUrl) : undefined}
+                  aria-label={currentPage.title ?? `Page ${pageIndex + 1}`}
+                  className="relative z-10 max-h-[calc(100dvh-7rem)] max-w-full object-contain" />
+              ) : currentPage.contentUrl ? <img src={resolveApiUrl(currentPage.contentUrl)} alt={currentPage.title ?? `Page ${pageIndex + 1}`} className="max-h-[calc(100dvh-7rem)] max-w-full object-contain" /> : <span className="p-4 text-sm">Page {pageIndex + 1}</span>}
               <StagePager
                 canPrev={pageIndex > 0}
                 canNext={pageIndex < pages.length - 1}
@@ -57,7 +62,13 @@ export function ComicReader({
               />
             </div>
           ) : <p className="text-stage-foreground/70 p-6 text-sm">No pages in this comic.</p>
-        ) : pages.map((page, index) => (
+        ) : pages.map((page, index) => containedVideoUrl(page) ? (
+          // A link around <video> would swallow the player controls, so videos stay unwrapped.
+          <video key={page.id} src={resolveApiUrl(containedVideoUrl(page)!)} controls playsInline preload="metadata"
+            poster={page.posterUrl ? resolveApiUrl(page.posterUrl) : undefined}
+            aria-label={page.title ?? `Page ${index + 1}`}
+            className="mx-auto block max-h-[calc(100dvh-7rem)] w-full max-w-5xl object-contain" />
+        ) : (
           <a key={page.id} href={`/cards/${page.id}`} onClick={onNavigate} className="block" aria-label={`Open page ${index + 1}${page.title ? `: ${page.title}` : ''}`}>
             {page.contentUrl ? <img src={resolveApiUrl(page.contentUrl)} alt={page.title ?? `Page ${index + 1}`} className="mx-auto max-h-none w-full max-w-5xl object-contain" loading="lazy" /> : <span className="block p-4 text-sm">Open page {index + 1}</span>}
           </a>

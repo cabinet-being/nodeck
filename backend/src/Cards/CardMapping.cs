@@ -91,6 +91,7 @@ internal static class CardMapping
         {
             PlaybackUrl = metadata["playback_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/playback",
             PosterUrl = metadata["poster_path"]?.GetValue<string>() is null ? null : $"/api/cards/{card.Id}/poster",
+            MediaType = metadata["media_type"]?.GetValue<string>(),
         };
     }
 }

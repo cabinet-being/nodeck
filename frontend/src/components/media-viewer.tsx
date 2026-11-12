@@ -99,7 +99,8 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
             controls
             playsInline
             preload="metadata"
-            className={cn('max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]')}
+            // Above pager overlays, so the player controls stay usable.
+            className={cn('relative z-10 max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]')}
           />
         ) : (
           wrapImage ? wrapImage(image, { actualSize }) : image

@@ -2,6 +2,18 @@
 
 All notable changes to nodeck are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.4] — 2026-11-12
+
+### Fixed
+
+- **Cards could not be created when nodeck is opened over plain HTTP** (for example `http://<server-ip>:5080` on ZimaOS). Browsers provide `crypto.randomUUID` and `crypto.subtle` only on HTTPS or localhost, so every bulk-import upload failed with "randomUUID is not a function", files chosen for a comic or set disappeared, and card views were never recorded. nodeck now falls back to `crypto.getRandomValues` and a built-in SHA-256, so uploads, duplicate checks, and view tracking work on any address.
+- **Comics and sets accept GIFs and videos.** Uploading a comic or set with GIF, MP4, MOV or WebM pages created only image pages before; pages now go through the same media pipeline as single cards (poster, browser playback copy, analysis). The comic reader and set viewer play video pages, and contained cards report `mediaType` (`image`, `gif`, `video`) in the API.
+- **"Similar" follows the open card.** Candidates are now the cards that share the most specific tags with it, from the whole library rather than only the newest cards of a few tags, and your viewing profile only nudges the order (`Recommendations:ContextAffinityFactor`, default 0.25). Before, the list was dominated by recently viewed cards and the same cards repeated on every page.
+
+### Added
+
+- The **New card** page accepts a dropped file for a single media card.
+
 ## [0.1.3] — 2026-11-11
 
 ### Added

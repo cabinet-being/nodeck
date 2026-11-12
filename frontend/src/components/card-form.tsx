@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { randomUuid } from '@/lib/uuid';
 import { ArrowDown, ArrowUp, GripVertical, Plus, Trash2, Upload } from 'lucide-react';
 
 import { cardTypes, relationTypes, type Card, type CreateRelationInput } from '@/api/cards';
@@ -94,13 +95,32 @@ export function CardForm({
           </label>
 
           {value.type === 'media' ? (
-            <div className="grid gap-2">
+            <div
+              className={[
+                'grid gap-2 rounded-lg border border-dashed p-4 transition-colors',
+                isDraggingOver ? 'border-primary bg-muted' : 'border-border',
+              ].join(' ')}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setIsDraggingOver(true);
+              }}
+              onDragLeave={() => setIsDraggingOver(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setIsDraggingOver(false);
+                const file = Array.from(event.dataTransfer.files).find(isSupportedMedia);
+                setUploadError(file ? null : 'Unsupported file. Choose JPEG, PNG, WebP, GIF, MP4, MOV, or WebM.');
+                if (file) onValueChange({ ...value, image: file });
+              }}
+            >
               <span className="text-sm font-medium">Media file</span>
+              <span className="text-muted-foreground text-xs">Drop a file here or choose one</span>
               <FilePicker
-                accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,.mov"
+                accept={mediaAccept}
                 fileName={value.image?.name}
                 onFiles={(files) => onValueChange({ ...value, image: files[0] })}
               />
+              {uploadError ? <div className="text-destructive text-sm">{uploadError}</div> : null}
             </div>
           ) : null}
 
@@ -124,10 +144,10 @@ export function CardForm({
               >
                 <div className="grid gap-2">
                   <Upload className="text-muted-foreground mx-auto size-6" />
-                  <div className="text-sm font-medium">Drop images here</div>
+                  <div className="text-sm font-medium">Drop images, GIFs or videos here</div>
                   <FilePicker
-                    label="Choose images"
-                    accept="image/png,image/jpeg,image/webp"
+                    label="Choose files"
+                    accept={mediaAccept}
                     multiple
                     fileName={value.images.length > 0 ? `${value.images.length} selected` : undefined}
                     onFiles={addImages}
@@ -158,11 +178,21 @@ export function CardForm({
                         <GripVertical className="text-muted-foreground size-4" />
                         <span className="text-muted-foreground w-7 text-sm">{index + 1}</span>
                       </div>
-                      <img
-                        src={image.previewUrl}
-                        alt=""
-                        className="bg-muted size-20 rounded object-cover"
-                      />
+                      {isVideoFile(image.file) ? (
+                        <video
+                          src={image.previewUrl}
+                          muted
+                          playsInline
+                          preload="metadata"
+                          className="bg-muted size-20 rounded object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={image.previewUrl}
+                          alt=""
+                          className="bg-muted size-20 rounded object-cover"
+                        />
+                      )}
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium">{image.file.name}</div>
                         {index === 0 ? (
@@ -324,7 +354,7 @@ export function CardForm({
   );
 
   function addImages(files: File[]) {
-    const supportedImages = files.filter(isSupportedImage);
+    const supportedImages = files.filter(isSupportedMedia);
     const rejectedCount = files.length - supportedImages.length;
 
     setUploadError(rejectedCount > 0 ? `${rejectedCount} unsupported file(s) skipped.` : null);
@@ -338,7 +368,7 @@ export function CardForm({
       images: [
         ...value.images,
         ...supportedImages.map((file) => ({
-          id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+          id: `${file.name}-${file.size}-${file.lastModified}-${randomUuid()}`,
           file,
           previewUrl: URL.createObjectURL(file),
         })),
@@ -383,8 +413,20 @@ export function toRecord(rows: KeyValueRow[]) {
   }, {});
 }
 
-function isSupportedImage(file: File) {
-  return ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
+const mediaAccept = 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,.mov';
+const mediaExtensions = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'mov', 'webm']);
+
+function fileExtension(file: File) {
+  return file.name.split('.').pop()?.toLowerCase() ?? '';
+}
+
+/** Checked by extension too: browsers often leave `type` empty for .mov and some videos. */
+function isSupportedMedia(file: File) {
+  return mediaExtensions.has(fileExtension(file));
+}
+
+function isVideoFile(file: File) {
+  return file.type.startsWith('video/') || ['mp4', 'mov', 'webm'].includes(fileExtension(file));
 }
 
 export function toRelationInputs(rows: RelationRow[]) {

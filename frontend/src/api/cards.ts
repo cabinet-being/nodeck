@@ -15,7 +15,16 @@ export type ContainedCard = {
   contentUrl: string | null;
   isFavorite: boolean;
   position: number;
+  playbackUrl?: string | null;
+  posterUrl?: string | null;
+  /** "image", "gif" or "video"; null when the server does not know. */
+  mediaType?: string | null;
 };
+
+/** URL to play a contained video (browser-friendly copy when one exists), or null for still media. */
+export function containedVideoUrl(card: Pick<ContainedCard, 'mediaType' | 'playbackUrl' | 'contentUrl'>) {
+  return card.mediaType === 'video' ? card.playbackUrl || card.contentUrl : null;
+}
 
 export type Card = {
   id: number;
@@ -453,6 +462,9 @@ function normalizeCardData(data: unknown): unknown {
       contentUrl: record.ContentUrl,
       isFavorite: Boolean(record.IsFavorite),
       position: record.Position,
+      playbackUrl: record.PlaybackUrl ?? null,
+      posterUrl: record.PosterUrl ?? null,
+      mediaType: record.MediaType ?? null,
     };
   }
 

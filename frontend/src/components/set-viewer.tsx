@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 
-import { resolveApiUrl, type ContainedCard } from '@/api/cards';
+import { containedVideoUrl, resolveApiUrl, type ContainedCard } from '@/api/cards';
 import { MediaViewer } from '@/components/media-viewer';
 import { stageButtonClass } from '@/components/media-stage';
 import { usePagerInput } from '@/hooks/use-pager-input';
@@ -37,7 +37,8 @@ export function SetViewer({
 
   if (!current) return <p className="text-stage-foreground/70 p-6 text-sm">No cards in this set.</p>;
 
-  const mainSrc = current.contentUrl || current.previewUrl;
+  const videoSrc = containedVideoUrl(current);
+  const mainSrc = videoSrc || current.contentUrl || current.previewUrl;
   const canPrev = index > 0;
   const canNext = index < cards.length - 1;
   const sideButtonClass = `${stageButtonClass} absolute top-1/2 z-10 -translate-y-1/2 disabled:pointer-events-none disabled:opacity-0`;
@@ -49,8 +50,9 @@ export function SetViewer({
       <div {...pager.swipeProps}>
         {mainSrc ? (
           <MediaViewer
-            kind="image"
+            kind={videoSrc ? 'video' : 'image'}
             src={mainSrc}
+            posterUrl={current.posterUrl}
             fallbackSrc={current.previewUrl}
             alt={current.title ?? `Card ${index + 1}`}
             contentRef={contentRef}

@@ -43,6 +43,12 @@ public sealed class RecommendationOptions
     public double FreshnessMax { get; set; } = 2.0;
     public double FreshnessHalfLifeDays { get; set; } = 7.0;
 
+    // "Similar" (a context card is given): candidates are the cards that share the most
+    // specific tags with the context, and the personal profile only nudges the order.
+    public int ContextCandidateLimit { get; set; } = 300;
+    public int ContextCandidateTagLimit { get; set; } = 24;
+    public double ContextAffinityFactor { get; set; } = 0.25;
+
     // Rarer tags and more informative categories count more (see tags.category).
     public Dictionary<string, double> CategoryMultipliers { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {

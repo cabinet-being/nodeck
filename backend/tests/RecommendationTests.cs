@@ -623,6 +623,78 @@ public sealed class RecommendationTests
     }
 
     [DatabaseFact]
+    public async Task SimilarFindsOldCardSharingRareTagOutsideNewestPools()
+    {
+        // Small pools: before, an old card was found only if it was among the newest
+        // cards overall or the newest few cards of a context tag.
+        await using var scope = await RecommendationScope.CreateAsync(configureOptions: o =>
+        {
+            o.NewestCardLimit = 2;
+            o.TagCandidateLimit = 1;
+        });
+        var rare = await scope.AddTagAsync("rare series");
+        var common = await scope.AddTagAsync("common look");
+        var oldMatch = await scope.AddCardAsync("media", "old match");
+        await scope.AssignTagAsync(oldMatch, rare);
+        for (var i = 0; i < 5; i++)
+        {
+            var filler = await scope.AddCardAsync("media", $"newer {i}");
+            await scope.AssignTagAsync(filler, common);
+        }
+        var context = await scope.AddCardAsync("media", "context");
+        await scope.AssignTagAsync(context, rare);
+        await scope.AssignTagAsync(context, common);
+        var newestRareCard = await scope.AddCardAsync("media", "newest with rare tag");
+        await scope.AssignTagAsync(newestRareCard, rare);
+
+        var items = await scope.GetItemsAsync($"/api/recommendations?mode=pages&contextCardId={context}");
+
+        Assert.Contains(items, item => CardId(item) == oldMatch);
+        // It shares the rarest context tag, so it leads every card that only shares the common one.
+        Assert.All(items.Where(item => CardId(item) != oldMatch && CardId(item) != newestRareCard),
+            item => Assert.True(IndexOf(items, oldMatch) < IndexOf(items, CardId(item))));
+    }
+
+    [DatabaseFact]
+    public async Task SimilarRanksContextMatchAboveCardThatOnlyMatchesViewingProfile()
+    {
+        // Before, the viewer's profile counted as much as the context card, so a card that
+        // matched the profile on every tag beat a card sharing one of three context tags.
+        await using var scope = await RecommendationScope.CreateAsync(configureOptions: o => o.WSelfVote = 0);
+        var likedTags = new[]
+        {
+            await scope.AddTagAsync("liked genre"), await scope.AddTagAsync("liked mood"),
+            await scope.AddTagAsync("liked palette"),
+        };
+        var contextTags = new[]
+        {
+            await scope.AddTagAsync("context series"), await scope.AddTagAsync("context style"),
+            await scope.AddTagAsync("context place"),
+        };
+        var all = new List<long>();
+        for (var i = 0; i < 4; i++)
+        {
+            var favourite = await scope.AddCardAsync("media", $"liked {i}");
+            foreach (var tag in likedTags) await scope.AssignTagAsync(favourite, tag);
+            await scope.VoteAsync(favourite, 1, DateTime.UtcNow.Date);
+            all.Add(favourite);
+        }
+        var context = await scope.AddCardAsync("media", "context");
+        foreach (var tag in contextTags) await scope.AssignTagAsync(context, tag);
+        var contextMatch = await scope.AddCardAsync("media", "context match");
+        await scope.AssignTagAsync(contextMatch, contextTags[0]);
+        var profileMatch = await scope.AddCardAsync("media", "profile match");
+        foreach (var tag in likedTags) await scope.AssignTagAsync(profileMatch, tag);
+        all.AddRange([context, contextMatch, profileMatch]);
+        await scope.SameAgeAsync(all.ToArray());
+
+        var items = await scope.GetItemsAsync($"/api/recommendations?mode=pages&contextCardId={context}");
+
+        Assert.True(IndexOf(items, contextMatch) < IndexOf(items, profileMatch));
+        Assert.True(ScoreOf(items, contextMatch) > ScoreOf(items, profileMatch));
+    }
+
+    [DatabaseFact]
     public async Task ArtistTagOutranksGeneralTagOfEqualFrequency()
     {
         await using var scope = await RecommendationScope.CreateAsync();

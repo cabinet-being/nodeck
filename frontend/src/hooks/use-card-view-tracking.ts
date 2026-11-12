@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { randomUuid } from '@/lib/uuid';
 
 import { recordCardView } from '@/api/cards';
 
@@ -62,7 +63,7 @@ export function useCardViewTracking(cardId: number, kind: 'media' | 'collection'
         }
         const durationMs = Math.min(600000, Math.max(minimumDwellMs, Math.round(performance.now() - startedAt)));
         sentRef.current = true;
-        void recordCardView(cardId, crypto.randomUUID(), durationMs).catch(() => {
+        void recordCardView(cardId, randomUuid(), durationMs).catch(() => {
           // A view is attempted once per opening; avoid duplicate events after a network failure.
         });
       }, minimumDwellMs);

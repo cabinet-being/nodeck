@@ -1,4 +1,6 @@
 import * as React from 'react';
+import { sha256 } from '@/lib/sha256';
+import { randomUuid } from '@/lib/uuid';
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, Clock, CircleHelp, Copy, FileQuestion, Loader2, MoreHorizontal, Pause, X, XCircle, Plus, RotateCw, Trash2, Upload } from 'lucide-react';
 
 import { CardHttpError, createCard, createCollectionFromCards, getCard, getCardAnalysis, getCardCreationRequest, findDuplicatesByHash, updateCollectionChildren, type CardAnalysis, type Card } from '@/api/cards';
@@ -147,7 +149,6 @@ function matchesDescriptor(file: File, descriptor: FileDescriptor) {
 }
 
 async function sampledFingerprint(file: File): Promise<string> {
-  if (!globalThis.crypto?.subtle) throw new Error('WebCrypto unavailable');
   const sampleSize = 64 * 1024;
   const first = await file.slice(0, sampleSize).arrayBuffer();
   const last = await file.slice(Math.max(0, file.size - sampleSize)).arrayBuffer();
@@ -155,7 +156,7 @@ async function sampledFingerprint(file: File): Promise<string> {
   new DataView(bytes.buffer).setBigUint64(0, BigInt(file.size));
   bytes.set(new Uint8Array(first), 8);
   bytes.set(new Uint8Array(last), 8 + first.byteLength);
-  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes));
+  const digest = await sha256(bytes);
   return `sample-sha256-v1:${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
@@ -181,8 +182,7 @@ const maxHashBytes = 1024 * 1024 * 1024;
 
 async function tryFullHash(file: File): Promise<string | undefined> {
   try {
-    if (!globalThis.crypto?.subtle) return undefined;
-    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
+    const digest = await sha256(await file.arrayBuffer());
     return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
   } catch { return undefined; }
 }
@@ -676,7 +676,7 @@ export function BulkImportPage() {
               updateItem(item.id, { status: 'error', error: item.error });
               return;
             }
-            item.creationKey ??= globalThis.crypto.randomUUID();
+            item.creationKey ??= randomUuid();
             item.creationAttempted = true;
             updateItem(item.id, { creationKey: item.creationKey, creationAttempted: true });
             pendingItemPosts.current.add(item.id);
@@ -815,7 +815,7 @@ export function BulkImportPage() {
                 }
               }
               if (!group.cardId) {
-              group.creationKey ??= globalThis.crypto.randomUUID();
+              group.creationKey ??= randomUuid();
               group.creationAttempted = true;
               group.plannedChildCardIds ??= [...childCardIds];
               setGroups((current) => current.map((candidate) => candidate.id === group.id

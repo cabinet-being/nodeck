@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -79,6 +80,66 @@ public sealed class CardDuplicatesAndMoveApiTests
         Assert.Equal(Sha(first), await host.HashAsync(childIds[0]));
         Assert.Equal(Sha(second), await host.HashAsync(childIds[1]));
         Assert.Null(await host.HashAsync(comicId));
+    }
+
+    [DatabaseFact]
+    public async Task CollectionUploadAcceptsGifAndVideoPagesAndReportsTheirMediaType()
+    {
+        if (!CanRun("ffmpeg") || !CanRun("ffprobe")) return; // Same convention as the video preview tests.
+        await using var host = await ApiTestHost.CreateAsync();
+        var videoPath = Path.Combine(Path.GetTempPath(), $"nodeck-page-{Guid.NewGuid():N}.webm");
+        try
+        {
+            await GenerateWebmAsync(videoPath);
+            using var content = new MultipartFormDataContent
+            {
+                { new StringContent("set"), "type" },
+                { new ByteArrayContent(ApiTestHost.Png(30)), "images", "still.png" },
+                { new ByteArrayContent(ApiTestHost.Gif(31)), "images", "loop.gif" },
+                { new ByteArrayContent(await File.ReadAllBytesAsync(videoPath)), "images", "clip.webm" },
+            };
+            using var response = await host.Client.PostAsync("/api/cards", content);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var setId = await ApiTestHost.IdAsync(response);
+
+            using var details = await host.Client.GetAsync($"/api/cards/{setId}");
+            using var json = JsonDocument.Parse(await details.Content.ReadAsStringAsync());
+            var contained = json.RootElement.GetProperty("containedCards").EnumerateArray().ToArray();
+            Assert.Equal(["image", "gif", "video"], contained.Select(card => card.GetProperty("mediaType").GetString()));
+            Assert.NotEqual(JsonValueKind.Null, contained[2].GetProperty("posterUrl").ValueKind);
+        }
+        finally
+        {
+            File.Delete(videoPath);
+        }
+    }
+
+    private static bool CanRun(string tool)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(tool, "-version")
+                { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false });
+            process!.WaitForExit(10_000);
+            return process.ExitCode == 0;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    private static async Task GenerateWebmAsync(string path)
+    {
+        var start = new ProcessStartInfo("ffmpeg") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in new[] { "-y", "-f", "lavfi", "-i", "color=c=blue:s=32x24:r=4:d=1",
+                     "-c:v", "libvpx", "-f", "webm", path })
+            start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, $"ffmpeg could not generate the webm fixture: {await stderr}");
     }
 
     [DatabaseFact]

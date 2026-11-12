@@ -53,7 +53,7 @@ export function CreateCardPage({
       }
 
       if ((value.type === 'comic' || value.type === 'set') && value.images.length < 2) {
-        throw new Error(`${value.type} cards require at least two images.`);
+        throw new Error(`${value.type} cards require at least two files.`);
       }
 
       const created = await createCard({
