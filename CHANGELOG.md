@@ -14,6 +14,7 @@ All notable changes to nodeck are documented here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Browser extension 0.2.0: videos, single pictures and more sites.** **Save to nodeck…** is offered anywhere on a page and saves the image or video under the pointer, also behind a site's cover layer or video player controls. Videos are saved when a single file exists (the player's file, the page's `og:video`/`VideoObject` data or a site rule); streamed-only players now say they cannot be saved instead of failing. The gallery window can save files as separate **Cards** (also one picture from a gallery), shows videos, and a comic or set may have one page. New and improved site rules: Pixiv (all pages of a work in original size, artist and tags), Pixiv Fanbox (post images and files), X (original-size pictures, videos and GIFs as MP4, author and hashtags) and more video sites. Download the new package from **Library → Browser extension** and replace the old one.
 - **Pages no longer appear next to their comic or set.** Deck pages and Favorites hide a page when its comic or set is in the same deck (**With pages** shows them); Manage cards hides pages unless **Show pages of comics and sets** is ticked; the search palette lists the comic or set instead of its pages. Search now also finds a comic or set by the title of one of its pages.
 
 ### Fixed
