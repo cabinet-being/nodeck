@@ -6,6 +6,13 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+# Browser extension packages (Chrome and Firefox), served from /api/extension.
+FROM node:22.12-bookworm-slim AS extension
+ARG NODECK_VERSION=dev
+WORKDIR /src/extension
+COPY extension/ ./
+RUN NODECK_VERSION="$NODECK_VERSION" node build.mjs --out /out
+
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 COPY backend/MyApp.Api.csproj ./
@@ -43,4 +50,5 @@ RUN apt-get update \
 COPY --from=build /app/publish ./
 COPY --from=whisper-build /src/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=frontend /src/frontend/dist ./wwwroot
+COPY --from=extension /out/nodeck-chrome.zip /out/nodeck-firefox.zip ./extension/
 ENTRYPOINT ["dotnet", "MyApp.Api.dll"]

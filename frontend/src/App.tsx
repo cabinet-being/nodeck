@@ -13,6 +13,7 @@ import { CreateDeckPage } from '@/pages/create-deck-page';
 import { DeckDetailsPage } from '@/pages/deck-details-page';
 import { DecksPage } from '@/pages/decks-page';
 import { DuplicatesPage } from '@/pages/duplicates-page';
+import { ExtensionPage } from '@/pages/extension-page';
 import { EditDeckPage } from '@/pages/edit-deck-page';
 import { EditCardPage } from '@/pages/edit-card-page';
 import { FavoritesPage } from '@/pages/favorites-page';
@@ -171,6 +172,10 @@ function RouteContent({
 
   if (currentPath === '/duplicates') {
     return <DuplicatesPage onNavigate={onNavigate} />;
+  }
+
+  if (currentPath === '/extension') {
+    return <ExtensionPage />;
   }
 
   if (currentPath === '/sources') {

@@ -8,6 +8,7 @@ import {
   House,
   Layers3,
   Plus,
+  Puzzle,
   Tag,
   Upload,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ export const routes: { primary: RouteItem[]; library: RouteItem[]; create: Route
     { path: '/sources', label: 'Sources', icon: Globe },
     { path: '/cards', label: 'Manage cards', icon: Archive },
     { path: '/duplicates', label: 'Duplicates', icon: CopyCheck },
+    { path: '/extension', label: 'Browser extension', icon: Puzzle },
   ],
   create: [
     { path: '/cards/import', label: 'Import files', icon: Upload },

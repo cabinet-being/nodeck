@@ -6,6 +6,7 @@ using MyApp.Api.Cards;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
 using MyApp.Api.Duplicates;
+using MyApp.Api.Extension;
 using MyApp.Api.Interest;
 using MyApp.Api.Migrations;
 using MyApp.Api.Recommendations;
@@ -270,6 +271,7 @@ app.MapInterestEndpoints();
 app.MapRecommendationEndpoints();
 app.MapCatalogEndpoints();
 app.MapDuplicateEndpoints();
+app.MapExtensionEndpoints();
 app.MapGet("/api/learned-tags", async (LearnedTagRepository repository, CancellationToken cancellationToken) =>
     Results.Ok(await repository.GetStatusAsync(cancellationToken)));
 
