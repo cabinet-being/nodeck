@@ -16,6 +16,8 @@ public sealed record CardSummary(
     public string? PosterUrl { get; init; }
     public int? DeckPosition { get; init; }
     public JsonNode? MembershipProperties { get; init; }
+    /// <summary>The comic or set this media card is a page of; set only in card lists.</summary>
+    public long? ParentCardId { get; init; }
 }
 
 public sealed record CardDetails(

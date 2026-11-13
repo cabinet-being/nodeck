@@ -14,4 +14,6 @@ public sealed record CardListQuery(
     int Limit = 200,
     int Offset = 0,
     long? DeckId = null,
-    bool IncludeTotal = false);
+    bool IncludeTotal = false,
+    /// <summary>Hide media pages whose comic or set is also in the list (in a deck: also a member).</summary>
+    bool CollapsePages = false);

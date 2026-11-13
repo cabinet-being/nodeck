@@ -277,6 +277,7 @@ public static class CardEndpoints
         string? catalog_source,
         string? search,
         string? exclude_contained_media,
+        string? collapse_pages,
         string? sort,
         string? order,
         int? limit,
@@ -322,7 +323,8 @@ public static class CardEndpoints
                 limit ?? 200,
                 offset ?? 0,
                 deckId,
-                Paging.WantsTotal(include_total)));
+                Paging.WantsTotal(include_total),
+                IsTruthy(collapse_pages)));
         }
         catch (KeyNotFoundException)
         {

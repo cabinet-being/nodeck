@@ -319,4 +319,63 @@ public sealed class CardListScopeApiTests
             fullBody!.RootElement.GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("id").GetInt64()));
         Assert.Equal(1, fullBody.RootElement.GetProperty("cardCount").GetInt64());
     }
+    [DatabaseFact]
+    public async Task CollapsedDeckHidesOnlyPagesWhoseCollectionIsAlsoInTheDeck()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        var page = await host.InsertCardAsync("media", "collapse-page");
+        var comic = await host.InsertCardAsync("comic", "collapse-comic");
+        var lonePage = await host.InsertCardAsync("media", "collapse-lone-page");
+        var otherSet = await host.InsertCardAsync("set", "collapse-other-set");
+        var plain = await host.InsertCardAsync("media", "collapse-plain");
+        await host.AddChildAsync(comic, page, 0);
+        await host.AddChildAsync(otherSet, lonePage, 0);
+        var deckId = await host.CreateDeckAsync("collapse deck", comic, page, lonePage, plain);
+
+        var all = await host.ListAsync($"deck_id={deckId}");
+        var collapsed = await host.ListAsync($"deck_id={deckId}&collapse_pages=true");
+        using var totalResponse = await host.Client.GetAsync(
+            $"/api/cards?deck_id={deckId}&collapse_pages=true&include_total=true&limit=1");
+
+        Assert.Equal(new[] { comic, page, lonePage, plain }, DeckApiHost.Ids(all.Items));
+        Assert.Equal(new[] { comic, lonePage, plain }, DeckApiHost.Ids(collapsed.Items));
+        Assert.Equal("3", totalResponse.Headers.GetValues("X-Total-Count").Single());
+        var parents = all.Items.ToDictionary(item => item.GetProperty("id").GetInt64(),
+            item => item.GetProperty("parentCardId"));
+        Assert.Equal(comic, parents[page].GetInt64());
+        Assert.Equal(otherSet, parents[lonePage].GetInt64());
+        Assert.Equal(JsonValueKind.Null, parents[plain].ValueKind);
+        Assert.Equal(JsonValueKind.Null, parents[comic].ValueKind);
+    }
+
+    [DatabaseFact]
+    public async Task CollapsedLibraryKeepsPagesWhenTheirCollectionTypeIsFilteredOut()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        var token = Guid.NewGuid().ToString("N")[..8];
+        var page = await host.InsertCardAsync("media", $"{token}-page");
+        var comic = await host.InsertCardAsync("comic", $"{token}-comic");
+        var plain = await host.InsertCardAsync("media", $"{token}-plain");
+        await host.AddChildAsync(comic, page, 0);
+
+        var mixed = await host.ListAsync($"types=media,comic&search={token}&collapse_pages=true&sort=id&order=asc");
+        var mediaOnly = await host.ListAsync($"types=media&search={token}&collapse_pages=true&sort=id&order=asc");
+
+        Assert.Equal(new[] { comic, plain }, DeckApiHost.Ids(mixed.Items));
+        Assert.Equal(new[] { page, plain }, DeckApiHost.Ids(mediaOnly.Items));
+    }
+
+    [DatabaseFact]
+    public async Task SearchFindsACollectionByThePageTitle()
+    {
+        await using var host = await DeckApiHost.CreateAsync();
+        var token = Guid.NewGuid().ToString("N")[..8];
+        var page = await host.InsertCardAsync("media", $"page {token}");
+        var comic = await host.InsertCardAsync("comic", "named differently");
+        await host.AddChildAsync(comic, page, 0);
+
+        var collections = await host.ListAsync($"search={token}&exclude_contained_media=true");
+
+        Assert.Equal(new[] { comic }, DeckApiHost.Ids(collections.Items));
+    }
 }

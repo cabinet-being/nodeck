@@ -31,7 +31,7 @@ public sealed partial class CardRepository
     public async Task<CardListPage> ListPageAsync(CardListQuery query)
     {
         var (types, mediaType, search, excludeContainedMedia, tagIds, sourceId,
-            catalogTagIds, catalogSourceId, sort, order, limit, offset, deckId, includeTotal) = query;
+            catalogTagIds, catalogSourceId, sort, order, limit, offset, deckId, includeTotal, collapsePages) = query;
         var positionSort = string.Equals(sort, "position", StringComparison.OrdinalIgnoreCase);
         if (positionSort && deckId is null)
             throw new ArgumentException("sort=position requires deck_id.", nameof(query));
@@ -80,6 +80,10 @@ public sealed partial class CardRepository
                     JOIN card_tags ct ON ct.card_id = child.to_card_id
                     WHERE child.relation_type = 'contains' AND ct.tag_id IN ({matchingTagIds})
                     UNION
+                    SELECT child.from_card_id FROM card_relations child
+                    JOIN cards page ON page.id = child.to_card_id
+                    WHERE child.relation_type = 'contains' AND page.title LIKE @SearchLike ESCAPE '!'
+                    UNION
                     SELECT r.from_card_id FROM card_relations r
                     JOIN tags t ON t.legacy_card_id = r.to_card_id
                     WHERE r.relation_type = 'tagged_with' AND t.id IN ({matchingTagIds})
@@ -97,6 +101,26 @@ public sealed partial class CardRepository
                 NOT EXISTS (
                     SELECT 1
                     FROM card_relations r
+                    WHERE r.to_card_id = cards.id
+                      AND r.relation_type = 'contains'
+                )
+                """);
+        }
+
+        if (collapsePages && !excludeContainedMedia)
+        {
+            // A page stays when its comic or set is not part of this list: outside the deck, or
+            // filtered out by type. Search and catalog filters match a collection through its
+            // pages, so the parent of a matching page is listed in its place.
+            var parentInList = deckId is null
+                ? "JOIN cards parent ON parent.id = r.from_card_id" +
+                  (types.Count > 0 ? " AND parent.type IN @Types" : "")
+                : "JOIN deck_cards parent_dc ON parent_dc.card_id = r.from_card_id AND parent_dc.deck_id = @DeckId";
+            conditions.Add($$"""
+                NOT EXISTS (
+                    SELECT 1
+                    FROM card_relations r
+                    {{parentInList}}
                     WHERE r.to_card_id = cards.id
                       AND r.relation_type = 'contains'
                 )
@@ -205,7 +229,10 @@ public sealed partial class CardRepository
                 cards.properties AS {nameof(DbListCard.Properties)},
                 cards.metadata AS {nameof(DbListCard.Metadata)},
                 {FavoriteSelectSql("cards.id")} AS {nameof(DbListCard.IsFavorite)},
-                {deckColumns}
+                {deckColumns},
+                (SELECT parent_relation.from_card_id FROM card_relations parent_relation
+                 WHERE parent_relation.to_card_id = cards.id AND parent_relation.relation_type = 'contains'
+                 LIMIT 1) AS {nameof(DbListCard.ParentCardId)}
             FROM cards
             {deckJoin}
             {where}
@@ -225,6 +252,7 @@ public sealed partial class CardRepository
             {
                 DeckPosition = row.DeckPosition,
                 MembershipProperties = deckId is null ? null : CardMetadata.ParseOptionalJson(row.MembershipProperties),
+                ParentCardId = row.ParentCardId,
             }).ToList();
         return new CardListPage(items, total);
     }
@@ -243,4 +271,5 @@ internal sealed class DbListCard
     public long IsFavorite { get; set; }
     public int? DeckPosition { get; set; }
     public string? MembershipProperties { get; set; }
+    public long? ParentCardId { get; set; }
 }
