@@ -170,4 +170,39 @@ public sealed class CardDatabaseInitializer
         if (hasIndex == 0)
             await connection.ExecuteAsync("ALTER TABLE cards ADD INDEX idx_cards_content_sha256 (content_sha256);");
     }
+
+    /// <summary>Perceptual hashes for near-duplicate detection and remembered "not duplicates" decisions.</summary>
+    public async Task InitializeDuplicatesAsync()
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await connection.ExecuteAsync("""
+            CREATE TABLE IF NOT EXISTS card_perceptual_hashes (
+                card_id BIGINT NOT NULL PRIMARY KEY,
+                content_sha256 CHAR(64) NOT NULL,
+                hash BIGINT NULL,
+                computed_at_utc DATETIME(6) NOT NULL,
+                CONSTRAINT fk_card_perceptual_hashes_card
+                    FOREIGN KEY (card_id) REFERENCES cards(id)
+                    ON DELETE CASCADE
+            );
+            """);
+        await connection.ExecuteAsync("""
+            CREATE TABLE IF NOT EXISTS card_duplicate_dismissals (
+                low_card_id BIGINT NOT NULL,
+                high_card_id BIGINT NOT NULL,
+                dismissed_at_utc DATETIME(6) NOT NULL,
+                PRIMARY KEY (low_card_id, high_card_id),
+                CONSTRAINT chk_card_duplicate_dismissals_order CHECK (low_card_id < high_card_id),
+                CONSTRAINT fk_card_duplicate_dismissals_low
+                    FOREIGN KEY (low_card_id) REFERENCES cards(id)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_card_duplicate_dismissals_high
+                    FOREIGN KEY (high_card_id) REFERENCES cards(id)
+                    ON DELETE CASCADE,
+                INDEX idx_card_duplicate_dismissals_high (high_card_id)
+            );
+            """);
+    }
 }

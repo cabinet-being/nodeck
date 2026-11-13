@@ -27,6 +27,7 @@ public sealed class SchemaMigrationRunner
         (11, "tag-decision-log-v1"),
         (12, "card-content-hash-v1"),
         (13, "learned-custom-tags-v1"),
+        (14, "card-duplicates-v1"),
     ];
 
     private readonly string _connectionString;
@@ -125,6 +126,7 @@ public sealed class SchemaMigrationRunner
                     case 11: await _catalog.InitializeTagDecisionLogAsync(); break;
                     case 12: await _cards.InitializeContentHashAsync(); break;
                     case 13: await _catalog.InitializeLearnedTagsAsync(); break;
+                    case 14: await _cards.InitializeDuplicatesAsync(); break;
                 }
 
                 var after = await SnapshotAsync(connection);
@@ -169,7 +171,7 @@ public sealed class SchemaMigrationRunner
                     throw new InvalidOperationException(
                         "Migration 11 changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");
-                if ((version is 12 or 13) && after != previous)
+                if ((version is 12 or 13 or 14) && after != previous)
                     throw new InvalidOperationException(
                         $"Migration {version} changed existing row or file counts. " +
                         "Stop the API and restore the pre-migration backup before accepting writes.");

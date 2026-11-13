@@ -5,6 +5,7 @@ using MyApp.Api.Analysis.LearnedTags;
 using MyApp.Api.Cards;
 using MyApp.Api.Catalog;
 using MyApp.Api.Decks;
+using MyApp.Api.Duplicates;
 using MyApp.Api.Interest;
 using MyApp.Api.Migrations;
 using MyApp.Api.Recommendations;
@@ -125,6 +126,7 @@ if (!importingDanbooru && !analyzingCard && !seedingWdTags)
     builder.Services.AddHostedService<SpeechAnalysisWorker>();
     builder.Services.AddHostedService<LearnedTagWorker>();
     builder.Services.AddHostedService<ContentHashBackfillService>();
+    builder.Services.AddHostedService<PerceptualHashBackfillService>();
     builder.Services.AddHostedService<MyApp.Api.Catalog.SystemMetaTagBackfillService>();
     builder.Services.AddHostedService<OrphanScanService>();
 }
@@ -267,6 +269,7 @@ app.MapFavoriteEndpoints();
 app.MapInterestEndpoints();
 app.MapRecommendationEndpoints();
 app.MapCatalogEndpoints();
+app.MapDuplicateEndpoints();
 app.MapGet("/api/learned-tags", async (LearnedTagRepository repository, CancellationToken cancellationToken) =>
     Results.Ok(await repository.GetStatusAsync(cancellationToken)));
 

@@ -13,6 +13,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MyApp.Api.Analysis;
 using MyApp.Api.Cards;
+using MyApp.Api.Duplicates;
 using MyApp.Api.Storage;
 using MySqlConnector;
 using SixLabors.ImageSharp;
@@ -73,7 +74,7 @@ internal sealed class ApiTestHost : IAsyncDisposable
             while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "database/init/001_cards.sql")))
                 directory = directory.Parent;
             Assert.NotNull(directory);
-            foreach (var file in new[] { "001_cards.sql", "002_catalog.sql" })
+            foreach (var file in new[] { "001_cards.sql", "002_catalog.sql", "003_interest.sql" })
             {
                 var sql = await File.ReadAllTextAsync(Path.Combine(directory.FullName, "database/init", file));
                 foreach (var statement in sql.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -122,6 +123,7 @@ internal sealed class ApiTestHost : IAsyncDisposable
                 }
             });
             app.MapCardEndpoints();
+            app.MapDuplicateEndpoints();
             if (withLibraryApi)
             {
                 app.MapDeckEndpoints();
