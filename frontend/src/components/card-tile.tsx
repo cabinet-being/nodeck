@@ -45,6 +45,7 @@ export function CardTile({
   caption,
   actions,
   showFavorite = true,
+  onFavoriteChange,
   className,
 }: {
   card: VisualCard;
@@ -55,6 +56,8 @@ export function CardTile({
   /** Extra round port buttons shown next to the favorite button. */
   actions?: React.ReactNode;
   showFavorite?: boolean;
+  /** Called after the favorite button added or removed the card. */
+  onFavoriteChange?: (isFavorite: boolean) => void;
   className?: string;
 }) {
   const [favoriteOverride, setFavoriteOverride] = React.useState<boolean | null>(null);
@@ -127,7 +130,7 @@ export function CardTile({
               <FavoriteToggle
                 cardId={card.id}
                 isFavorite={isFavorite}
-                onChange={setFavoriteOverride}
+                onChange={(next) => { setFavoriteOverride(next); onFavoriteChange?.(next); }}
                 className="bg-surface/95 text-foreground shadow-1 size-8 rounded-full pointer-coarse:size-11"
               />
             ) : null}

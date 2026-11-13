@@ -107,6 +107,7 @@ export function VisualCardWall({
   onNavigate,
   renderCaption,
   renderActions,
+  onFavoriteChange,
 }: {
   cards: VisualCard[];
   view: VisualCardView;
@@ -115,6 +116,7 @@ export function VisualCardWall({
   renderCaption?: (index: number) => React.ReactNode;
   /** Extra round port buttons for a tile. */
   renderActions?: (index: number) => React.ReactNode;
+  onFavoriteChange?: (index: number, isFavorite: boolean) => void;
 }) {
   return (
     <div
@@ -139,6 +141,7 @@ export function VisualCardWall({
           onNavigate={onNavigate}
           caption={renderCaption ? renderCaption(index) : undefined}
           actions={renderActions ? renderActions(index) : undefined}
+          onFavoriteChange={onFavoriteChange ? (isFavorite) => onFavoriteChange(index, isFavorite) : undefined}
         />
       ))}
     </div>

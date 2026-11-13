@@ -161,7 +161,7 @@ function RouteContent({
   }
 
   if (currentPath === '/favorites') {
-    return <FavoritesPage onNavigate={onNavigate} />;
+    return <FavoritesPage currentSearch={currentSearch} onNavigate={onNavigate} onNavigateTo={onNavigateTo} />;
   }
 
   if (currentPath === '/tags') {

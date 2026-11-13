@@ -13,11 +13,14 @@ import { Sheet } from '@/components/ui/sheet';
 
 export function DeckDetailsPage({
   deckId,
+  basePath = `/decks/${deckId}`,
   currentSearch,
   onNavigate,
   onNavigateTo,
 }: {
   deckId: number;
+  /** Address of this page; filters and paging keep it (Favorites lives at /favorites). */
+  basePath?: string;
   currentSearch: string;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   onNavigateTo: (path: string) => void;
@@ -87,24 +90,29 @@ export function DeckDetailsPage({
 
     try {
       await removeCardFromDeck(deckId, cardId);
-      if (currentDeckId.current !== deckId) return;
-      const updated = await getDeck(deckId, { includeCards: false }).catch(() => null);
-      if (currentDeckId.current !== deckId) return;
-      if (updated) setResult({ deckId, deck: updated, error: null });
-      if (pageCount.current <= 1 && page > 1) {
-        const params = new URLSearchParams(currentSearch);
-        if (page - 1 <= 1) params.delete('page');
-        else params.set('page', String(page - 1));
-        onNavigateTo(`/decks/${deckId}${params.toString() ? `?${params.toString()}` : ''}`);
-      } else {
-        setReloadKey((key) => key + 1);
-      }
+      await refreshAfterRemoval();
     } catch (error) {
       if (currentDeckId.current === deckId) {
         setRemoveError(error instanceof Error ? error.message : 'Unable to remove card.');
       }
     } finally {
       if (currentDeckId.current === deckId) setRemovingId(null);
+    }
+  }
+
+  // Re-reads the card count and the current page, stepping back when the last card of a page left.
+  async function refreshAfterRemoval() {
+    if (currentDeckId.current !== deckId) return;
+    const updated = await getDeck(deckId, { includeCards: false }).catch(() => null);
+    if (currentDeckId.current !== deckId) return;
+    if (updated) setResult({ deckId, deck: updated, error: null });
+    if (pageCount.current <= 1 && page > 1) {
+      const params = new URLSearchParams(currentSearch);
+      if (page - 1 <= 1) params.delete('page');
+      else params.set('page', String(page - 1));
+      onNavigateTo(`${basePath}${params.toString() ? `?${params.toString()}` : ''}`);
+    } else {
+      setReloadKey((key) => key + 1);
     }
   }
 
@@ -145,13 +153,15 @@ export function DeckDetailsPage({
       {removeError ? <p className="text-destructive text-sm" role="alert">{removeError}</p> : null}
       <CardBrowser
         scope={{ kind: 'deck', deckId }}
-        basePath={`/decks/${deckId}`}
+        basePath={basePath}
         currentSearch={currentSearch}
         onNavigate={onNavigate}
         onNavigateTo={onNavigateTo}
         reloadKey={reloadKey}
         emptyMessage="This deck has no cards yet."
         onPageLoaded={({ count }) => { pageCount.current = count; }}
+        // In Favorites, un-hearting a card removes it from this deck, so the list follows at once.
+        onFavoriteChange={isFavorites ? (_card, isFavorite) => { if (!isFavorite) void refreshAfterRemoval(); } : undefined}
         renderActions={canRemove ? (card) => (
           <RemoveFromDeckButton
             card={card}

@@ -2,6 +2,12 @@
 
 All notable changes to nodeck are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Favorites showed two heart buttons on every card** (since 0.1.5). Favorites now uses the regular deck view: one heart per card, search and tag/source filters like the gallery and other decks, and un-hearting a card removes it from the list at once. The page stays at `/favorites`.
+
 ## [0.1.5] — 2026-11-13
 
 ### Added

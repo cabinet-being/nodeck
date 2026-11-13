@@ -28,6 +28,7 @@ export function CardBrowser({
   title,
   renderCaption,
   renderActions,
+  onFavoriteChange,
   reloadKey = 0,
   onPageLoaded,
   emptyMessage = 'Nothing here yet.',
@@ -42,6 +43,8 @@ export function CardBrowser({
   renderCaption?: (card: Card, index: number) => React.ReactNode;
   /** Optional round port buttons on each tile. */
   renderActions?: (card: Card, index: number) => React.ReactNode;
+  /** Called after a tile's favorite button added or removed the card. */
+  onFavoriteChange?: (card: Card, isFavorite: boolean) => void;
   /** Change to refetch the current page. */
   reloadKey?: number;
   /** Called after each successful page load. */
@@ -210,6 +213,7 @@ export function CardBrowser({
           onNavigate={onNavigate}
           renderCaption={renderCaption ? (index) => renderCaption(cards[index], index) : undefined}
           renderActions={renderActions ? (index) => renderActions(cards[index], index) : undefined}
+          onFavoriteChange={onFavoriteChange ? (index, isFavorite) => onFavoriteChange(cards[index], isFavorite) : undefined}
         />
       ) : null}
       {!error ? (
