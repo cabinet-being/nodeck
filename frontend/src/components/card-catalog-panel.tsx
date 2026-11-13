@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check, ExternalLink, FileText, Globe, MoreHorizontal, Pencil, Save, Tag as TagIcon, Wand2, X } from 'lucide-react';
+import { Check, Combine, ExternalLink, FileText, Globe, MoreHorizontal, Pencil, Save, Tag as TagIcon, Wand2, X } from 'lucide-react';
 
 import {
   correctTagSuggestion, createSource, createTag, decideTagSuggestion, decideTagSuggestions, deleteCardSource, deleteCardTag,
@@ -37,6 +37,7 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
   const [busy, setBusy] = React.useState(false);
   const [selectMode, setSelectMode] = React.useState(false);
   const [showAllTags, setShowAllTags] = React.useState(false);
+  const [showAllMerged, setShowAllMerged] = React.useState(false);
   const [editingSourceId, setEditingSourceId] = React.useState<number | null>(null);
   const [showAllSuggestions, setShowAllSuggestions] = React.useState(false);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = React.useState<number[]>([]);
@@ -108,6 +109,9 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
   const unassignedSuggestions = suggestions.filter((suggestion) => !assignedIds.has(suggestion.tagId));
   const visibleSuggestions = showAllSuggestions ? unassignedSuggestions : unassignedSuggestions.slice(0, 8);
   const file = fileSummary(metadata);
+  const mergedCopies = Array.isArray(metadata.merged_cards)
+    ? metadata.merged_cards.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && !Array.isArray(item))
+    : [];
 
   function startPicker(next: 'tag' | 'source') {
     setMode(next); setSearch(''); setChoices([]); setSourceUrl(''); setError(null);
@@ -273,6 +277,17 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
       key: 'file', label: 'File', icon: FileText, nodes: systemNodes, footer: fileNode,
     }] : []),
     ...extraGroups,
+    ...(mergedCopies.length > 0 ? [{
+      key: 'merged', label: 'Merged copies', icon: Combine, stacked: true,
+      nodes: (showAllMerged ? mergedCopies : mergedCopies.slice(0, 3)).map((copy, index) => <MergedCopyRow key={index} copy={copy} />),
+      count: mergedCopies.length,
+      footer: mergedCopies.length > 3 ? (
+        <Button type="button" variant="ghost" size="sm" className="justify-self-start px-2 text-xs"
+          onClick={() => setShowAllMerged((value) => !value)}>
+          {showAllMerged ? 'Show fewer' : `Show all ${mergedCopies.length}`}
+        </Button>
+      ) : null,
+    }] : []),
   ];
 
   return (
@@ -319,6 +334,40 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
   );
 }
 
+/** One card that was merged into this one: its own title, file facts, properties and dates. */
+function MergedCopyRow({ copy }: { copy: Record<string, unknown> }) {
+  const text = (value: unknown) => (typeof value === 'string' && value.trim() !== '' ? value : null);
+  const day = (value: unknown) => text(value)?.slice(0, 10) ?? null;
+  const facts = [
+    text(copy.original_file_name),
+    typeof copy.width === 'number' && typeof copy.height === 'number' ? `${copy.width}×${copy.height}` : null,
+    text(copy.mime_type),
+    typeof copy.file_size === 'number' ? formatBytes(copy.file_size) : null,
+    typeof copy.duration === 'number' && copy.duration > 0 ? formatDuration(copy.duration) : null,
+  ].filter(Boolean).join(' · ');
+  const dates = [
+    day(copy.created_at) ? `added ${day(copy.created_at)}` : null,
+    day(copy.merged_at) ? `merged ${day(copy.merged_at)}` : null,
+  ].filter(Boolean).join(' · ');
+  const properties = copy.properties && typeof copy.properties === 'object' && !Array.isArray(copy.properties)
+    ? Object.entries(copy.properties as Record<string, unknown>)
+    : [];
+  return (
+    <div className="bg-muted/40 grid w-full min-w-0 gap-0.5 rounded-lg px-3 py-2 text-xs">
+      <p className="flex min-w-0 items-baseline gap-1.5 text-sm">
+        <span className="truncate font-medium">{text(copy.title) ?? 'Untitled'}</span>
+        {typeof copy.id === 'number' ? <span className="text-muted-foreground shrink-0 tabular-nums">#{copy.id}</span> : null}
+      </p>
+      {facts ? <p className="text-muted-foreground break-all">{facts}</p> : null}
+      {properties.length > 0 ? (
+        <p className="text-muted-foreground break-words">
+          {properties.map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`).join(' · ')}
+        </p>
+      ) : null}
+      {dates ? <p className="text-muted-foreground">{dates}</p> : null}
+    </div>
+  );
+}
 
 function fileSummary(metadata: Record<string, unknown>): string | null {
   const parts: string[] = [];
