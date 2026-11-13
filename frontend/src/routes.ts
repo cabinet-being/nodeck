@@ -1,5 +1,6 @@
 import {
   Archive,
+  CopyCheck,
   FilePlus2,
   GalleryVerticalEnd,
   Globe,
@@ -28,6 +29,7 @@ export const routes: { primary: RouteItem[]; library: RouteItem[]; create: Route
     { path: '/tags', label: 'Tags', icon: Tag },
     { path: '/sources', label: 'Sources', icon: Globe },
     { path: '/cards', label: 'Manage cards', icon: Archive },
+    { path: '/duplicates', label: 'Duplicates', icon: CopyCheck },
   ],
   create: [
     { path: '/cards/import', label: 'Import files', icon: Upload },

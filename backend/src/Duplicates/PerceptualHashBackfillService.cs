@@ -10,7 +10,7 @@ namespace MyApp.Api.Duplicates;
 public sealed class PerceptualHashBackfillService : BackgroundService
 {
     private const int BatchSize = 50;
-    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
     private readonly string _connectionString;
     private readonly string _appDataRoot;
     private readonly ILogger<PerceptualHashBackfillService> _logger;
