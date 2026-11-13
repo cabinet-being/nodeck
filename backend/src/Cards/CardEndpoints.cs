@@ -124,7 +124,7 @@ public static class CardEndpoints
     {
         try
         {
-            var card = await repository.UpdateCollectionChildrenAsync(id, request.ChildCardIds);
+            var card = await repository.UpdateCollectionChildrenAsync(id, request.ChildCardIds, request.MoveFromOtherCollections);
             return card is null ? Results.NotFound(new { error = "Card not found." }) : Results.Ok(card);
         }
         catch (InvalidOperationException exception)
@@ -218,9 +218,9 @@ public static class CardEndpoints
             {
                 var images = ReadImageFiles(form);
 
-                if (images.Count < 2)
+                if (images.Count < 1)
                 {
-                    return Results.BadRequest(new { error = $"{type} cards require at least two files." });
+                    return Results.BadRequest(new { error = $"{type} cards require at least one file." });
                 }
 
                 var createdCollection = await repository.CreateCollectionAsync(

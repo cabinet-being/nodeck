@@ -17,6 +17,7 @@ All notable changes to nodeck are documented here. The format follows [Keep a Ch
 
 ### Fixed
 
+- **A comic or set needed two pages to be created, and a page could not be added anywhere else.** One page is now enough (from **Select**, **Group existing** or an upload). Pages of another comic or set can be selected and are moved out of it, with a note in the panel saying how many; a page's ··· menu offers **Move to another comic or set**. `POST /api/cards/collections` and `PUT /api/cards/{id}/children` accept `moveFromOtherCollections: true` (default false keeps the old refusal); the old collection keeps its other pages in order.
 - **Favorites showed two heart buttons on every card** (since 0.1.5). Favorites now uses the regular deck view: one heart per card, search and tag/source filters like the gallery and other decks, and un-hearting a card removes it from the list at once. The page stays at `/favorites`.
 
 ## [0.1.5] — 2026-11-13

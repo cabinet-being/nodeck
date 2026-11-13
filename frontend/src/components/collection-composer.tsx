@@ -57,8 +57,9 @@ export function CollectionComposer({
   }, [open, initialMode]);
 
   const creating = mode !== 'add';
-  const tooFew = creating && cards.length < 2;
-  const canSubmit = !submitting && cards.length > 0 && !tooFew && (creating || target !== null);
+  const canSubmit = !submitting && cards.length > 0 && (creating || target !== null);
+  // Pages that already belong to another comic or set leave it when this is saved.
+  const moving = cards.filter((card) => card.parentCardId && !(mode === 'add' && card.parentCardId === target?.id)).length;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -70,7 +71,7 @@ export function CollectionComposer({
         const current = await getCard(target!.id);
         const existing = (current.containedCards ?? []).map((child) => child.id);
         const adding = cards.map((card) => card.id).filter((id) => !existing.includes(id));
-        await updateCollectionChildren(target!.id, [...existing, ...adding]);
+        await updateCollectionChildren(target!.id, [...existing, ...adding], true);
         onDone(`/cards/${target!.id}`);
       } else {
         const created = await createCollectionFromCards({
@@ -78,6 +79,7 @@ export function CollectionComposer({
           title: title.trim() || undefined,
           childCardIds: cards.map((card) => card.id),
           idempotencyKey: creationKey.current,
+          moveFromOtherCollections: true,
         });
         setTitle('');
         onDone(`/cards/${created.id}`);
@@ -127,8 +129,10 @@ export function CollectionComposer({
           </div>
           <SortableCardList items={cards} onChange={onCardsChange} disabled={submitting} />
           {cards.length === 0 ? <p className="text-muted-foreground text-sm">No pages chosen.</p> : null}
-          {tooFew && cards.length > 0 ? (
-            <p className="text-muted-foreground text-sm">A new comic or set needs at least two pages.</p>
+          {moving > 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {moving === 1 ? '1 page is' : `${moving} pages are`} in another comic or set and will be moved out of it.
+            </p>
           ) : null}
         </div>
         {error ? <p className="text-destructive text-sm" role="alert">{error}</p> : null}

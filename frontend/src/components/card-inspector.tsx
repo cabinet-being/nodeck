@@ -55,9 +55,10 @@ export function CardInspector({
   const [composerOpen, setComposerOpen] = React.useState(false);
   const [composerCards, setComposerCards] = React.useState<SortableCard[]>([]);
   // A media card that is not yet a page can be added to a comic or set from here.
-  const canJoinCollection = card.type === 'media' && ![
-    ...(card.incomingRelations ?? []), ...relations.incomingRelations,
-  ].some((relation) => relation.relationType === 'contains');
+  // A media card can join a comic or set; if it is already a page, it is moved out of its current one.
+  const parentId = card.incomingRelations?.find((relation) => relation.relationType === 'contains')?.fromCardId
+    ?? relations.incomingRelations.find((relation) => relation.relationType === 'contains')?.relatedCard.id ?? null;
+  const canJoinCollection = card.type === 'media';
 
   React.useEffect(() => {
     let active = true;
@@ -168,8 +169,8 @@ export function CardInspector({
           onDeckOpenChange={setDeckOpen}
           onDecksChange={() => setDeckRevision((value) => value + 1)}
           menuItems={canJoinCollection ? (
-            <MenuItem onClick={() => { setComposerCards([card]); setComposerOpen(true); }}>
-              <BookPlus /> Add to comic or set
+            <MenuItem onClick={() => { setComposerCards([{ ...card, parentCardId: parentId }]); setComposerOpen(true); }}>
+              <BookPlus /> {parentId ? 'Move to another comic or set' : 'Add to comic or set'}
             </MenuItem>
           ) : card.type === 'comic' || card.type === 'set' ? (
             <MenuLinkItem href={`/cards/${card.id}/edit#contents`} onClick={onNavigate}>

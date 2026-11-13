@@ -52,8 +52,8 @@ export function CreateCardPage({
         throw new Error(`${value.type} cards require a title.`);
       }
 
-      if ((value.type === 'comic' || value.type === 'set') && value.images.length < 2) {
-        throw new Error(`${value.type} cards require at least two files.`);
+      if ((value.type === 'comic' || value.type === 'set') && value.images.length < 1) {
+        throw new Error(`${value.type} cards require at least one file.`);
       }
 
       const created = await createCard({
@@ -75,8 +75,8 @@ export function CreateCardPage({
 
   async function handleExistingSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (selectedMedia.length < 2) {
-      setError('Select at least two media cards.');
+    if (selectedMedia.length < 1) {
+      setError('Select at least one media card.');
       return;
     }
     setError(null);
@@ -131,7 +131,7 @@ export function CreateCardPage({
           <ExistingMediaPicker selected={selectedMedia} onChange={setSelectedMedia} disabled={isSubmitting} />
           <FormActions error={error}>
             <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => onCreated('/gallery')}>Cancel</Button>
-            <Button type="submit" disabled={isSubmitting || selectedMedia.length < 2}><Plus className="size-4" />{isSubmitting ? 'Creating...' : 'Create collection'}</Button>
+            <Button type="submit" disabled={isSubmitting || selectedMedia.length < 1}><Plus className="size-4" />{isSubmitting ? 'Creating...' : 'Create collection'}</Button>
           </FormActions>
         </form>
       ) : (

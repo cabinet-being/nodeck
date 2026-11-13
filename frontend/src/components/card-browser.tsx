@@ -298,10 +298,9 @@ export function CardBrowser({
   );
 }
 
-/** Only media that is not yet a page of a comic or set can become a page. */
+/** Only media can become a page; a page of another comic or set is moved out of it. */
 function pageDisabledReason(card: Card) {
   if (card.type !== 'media') return 'Comics and sets cannot become pages';
-  if (card.parentCardId) return 'Already a page of a comic or set';
   return null;
 }
 
@@ -332,12 +331,10 @@ function SelectionBar({
         <X className="size-4" />
       </Button>
       <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto">
-        <Button type="button" size="sm" disabled={count < 2} onClick={() => onCompose('comic')}
-          title={count < 2 ? 'Choose at least two media cards' : undefined}>
+        <Button type="button" size="sm" disabled={count < 1} onClick={() => onCompose('comic')}>
           <BookOpen className="size-3.5" aria-hidden="true" /><span className="sm:hidden">Comic</span><span className="max-sm:hidden">Make comic</span>
         </Button>
-        <Button type="button" size="sm" variant="outline" disabled={count < 2} onClick={() => onCompose('set')}
-          title={count < 2 ? 'Choose at least two media cards' : undefined}>
+        <Button type="button" size="sm" variant="outline" disabled={count < 1} onClick={() => onCompose('set')}>
           <Layers className="size-3.5" aria-hidden="true" /><span className="sm:hidden">Set</span><span className="max-sm:hidden">Make set</span>
         </Button>
         <Button type="button" size="sm" variant="outline" disabled={count < 1} onClick={() => onCompose('add')}>

@@ -100,8 +100,11 @@ public sealed record CreateCardCollectionData(
     IReadOnlyList<IFormFile> Images,
     IReadOnlyList<CreateRelationData> Relations);
 
-public sealed record CreateExistingCollectionRequest(string Type, string? Title, IReadOnlyList<long> ChildCardIds);
-public sealed record UpdateCollectionChildrenRequest(IReadOnlyList<long> ChildCardIds);
+/// <param name="MoveFromOtherCollections">Take pages that belong to another comic or set out of it instead of refusing them.</param>
+public sealed record CreateExistingCollectionRequest(
+    string Type, string? Title, IReadOnlyList<long> ChildCardIds, bool MoveFromOtherCollections = false);
+/// <param name="MoveFromOtherCollections">Take pages that belong to another comic or set out of it instead of refusing them.</param>
+public sealed record UpdateCollectionChildrenRequest(IReadOnlyList<long> ChildCardIds, bool MoveFromOtherCollections = false);
 public sealed record DeletionImpact(long CardCount, long DeckMembershipCount);
 public sealed record CardDeletionPreview(DeletionImpact ParentOnly, DeletionImpact WithContents);
 

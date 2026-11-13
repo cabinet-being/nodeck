@@ -6,7 +6,7 @@ import { cardLabel } from '@/components/card-tile';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export type SortableCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl'>;
+export type SortableCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl' | 'parentCardId'>;
 
 /**
  * Ordered list of cards (the page order of a comic or set). Rows are dragged by their handle

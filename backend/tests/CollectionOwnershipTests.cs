@@ -127,6 +127,60 @@ public sealed class CollectionOwnershipTests
     }
 
     [DatabaseFact]
+    public async Task ComicCanStartWithOnePageAndGrowLater()
+    {
+        await using var scope = await TestScope.CreateAsync();
+        var first = await scope.CreateMediaAsync("first");
+        var second = await scope.CreateMediaAsync("second");
+
+        var comic = await scope.Cards.CreateCollectionFromExistingAsync(
+            new CreateExistingCollectionRequest("comic", "One page", [first]));
+        scope.TrackCard(comic.Id);
+        Assert.Equal(new[] { first }, comic.ContainedCards.Select(card => card.Id).ToArray());
+        Assert.Equal(comic.Id, await scope.GetParentAsync(first));
+
+        var grown = await scope.Cards.UpdateCollectionChildrenAsync(comic.Id, [first, second]);
+        Assert.NotNull(grown);
+        Assert.Equal(new[] { first, second }, grown.ContainedCards.Select(card => card.Id).ToArray());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scope.Cards.CreateCollectionFromExistingAsync(new CreateExistingCollectionRequest("set", "Empty", [])));
+    }
+
+    [DatabaseFact]
+    public async Task PagesCanBeMovedFromAnotherCollectionOnlyWhenAsked()
+    {
+        await using var scope = await TestScope.CreateAsync();
+        var a = await scope.CreateMediaAsync("a");
+        var b = await scope.CreateMediaAsync("b");
+        var c = await scope.CreateMediaAsync("c");
+        var d = await scope.CreateMediaAsync("d");
+        var old = await scope.Cards.CreateCollectionFromExistingAsync(new CreateExistingCollectionRequest("comic", "Old", [a, b, c]));
+        scope.TrackCard(old.Id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scope.Cards.CreateCollectionFromExistingAsync(new CreateExistingCollectionRequest("comic", "New", [b])));
+
+        var created = await scope.Cards.CreateCollectionFromExistingAsync(
+            new CreateExistingCollectionRequest("comic", "New", [b], MoveFromOtherCollections: true));
+        scope.TrackCard(created.Id);
+        Assert.Equal(new[] { b }, created.ContainedCards.Select(card => card.Id).ToArray());
+        Assert.Equal(created.Id, await scope.GetParentAsync(b));
+        var oldAfter = await scope.Cards.GetByIdAsync(old.Id);
+        Assert.Equal(new[] { a, c }, oldAfter!.ContainedCards.Select(card => card.Id).ToArray());
+        Assert.Equal(c, await scope.GetNextInSequenceAsync(a));
+        Assert.Null(await scope.GetNextInSequenceAsync(b));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scope.Cards.UpdateCollectionChildrenAsync(created.Id, [b, a]));
+        var grown = await scope.Cards.UpdateCollectionChildrenAsync(created.Id, [b, a, c, d], moveFromOtherCollections: true);
+        Assert.Equal(new[] { b, a, c, d }, grown!.ContainedCards.Select(card => card.Id).ToArray());
+        var emptied = await scope.Cards.GetByIdAsync(old.Id);
+        Assert.NotNull(emptied);
+        Assert.Empty(emptied.ContainedCards);
+    }
+
+    [DatabaseFact]
     public async Task DeletingOnlyParentDetachesChildrenAndKeepsDeckLinks()
     {
         await using var scope = await TestScope.CreateAsync();

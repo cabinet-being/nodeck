@@ -299,11 +299,16 @@ export async function createCollectionFromCards(input: {
   title?: string;
   childCardIds: number[];
   idempotencyKey?: string;
+  /** Take chosen pages out of the comic or set they belong to instead of refusing them. */
+  moveFromOtherCollections?: boolean;
 }) {
   const response = await fetch(`${apiBaseUrl}/api/cards/collections`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(input.idempotencyKey ? { 'Idempotency-Key': input.idempotencyKey } : {}) },
-    body: JSON.stringify({ type: input.type, title: input.title, childCardIds: input.childCardIds }),
+    body: JSON.stringify({
+      type: input.type, title: input.title, childCardIds: input.childCardIds,
+      moveFromOtherCollections: input.moveFromOtherCollections ?? false,
+    }),
   });
   return readJson<Card>(response);
 }
@@ -348,11 +353,11 @@ export async function moveCardChild(
   }
 }
 
-export async function updateCollectionChildren(id: number, childCardIds: number[]) {
+export async function updateCollectionChildren(id: number, childCardIds: number[], moveFromOtherCollections = false) {
   const response = await fetch(`${apiBaseUrl}/api/cards/${id}/children`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ childCardIds }),
+    body: JSON.stringify({ childCardIds, moveFromOtherCollections }),
   });
   return readJson<Card>(response);
 }

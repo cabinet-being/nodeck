@@ -150,18 +150,21 @@ public sealed partial class CardRepository
     public async Task<CardCreationResult> CreateCollectionFromExistingAsync(
         CreateExistingCollectionRequest request, CardCreationRequest? creationRequest)
     {
-        if (request.Type is not ("comic" or "set") || request.ChildCardIds is null || request.ChildCardIds.Count < 2)
-            throw new InvalidOperationException("A comic or set requires at least two existing media cards.");
+        if (request.Type is not ("comic" or "set") || request.ChildCardIds is null || request.ChildCardIds.Count < 1)
+            throw new InvalidOperationException("A comic or set requires at least one existing media card.");
 
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
         long id = 0;
+        long[] formerParents = [];
         try
         {
             if (creationRequest is not null)
                 await InsertCreationRequestAsync(connection, transaction, creationRequest);
             id = await InsertCardAsync(connection, transaction, request.Type, request.Title, null, CreateMetadata());
+            if (request.MoveFromOtherCollections)
+                formerParents = await DetachFromOtherCollectionsAsync(connection, transaction, id, request.ChildCardIds);
             await ReplaceCollectionChildrenAsync(connection, transaction, id, request.Type, request.ChildCardIds);
             if (creationRequest is not null)
                 await CompleteCreationRequestAsync(connection, transaction, creationRequest, id);
@@ -178,12 +181,15 @@ public sealed partial class CardRepository
             await transaction.RollbackAsync();
             throw;
         }
+        if (formerParents.Length > 0) await SyncMetaTagsAsync(connection, formerParents);
         return new CardCreationResult(CardCreationStatus.Created,
             await GetByIdAsync(id) ?? throw new InvalidOperationException("Created collection could not be read."));
     }
 
-    public async Task<CardDetails?> UpdateCollectionChildrenAsync(long id, IReadOnlyList<long> childCardIds)
+    public async Task<CardDetails?> UpdateCollectionChildrenAsync(
+        long id, IReadOnlyList<long> childCardIds, bool moveFromOtherCollections = false)
     {
+        long[] formerParents = [];
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync();
         await using var transaction = await connection.BeginTransactionAsync();
@@ -197,9 +203,11 @@ public sealed partial class CardRepository
                 return null;
             }
             if (type is not ("comic" or "set")) throw new InvalidOperationException("Only comic and set cards have children.");
+            if (moveFromOtherCollections)
+                formerParents = await DetachFromOtherCollectionsAsync(connection, transaction, id, childCardIds);
             await ReplaceCollectionChildrenAsync(connection, transaction, id, type, childCardIds);
             await transaction.CommitAsync();
-            await SyncMetaTagsAsync(connection, id);
+            await SyncMetaTagsAsync(connection, [id, .. formerParents]);
         }
         catch
         {
@@ -207,6 +215,32 @@ public sealed partial class CardRepository
             throw;
         }
         return await GetByIdAsync(id);
+    }
+
+    /// <summary>
+    /// Takes the given cards out of every other comic or set that holds them; those collections keep
+    /// their remaining pages in order (possibly none). Returns the ids of the collections that changed.
+    /// </summary>
+    private static async Task<long[]> DetachFromOtherCollectionsAsync(
+        IDbConnection connection, IDbTransaction transaction, long parentId, IReadOnlyList<long> childIds)
+    {
+        if (childIds is null || childIds.Count == 0) return [];
+        var owners = (await connection.QueryAsync<(long Id, string Type)>(
+            """
+            SELECT DISTINCT p.id, p.type FROM card_relations r JOIN cards p ON p.id = r.from_card_id
+            WHERE r.relation_type = 'contains' AND r.to_card_id IN @Ids AND r.from_card_id <> @ParentId
+            ORDER BY p.id FOR UPDATE;
+            """,
+            new { Ids = childIds.ToArray(), ParentId = parentId }, transaction)).ToArray();
+        var moving = childIds.ToHashSet();
+        foreach (var owner in owners)
+        {
+            var remaining = (await connection.QueryAsync<long>(
+                $"SELECT to_card_id FROM card_relations WHERE from_card_id = @Id AND relation_type = 'contains' {ChildOrderSql} FOR UPDATE;",
+                new { owner.Id }, transaction)).Where(childId => !moving.Contains(childId)).ToArray();
+            await ReplaceCollectionChildrenAsync(connection, transaction, owner.Id, owner.Type, remaining);
+        }
+        return owners.Select(owner => owner.Id).ToArray();
     }
 
     private static async Task ReplaceCollectionChildrenAsync(
