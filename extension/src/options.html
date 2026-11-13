@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nodeck extension settings</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body>
+  <header class="bar">
+    <img src="../icons/icon-32.png" alt="" width="20" height="20">
+    <h1>Save to nodeck — settings</h1>
+  </header>
+  <main class="options">
+    <label class="field">
+      <span>nodeck server URL</span>
+      <input id="serverUrl" type="url" placeholder="http://192.168.0.104:5080" autocomplete="off">
+    </label>
+    <p id="defaultHint"></p>
+    <div class="row">
+      <button class="primary" id="saveSettings" type="button">Save and test</button>
+      <button id="test" type="button">Test connection</button>
+    </div>
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+    <h2>How to use</h2>
+    <p>Right-click an image or video → <b>Save to nodeck…</b>. Tags, the source site and the page link are filled in; edit them before saving.</p>
+    <p>For a comic, manga chapter or gallery, click the nodeck button in the toolbar (or right-click the page → <b>Save page images to nodeck…</b>). Remove extra images, put pages in order, then save them as a comic or a set.</p>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
