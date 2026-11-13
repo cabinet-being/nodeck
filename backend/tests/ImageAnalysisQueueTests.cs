@@ -54,6 +54,14 @@ public sealed class ImageAnalysisQueueTests
     }
 
     [DatabaseFact]
+    public async Task NewImageJobCountsAsReadyRegularWorkForSpeechToWaitOn()
+    {
+        await using var scope = await QueueScope.CreateAsync();
+        await scope.CreateAsync("image");
+        Assert.True(await scope.Queue.HasReadyRegularJobsAsync(default));
+    }
+
+    [DatabaseFact]
     public async Task StillImagesAreClaimedBeforeEarlierVideosAndGifs()
     {
         await using var scope = await QueueScope.CreateAsync();

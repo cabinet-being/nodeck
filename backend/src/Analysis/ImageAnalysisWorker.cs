@@ -42,9 +42,11 @@ public sealed class ImageAnalysisWorker : BackgroundService
                 }
                 if (!ModelFilesExist() || !await _queue.IsVocabularyReadyAsync(stoppingToken))
                 {
+                    _queue.ImageWorkerReady = false;
                     await Task.Delay(PollInterval, stoppingToken);
                     continue;
                 }
+                _queue.ImageWorkerReady = true;
 
                 await using var lockConnection = await _queue.OpenLockConnectionAsync(stoppingToken);
                 if (!await AnalysisQueueRepository.TryAcquireInferenceLockAsync(lockConnection, stoppingToken))
@@ -102,6 +104,7 @@ public sealed class ImageAnalysisWorker : BackgroundService
             catch (Exception error)
             {
                 _logger.LogWarning(error, "Image analysis worker will retry after a delay.");
+                _queue.ImageWorkerReady = false;
                 await Task.Delay(PollInterval, stoppingToken);
             }
         }

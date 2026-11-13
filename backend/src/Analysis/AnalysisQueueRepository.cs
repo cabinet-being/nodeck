@@ -46,6 +46,30 @@ public sealed class AnalysisQueueRepository
             """, cancellationToken: cancellationToken)) > 0;
     }
 
+    /// <summary>
+    /// Set by the image worker while its model and vocabulary are ready and its loop is healthy, so
+    /// other work never waits for image jobs that nothing is going to process.
+    /// </summary>
+    public bool ImageWorkerReady { get; set; }
+
+    /// <summary>
+    /// True when a regular (not background backfill) image job could be claimed now. Slower work that
+    /// shares the inference lock, such as speech recognition, waits while this holds, so freshly
+    /// uploaded cards get their tags first.
+    /// </summary>
+    public async Task<bool> HasReadyRegularJobsAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        return await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+            SELECT EXISTS (
+                SELECT 1 FROM card_image_analysis_jobs
+                WHERE priority = 0 AND attempts < @MaxAttempts AND (
+                    (state = 'pending' AND available_at_utc <= UTC_TIMESTAMP(6))
+                    OR (state = 'leased' AND lease_until_utc <= UTC_TIMESTAMP(6))));
+            """, new { MaxAttempts }, cancellationToken: cancellationToken)) == 1;
+    }
+
     public async Task<AnalysisJobStatus?> GetStatusAsync(long cardId,
         CancellationToken cancellationToken = default)
     {

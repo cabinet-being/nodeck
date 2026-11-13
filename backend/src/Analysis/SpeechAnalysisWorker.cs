@@ -36,6 +36,14 @@ public sealed class SpeechAnalysisWorker : BackgroundService
                 _recognizer ??= new WhisperCppSpeechRecognizer(_configuration);
                 await _recognizer.EnsureReadyAsync(stoppingToken);
 
+                // Image tagging takes seconds per card and is what an import waits for; a speech job
+                // can hold the shared inference lock for many minutes, so it gives way to them.
+                if (_inferenceLock.ImageWorkerReady && await _inferenceLock.HasReadyRegularJobsAsync(stoppingToken))
+                {
+                    await Task.Delay(PollInterval, stoppingToken);
+                    continue;
+                }
+
                 await using var lockConnection = await _inferenceLock.OpenLockConnectionAsync(stoppingToken);
                 if (!await AnalysisQueueRepository.TryAcquireInferenceLockAsync(lockConnection, stoppingToken))
                 {
