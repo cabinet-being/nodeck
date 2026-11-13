@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { BookOpen, Film, Layers, Play } from 'lucide-react';
 
+
 import { type Card } from '@/api/cards';
 import { CardPreview } from '@/components/card-preview';
 import { FavoriteToggle } from '@/components/favorite-toggle';
@@ -11,6 +12,16 @@ export type VisualCard = Pick<Card, 'id' | 'type' | 'title' | 'previewUrl'> & {
   contentUrl?: Card['contentUrl'];
   containedCards?: Card['containedCards'];
   metadata?: Card['metadata'];
+  parentCardId?: Card['parentCardId'];
+};
+
+/** Selection state of one tile while a wall is in selection mode. */
+export type CardTileSelection = {
+  /** 1-based place in the selection, or null when the card is not selected. */
+  order: number | null;
+  /** Why the card cannot be selected; null when it can. */
+  disabledReason: string | null;
+  onToggle: () => void;
 };
 
 export type CardTileLayout = 'grid' | 'brick' | 'rail';
@@ -46,6 +57,7 @@ export function CardTile({
   actions,
   showFavorite = true,
   onFavoriteChange,
+  selection,
   className,
 }: {
   card: VisualCard;
@@ -58,6 +70,8 @@ export function CardTile({
   showFavorite?: boolean;
   /** Called after the favorite button added or removed the card. */
   onFavoriteChange?: (isFavorite: boolean) => void;
+  /** Selection mode: the tile toggles its selection instead of opening the card. */
+  selection?: CardTileSelection;
   className?: string;
 }) {
   const [favoriteOverride, setFavoriteOverride] = React.useState<boolean | null>(null);
@@ -67,7 +81,8 @@ export function CardTile({
   const [loadedUrl, setLoadedUrl] = React.useState<string | null>(null);
   const ratio = metadataRatio(card);
   const loaded = loadedUrl === card.previewUrl;
-  const hasFavorite = showFavorite && card.isFavorite !== undefined;
+  const hasFavorite = !selection && showFavorite && card.isFavorite !== undefined;
+  const selected = selection?.order != null;
 
   return (
     <div
@@ -75,6 +90,8 @@ export function CardTile({
         'group bg-surface shadow-1 relative min-w-0 rounded-2xl border transition-[transform,box-shadow] duration-[var(--dur-fast)] ease-out motion-safe:hover:-translate-y-0.5 hover:shadow-2 focus-within:shadow-2',
         layout === 'rail' && 'w-40 shrink-0 snap-start sm:w-44',
         layout === 'brick' && 'mb-3 break-inside-avoid',
+        selected && 'ring-primary ring-3',
+        selection?.disabledReason && 'opacity-45',
         className
       )}
     >
@@ -84,6 +101,8 @@ export function CardTile({
           onClick={onNavigate}
           aria-label={`Open ${label}`}
           title={label}
+          tabIndex={selection ? -1 : undefined}
+          aria-hidden={selection ? true : undefined}
           className={cn('block rounded-[inherit]', layout !== 'brick' && 'aspect-square')}
           style={layout === 'brick' && (ratio !== null || !loaded) ? { aspectRatio: ratio ?? 1 } : undefined}
         >
@@ -111,8 +130,38 @@ export function CardTile({
             {badge.count !== undefined ? <span>{badge.count}</span> : null}
           </span>
         ) : null}
+        {selection ? (
+          <button
+            type="button"
+            aria-pressed={selected}
+            aria-disabled={selection.disabledReason ? true : undefined}
+            aria-label={selection.disabledReason ? `${label}: ${selection.disabledReason}` : `Select ${label}`}
+            title={selection.disabledReason ?? label}
+            onClick={(event) => {
+              event.preventDefault();
+              if (!selection.disabledReason) selection.onToggle();
+            }}
+            className={cn(
+              'absolute inset-0 rounded-[inherit] outline-none focus-visible:ring-ring/60 focus-visible:ring-3 focus-visible:ring-inset',
+              selection.disabledReason ? 'cursor-not-allowed' : 'cursor-pointer',
+              selected && 'bg-primary/15'
+            )}
+          >
+            {selection.disabledReason ? null : (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'absolute top-2 right-2 flex size-8 items-center justify-center rounded-full border-2 text-sm font-semibold tabular-nums shadow-1 pointer-coarse:size-9',
+                  selected ? 'bg-primary border-primary text-primary-foreground' : 'border-white bg-black/30'
+                )}
+              >
+                {selection.order ?? ''}
+              </span>
+            )}
+          </button>
+        ) : null}
       </div>
-      {hasFavorite || actions ? (
+      {!selection && (hasFavorite || actions) ? (
         <>
           <span
             aria-hidden="true"

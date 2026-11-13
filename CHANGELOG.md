@@ -4,6 +4,15 @@ All notable changes to nodeck are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Make a comic or set from cards you already have.** Gallery, deck pages and Favorites have a **Select** button: tap media cards in page order (each shows its number, and the choice carries across result pages), then **Make comic**, **Make set** or **Add to…** an existing comic or set. The panel lets you name it and drag pages into order before saving. A media card's ··· menu has **Add to comic or set**; a comic's or set's ··· menu has **Add or reorder pages**. Page lists on **New card → Group existing** and the edit page can now be reordered by dragging.
+- `GET /api/cards` accepts `collapse_pages=true` and returns `parentCardId` on each card.
+
+### Changed
+
+- **Pages no longer appear next to their comic or set.** Deck pages and Favorites hide a page when its comic or set is in the same deck (**With pages** shows them); Manage cards hides pages unless **Show pages of comics and sets** is ticked; the search palette lists the comic or set instead of its pages. Search now also finds a comic or set by the title of one of its pages.
+
 ### Fixed
 
 - **Favorites showed two heart buttons on every card** (since 0.1.5). Favorites now uses the regular deck view: one heart per card, search and tag/source filters like the gallery and other decks, and un-hearting a card removes it from the list at once. The page stays at `/favorites`.

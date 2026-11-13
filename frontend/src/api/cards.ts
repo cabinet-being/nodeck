@@ -43,6 +43,8 @@ export type Card = {
   containedCards?: ContainedCard[];
   deckPosition?: number | null;
   membershipProperties?: Record<string, unknown> | null;
+  /** In card lists: the comic or set this media card is a page of. */
+  parentCardId?: number | null;
 };
 
 export type RelationCard = {
@@ -76,6 +78,8 @@ export type CardListParams = {
   catalogSource?: number;
   search?: string;
   excludeContainedMedia?: boolean;
+  /** Hide pages whose comic or set is in the same list (in a deck: also a member). */
+  collapsePages?: boolean;
   deckId?: number;
   sort?: 'created_at' | 'position';
   order?: 'asc' | 'desc';
@@ -148,6 +152,7 @@ async function fetchCardList(params: CardListParams) {
   if (params.catalogSource) searchParams.set('catalog_source', String(params.catalogSource));
   if (params.search) searchParams.set('search', params.search);
   if (params.excludeContainedMedia) searchParams.set('exclude_contained_media', 'true');
+  if (params.collapsePages) searchParams.set('collapse_pages', 'true');
   if (params.deckId) searchParams.set('deck_id', String(params.deckId));
   if (params.sort) searchParams.set('sort', params.sort);
   if (params.order) searchParams.set('order', params.order);

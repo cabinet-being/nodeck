@@ -124,6 +124,10 @@ export function CreateCardPage({
               <Input value={collectionTitle} onChange={(event) => setCollectionTitle(event.target.value)} />
             </label>
           </FormSection>
+          <p className="text-muted-foreground text-sm">
+            Tip: in the Gallery, a deck or Favorites, press <span className="text-foreground font-medium">Select</span> and
+            tap media in page order, then choose Make comic or Make set.
+          </p>
           <ExistingMediaPicker selected={selectedMedia} onChange={setSelectedMedia} disabled={isSubmitting} />
           <FormActions error={error}>
             <Button type="button" variant="outline" disabled={isSubmitting} onClick={() => onCreated('/gallery')}>Cancel</Button>

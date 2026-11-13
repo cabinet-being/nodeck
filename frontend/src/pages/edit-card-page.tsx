@@ -32,6 +32,14 @@ export function EditCardPage({
   const [isSavingChildren, setIsSavingChildren] = React.useState(false);
   const [childrenMessage, setChildrenMessage] = React.useState<string | null>(null);
 
+  const loadedType = card?.type;
+  React.useEffect(() => {
+    // The card page links straight to the contents section with #contents.
+    if ((loadedType === 'comic' || loadedType === 'set') && window.location.hash === '#contents') {
+      document.getElementById('contents')?.scrollIntoView({ block: 'start' });
+    }
+  }, [loadedType]);
+
   React.useEffect(() => {
     let isCurrent = true;
     setIsLoading(true);
@@ -135,7 +143,8 @@ export function EditCardPage({
         }
       />
       {card.type === 'comic' || card.type === 'set' ? (
-        <FormSection title="Collection contents" hint="Add, remove or reorder media. Removed media stays in the library.">
+        <div id="contents" className="scroll-mt-20">
+        <FormSection title="Collection contents" hint="Add, remove or drag media into order. Removed media stays in the library.">
             <ExistingMediaPicker selected={selectedMedia} onChange={(cards) => { setSelectedMedia(cards); setChildrenMessage(null); }} disabled={isSavingChildren} />
             {childrenMessage ? <p className="text-sm" role="status">{childrenMessage}</p> : null}
             <Button type="button" disabled={isSavingChildren} onClick={saveChildren}>
@@ -145,6 +154,7 @@ export function EditCardPage({
               <MoveChildren card={card} onMoved={reloadCard} />
             ) : null}
         </FormSection>
+        </div>
       ) : null}
     </FormPage>
   );

@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 import { listCards, resolveApiUrl, type Card } from '@/api/cards';
+import { SortableCardList } from '@/components/sortable-card-list';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -50,26 +51,10 @@ export function ExistingMediaPicker({
       </div>
       <div className="grid gap-2">
         <div className="text-sm font-medium">Selected media ({selected.length})</div>
-        {selected.map((card, index) => (
-          <div key={card.id} className="bg-surface flex items-center gap-2 rounded-xl border p-2">
-            <span className="text-muted-foreground w-6 text-sm">{index + 1}</span>
-            <Thumb card={card} />
-            <span className="min-w-0 flex-1 truncate text-sm">{card.title || `Untitled media`}</span>
-            <Button type="button" variant="ghost" size="icon" disabled={disabled || index === 0} aria-label={`Move ${card.title || 'media'} up`} onClick={() => move(index, index - 1)}><ArrowUp className="size-4" /></Button>
-            <Button type="button" variant="ghost" size="icon" disabled={disabled || index === selected.length - 1} aria-label={`Move ${card.title || 'media'} down`} onClick={() => move(index, index + 1)}><ArrowDown className="size-4" /></Button>
-            <Button type="button" variant="ghost" size="icon" disabled={disabled} aria-label={`Remove ${card.title || 'media'}`} onClick={() => onChange(selected.filter((item) => item.id !== card.id))}><Trash2 className="size-4" /></Button>
-          </div>
-        ))}
+        <SortableCardList items={selected} onChange={onChange} disabled={disabled} label="Selected media" />
       </div>
     </div>
   );
-
-  function move(from: number, to: number) {
-    const next = [...selected];
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    onChange(next);
-  }
 }
 
 function Thumb({ card }: { card: Card }) {

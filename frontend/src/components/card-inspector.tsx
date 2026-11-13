@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Layers, Link2 } from 'lucide-react';
+import { BookPlus, Layers, Link2 } from 'lucide-react';
 
 import {
   createCardRelation, deleteCardRelation, listCards,
@@ -7,6 +7,9 @@ import {
 } from '@/api/cards';
 import { getCardDecks, removeCardFromDeck, type DeckSummary } from '@/api/decks';
 import { ActionBar } from '@/components/action-bar';
+import { CollectionComposer } from '@/components/collection-composer';
+import { type SortableCard } from '@/components/sortable-card-list';
+import { MenuItem, MenuLinkItem } from '@/components/ui/menu';
 import { CardCatalogPanel } from '@/components/card-catalog-panel';
 import { type ConnectionGroup } from '@/components/connection-strip';
 import { DeleteCardDialog } from '@/components/delete-card-dialog';
@@ -49,6 +52,12 @@ export function CardInspector({
   const [pickerError, setPickerError] = React.useState<string | null>(null);
   const [mutationError, setMutationError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [composerOpen, setComposerOpen] = React.useState(false);
+  const [composerCards, setComposerCards] = React.useState<SortableCard[]>([]);
+  // A media card that is not yet a page can be added to a comic or set from here.
+  const canJoinCollection = card.type === 'media' && ![
+    ...(card.incomingRelations ?? []), ...relations.incomingRelations,
+  ].some((relation) => relation.relationType === 'contains');
 
   React.useEffect(() => {
     let active = true;
@@ -158,6 +167,23 @@ export function CardInspector({
           deckOpen={deckOpen}
           onDeckOpenChange={setDeckOpen}
           onDecksChange={() => setDeckRevision((value) => value + 1)}
+          menuItems={canJoinCollection ? (
+            <MenuItem onClick={() => { setComposerCards([card]); setComposerOpen(true); }}>
+              <BookPlus /> Add to comic or set
+            </MenuItem>
+          ) : card.type === 'comic' || card.type === 'set' ? (
+            <MenuLinkItem href={`/cards/${card.id}/edit#contents`} onClick={onNavigate}>
+              <BookPlus /> Add or reorder pages
+            </MenuLinkItem>
+          ) : null}
+        />
+        <CollectionComposer
+          open={composerOpen}
+          onOpenChange={setComposerOpen}
+          mode="add"
+          cards={composerCards}
+          onCardsChange={setComposerCards}
+          onDone={(path) => { setComposerOpen(false); onNavigateTo?.(path); }}
         />
       </div>
 

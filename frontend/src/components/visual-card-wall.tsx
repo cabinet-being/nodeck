@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Grid3X3, LayoutGrid, SlidersHorizontal } from 'lucide-react';
 
-import { CardTile, type VisualCard } from '@/components/card-tile';
+import { CardTile, type CardTileSelection, type VisualCard } from '@/components/card-tile';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Segmented } from '@/components/ui/segmented';
@@ -108,6 +108,7 @@ export function VisualCardWall({
   renderCaption,
   renderActions,
   onFavoriteChange,
+  selection,
 }: {
   cards: VisualCard[];
   view: VisualCardView;
@@ -117,6 +118,8 @@ export function VisualCardWall({
   /** Extra round port buttons for a tile. */
   renderActions?: (index: number) => React.ReactNode;
   onFavoriteChange?: (index: number, isFavorite: boolean) => void;
+  /** Selection mode: tiles toggle their selection instead of opening. */
+  selection?: (index: number) => CardTileSelection;
 }) {
   return (
     <div
@@ -142,6 +145,7 @@ export function VisualCardWall({
           caption={renderCaption ? renderCaption(index) : undefined}
           actions={renderActions ? renderActions(index) : undefined}
           onFavoriteChange={onFavoriteChange ? (isFavorite) => onFavoriteChange(index, isFavorite) : undefined}
+          selection={selection?.(index)}
         />
       ))}
     </div>

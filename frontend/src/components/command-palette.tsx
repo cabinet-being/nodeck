@@ -58,7 +58,8 @@ export function CommandPalette({
     const timer = window.setTimeout(() => {
       const needle = trimmed.toLowerCase();
       Promise.allSettled([
-        listCards({ search: trimmed, limit: 8 }),
+        // Pages are found through their comic or set, so the list does not repeat them.
+        listCards({ search: trimmed, limit: 8, excludeContainedMedia: true }),
         listTags(trimmed),
         listSources(trimmed),
       ]).then(([cards, tags, sources]) => {

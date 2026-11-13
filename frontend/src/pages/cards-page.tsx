@@ -5,6 +5,7 @@ import { cardTypes, listCardsPage, type Card } from '@/api/cards';
 import { FavoriteToggle } from '@/components/favorite-toggle';
 import { CardPreview } from '@/components/card-preview';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { DeleteCardDialog } from '@/components/delete-card-dialog';
 import { EmptyState } from '@/components/empty-state';
@@ -30,6 +31,10 @@ export function CardsPage({
   const [order, setOrder] = useUrlState<'asc' | 'desc'>('order', 'desc', {
     parse: (raw) => (raw === 'asc' ? 'asc' : undefined),
   });
+  const [showPages, setShowPages] = useUrlState('pages', false, {
+    parse: (raw) => (raw === '1' ? true : undefined),
+    serialize: (value) => (value ? '1' : ''),
+  });
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [cardToDelete, setCardToDelete] = React.useState<Card | null>(null);
@@ -37,7 +42,7 @@ export function CardsPage({
   const [total, setTotal] = React.useState(0);
   const [reloadKey, setReloadKey] = React.useState(0);
   const pageCount = pageCountOf(total, pageSize);
-  useResetPage(setPage, [order, search, type]);
+  useResetPage(setPage, [order, search, type, showPages]);
   useClampPage(page, pageCount, !isLoading && !error, setPage);
   usePageScroll(page);
 
@@ -49,6 +54,7 @@ export function CardsPage({
     listCardsPage({
       types: type ? [type] : [...cardTypes],
       search: search || undefined,
+      excludeContainedMedia: !showPages,
       sort: 'created_at',
       order,
     }, page, pageSize)
@@ -56,7 +62,7 @@ export function CardsPage({
       .catch((requestError) => { if (active) setError(requestError.message); })
       .finally(() => { if (active) setIsLoading(false); });
     return () => { active = false; };
-  }, [order, search, type, page, reloadKey]);
+  }, [order, search, type, showPages, page, reloadKey]);
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
@@ -85,6 +91,10 @@ export function CardsPage({
             { value: 'asc', label: 'Oldest' },
           ]}
         />
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <Checkbox checked={showPages} onCheckedChange={(checked) => setShowPages(checked === true)} />
+          Show pages of comics and sets
+        </label>
       </div>
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <Segmented
@@ -119,7 +129,13 @@ export function CardsPage({
                 className="block truncate text-sm font-medium hover:underline" title={card.title || `Card ${card.id}`}>
                 {card.title || `Card ${card.id}`}
               </a>
-              <Badge variant="outline" className="mt-1 text-[10px]">{card.type}</Badge>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <Badge variant="outline" className="text-[10px]">{card.type}</Badge>
+                {card.parentCardId ? (
+                  <a href={`/cards/${card.parentCardId}`} onClick={onNavigate}
+                    className="text-muted-foreground text-xs hover:underline">Page of #{card.parentCardId}</a>
+                ) : null}
+              </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <FavoriteToggle

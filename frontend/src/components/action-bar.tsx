@@ -21,6 +21,7 @@ export function ActionBar({
   deckOpen,
   onDeckOpenChange,
   onDecksChange,
+  menuItems,
 }: {
   cardId: number;
   isFavorite: boolean;
@@ -35,6 +36,8 @@ export function ActionBar({
   deckOpen?: boolean;
   onDeckOpenChange?: (open: boolean) => void;
   onDecksChange?: () => void;
+  /** Extra overflow menu items, shown after Edit. */
+  menuItems?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1" role="toolbar" aria-label="Card actions">
@@ -48,6 +51,7 @@ export function ActionBar({
         </MenuTrigger>
         <MenuContent>
           <MenuLinkItem href={editHref} onClick={onNavigate}><Pencil /> Edit</MenuLinkItem>
+          {menuItems}
           {originalUrl ? (
             <MenuLinkItem href={resolveApiUrl(originalUrl)} download><Download /> Download original</MenuLinkItem>
           ) : null}

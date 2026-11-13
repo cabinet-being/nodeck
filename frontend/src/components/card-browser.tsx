@@ -1,9 +1,11 @@
 import * as React from 'react';
-import { Images, Layers3, SearchX, Sparkles } from 'lucide-react';
+import { BookOpen, CheckSquare, Images, Layers, Layers3, Plus, SearchX, Sparkles, X } from 'lucide-react';
 
 import { listCardsPage, type Card } from '@/api/cards';
 import { getSource, getTag, type Source, type Tag } from '@/api/catalog';
+import { CollectionComposer, type ComposerMode } from '@/components/collection-composer';
 import { EmptyState } from '@/components/empty-state';
+import { type SortableCard } from '@/components/sortable-card-list';
 import { FilterBar, type CatalogFilters } from '@/components/filter-bar';
 import { pageCountOf, Pagination, usePageScroll } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
@@ -71,7 +73,28 @@ export function CardBrowser({
   const legacySource = params.get('source') ?? '';
   const legacyActive = legacyTags !== '' || legacySource !== '';
   const deckId = scope.kind === 'deck' ? scope.deckId : null;
-  const pagesMode = deckId === null && params.get('view') === 'pages';
+  // Gallery: "pages" lists media pages instead of collections. Deck: "pages" also lists the
+  // pages of comics and sets that are in the deck themselves, which are hidden by default.
+  const pagesMode = params.get('view') === 'pages';
+  const [selecting, setSelecting] = React.useState(false);
+  const [selected, setSelected] = React.useState<SortableCard[]>([]);
+  const [composerMode, setComposerMode] = React.useState<ComposerMode | null>(null);
+  const [lastComposerMode, setLastComposerMode] = React.useState<ComposerMode>('comic');
+
+  React.useEffect(() => {
+    setSelecting(false);
+    setSelected([]);
+    setComposerMode(null);
+  }, [deckId]);
+
+  React.useEffect(() => {
+    if (!selecting || composerMode !== null) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') stopSelecting();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selecting, composerMode]);
 
   React.useEffect(() => {
     let active = true;
@@ -96,7 +119,7 @@ export function CardBrowser({
         ? pagesMode
           ? { types: ['media'], sort: 'created_at' as const, order: 'desc' as const }
           : { types: ['media', 'comic', 'set'], excludeContainedMedia: true, sort: 'created_at' as const, order: 'desc' as const }
-        : { deckId, sort: 'position' as const }),
+        : { deckId, sort: 'position' as const, collapsePages: !pagesMode }),
       tags: parseIds(legacyTags || null),
       source: parseSingleId(legacySource),
       catalogTags: parseIds(catalogTagIds || null),
@@ -140,6 +163,22 @@ export function CardBrowser({
     navigateWith(next);
   }
 
+  function stopSelecting() {
+    setSelecting(false);
+    setSelected([]);
+  }
+
+  function toggleSelected(card: Card) {
+    setSelected((current) => current.some((item) => item.id === card.id)
+      ? current.filter((item) => item.id !== card.id)
+      : [...current, card]);
+  }
+
+  function openComposer(mode: ComposerMode) {
+    setLastComposerMode(mode);
+    setComposerMode(mode);
+  }
+
   function clearFilters() {
     const next = new URLSearchParams();
     if (pagesMode) next.set('view', 'pages');
@@ -164,24 +203,28 @@ export function CardBrowser({
   usePageScroll(page);
   const pageCount = pageCountOf(total, pageSize);
 
+  const selectionOrder = new Map(selected.map((card, index) => [card.id, index + 1]));
   const filtersActive = search !== '' || catalogTagIds !== '' || catalogSourceId !== '' || legacyActive;
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {title ?? <span />}
-        <div className="flex items-center gap-2">
-          {deckId === null ? (
-            <Segmented
-              ariaLabel="Show"
-              value={pagesMode ? 'pages' : 'collections'}
-              onValueChange={selectGalleryMode}
-              options={[
-                { value: 'collections', label: 'Collections', icon: <Layers3 /> },
-                { value: 'pages', label: 'Pages', icon: <Images /> },
-              ]}
-            />
-          ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Segmented
+            ariaLabel="Show"
+            value={pagesMode ? 'pages' : 'collections'}
+            onValueChange={selectGalleryMode}
+            options={[
+              { value: 'collections', label: 'Collections', icon: <Layers3 /> },
+              { value: 'pages', label: deckId === null ? 'Pages' : 'With pages', icon: <Images /> },
+            ]}
+          />
+          <Button type="button" variant={selecting ? 'default' : 'outline'} size="sm" aria-pressed={selecting}
+            onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+            <CheckSquare className="size-3.5" aria-hidden="true" />
+            {selecting ? 'Done' : 'Select'}
+          </Button>
           <VisualCardViewToggle view={view} onChange={setView} />
         </div>
       </div>
@@ -214,12 +257,93 @@ export function CardBrowser({
           renderCaption={renderCaption ? (index) => renderCaption(cards[index], index) : undefined}
           renderActions={renderActions ? (index) => renderActions(cards[index], index) : undefined}
           onFavoriteChange={onFavoriteChange ? (index, isFavorite) => onFavoriteChange(cards[index], isFavorite) : undefined}
+          selection={selecting ? (index) => {
+            const card = cards[index];
+            return {
+              order: selectionOrder.get(card.id) ?? null,
+              disabledReason: pageDisabledReason(card),
+              onToggle: () => toggleSelected(card),
+            };
+          } : undefined}
         />
       ) : null}
       {!error ? (
         <Pagination page={page} pageCount={Math.max(pageCount, page)} total={total} disabled={loading}
           onPageChange={goToPage} />
       ) : null}
+      {selecting ? (
+        <>
+          <div aria-hidden="true" className="h-20" />
+          <SelectionBar
+            count={selected.length}
+            onCompose={openComposer}
+            onClear={() => setSelected([])}
+            onClose={stopSelecting}
+          />
+        </>
+      ) : null}
+      <CollectionComposer
+        open={composerMode !== null}
+        onOpenChange={(open) => { if (!open) setComposerMode(null); }}
+        mode={composerMode ?? lastComposerMode}
+        cards={selected}
+        onCardsChange={setSelected}
+        onDone={(path) => {
+          setComposerMode(null);
+          stopSelecting();
+          onNavigateTo(path);
+        }}
+      />
+    </div>
+  );
+}
+
+/** Only media that is not yet a page of a comic or set can become a page. */
+function pageDisabledReason(card: Card) {
+  if (card.type !== 'media') return 'Comics and sets cannot become pages';
+  if (card.parentCardId) return 'Already a page of a comic or set';
+  return null;
+}
+
+function SelectionBar({
+  count,
+  onCompose,
+  onClear,
+  onClose,
+}: {
+  count: number;
+  onCompose: (mode: ComposerMode) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="toolbar"
+      aria-label="Selection"
+      className="bg-popover text-popover-foreground shadow-3 fixed inset-x-3 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-2xl flex-wrap items-center gap-2 rounded-[var(--radius-panel)] border p-2 md:bottom-6"
+    >
+      <span className="min-w-0 flex-1 px-2 text-sm font-medium tabular-nums" aria-live="polite">
+        {count === 0 ? 'Tap media to choose pages' : `${count} selected`}
+      </span>
+      {count > 0 ? (
+        <Button type="button" variant="ghost" size="sm" onClick={onClear}>Clear</Button>
+      ) : null}
+      <Button type="button" size="icon" variant="ghost" aria-label="Stop selecting" onClick={onClose} className="sm:order-last">
+        <X className="size-4" />
+      </Button>
+      <div className="grid w-full grid-cols-3 gap-1.5 sm:flex sm:w-auto">
+        <Button type="button" size="sm" disabled={count < 2} onClick={() => onCompose('comic')}
+          title={count < 2 ? 'Choose at least two media cards' : undefined}>
+          <BookOpen className="size-3.5" aria-hidden="true" /><span className="sm:hidden">Comic</span><span className="max-sm:hidden">Make comic</span>
+        </Button>
+        <Button type="button" size="sm" variant="outline" disabled={count < 2} onClick={() => onCompose('set')}
+          title={count < 2 ? 'Choose at least two media cards' : undefined}>
+          <Layers className="size-3.5" aria-hidden="true" /><span className="sm:hidden">Set</span><span className="max-sm:hidden">Make set</span>
+        </Button>
+        <Button type="button" size="sm" variant="outline" disabled={count < 1} onClick={() => onCompose('add')}>
+          <Plus className="size-3.5" aria-hidden="true" /> Add to…
+        </Button>
+      </div>
     </div>
   );
 }
