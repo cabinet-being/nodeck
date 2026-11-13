@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 
-import { cardTypes, listCards, type Card } from '@/api/cards';
+import { cardTypes, listCardsPage, type Card } from '@/api/cards';
 import { FavoriteToggle } from '@/components/favorite-toggle';
 import { CardPreview } from '@/components/card-preview';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +12,10 @@ import { Input } from '@/components/ui/input';
 import { Menu, MenuContent, MenuItem, MenuLinkItem, MenuTrigger } from '@/components/ui/menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useUrlState } from '@/hooks/use-url-state';
+import { pageCountOf, Pagination, useClampPage, usePageScroll, useResetPage } from '@/components/pagination';
+import { parsePositiveInt, useUrlState } from '@/hooks/use-url-state';
+
+const pageSize = 50;
 
 export function CardsPage({
   onNavigate,
@@ -30,21 +33,30 @@ export function CardsPage({
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [cardToDelete, setCardToDelete] = React.useState<Card | null>(null);
+  const [page, setPage] = useUrlState('page', 1, { parse: parsePositiveInt });
+  const [total, setTotal] = React.useState(0);
+  const [reloadKey, setReloadKey] = React.useState(0);
+  const pageCount = pageCountOf(total, pageSize);
+  useResetPage(setPage, [order, search, type]);
+  useClampPage(page, pageCount, !isLoading && !error, setPage);
+  usePageScroll(page);
 
   React.useEffect(() => {
+    let active = true;
     setIsLoading(true);
     setError(null);
 
-    listCards({
+    listCardsPage({
       types: type ? [type] : [...cardTypes],
       search: search || undefined,
       sort: 'created_at',
       order,
-    })
-      .then(setCards)
-      .catch((requestError) => setError(requestError.message))
-      .finally(() => setIsLoading(false));
-  }, [order, search, type]);
+    }, page, pageSize)
+      .then((result) => { if (active) { setCards(result.items); setTotal(result.total); } })
+      .catch((requestError) => { if (active) setError(requestError.message); })
+      .finally(() => { if (active) setIsLoading(false); });
+    return () => { active = false; };
+  }, [order, search, type, page, reloadKey]);
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
@@ -132,6 +144,7 @@ export function CardsPage({
         ))}
         {!isLoading && cards.length === 0 && !error ? <EmptyState title="No cards found" /> : null}
       </div>
+      <Pagination page={page} pageCount={pageCount} total={total} disabled={isLoading} onPageChange={setPage} />
 
       <DeleteCardDialog
         card={cardToDelete}
@@ -140,6 +153,8 @@ export function CardsPage({
           const removed = new Set(removedIds);
           setCards((current) => current.filter((card) => !removed.has(card.id)));
           setCardToDelete(null);
+          // Refill the page from the next one.
+          setReloadKey((key) => key + 1);
         }}
       />
     </section>

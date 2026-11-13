@@ -3,6 +3,7 @@ import { Download, Expand, Maximize2, Minimize2, Shrink } from 'lucide-react';
 
 import { resolveApiUrl } from '@/api/cards';
 import { stageButtonClass } from '@/components/media-stage';
+import { VideoPlayer } from '@/components/video-player';
 import { cn } from '@/lib/utils';
 
 type MediaViewerProps = {
@@ -69,7 +70,7 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
             {actualSize ? <Shrink /> : <Expand />}
           </button>
         ) : null}
-        {canFullscreen ? (
+        {canFullscreen && kind === 'image' ? (
           <button type="button" className={stageButtonClass} onClick={toggleFullscreen}
             aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
             title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
@@ -93,14 +94,11 @@ export function MediaViewer({ kind, src, alt, posterUrl, fallbackSrc, contentRef
         style={fullscreen ? undefined : { maxHeight: 'calc(100dvh - 7rem)' }}
       >
         {kind === 'video' ? (
-          <video
+          <VideoPlayer
             src={resolveApiUrl(src)}
             poster={posterUrl ? resolveApiUrl(posterUrl) : undefined}
-            controls
-            playsInline
-            preload="metadata"
-            // Above pager overlays, so the player controls stay usable.
-            className={cn('relative z-10 max-w-full object-contain', fullscreen ? 'max-h-dvh' : 'max-h-[calc(100dvh-7rem)]')}
+            label={alt || 'Video'}
+            videoClassName="max-h-[calc(100dvh-7rem)]"
           />
         ) : (
           wrapImage ? wrapImage(image, { actualSize }) : image

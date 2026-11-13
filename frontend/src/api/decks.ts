@@ -1,3 +1,4 @@
+import { pageParams, totalFrom, type Page } from '@/api/paging';
 import { type Card } from '@/api/cards';
 
 export type DeckSummary = {
@@ -48,6 +49,22 @@ export async function listDecks(params: DeckListParams = {}) {
   const response = await fetch(`${apiBaseUrl}/api/decks?${searchParams.toString()}`);
 
   return readJson<DeckSummary[]>(response);
+}
+
+export async function listDecksPage(params: DeckListParams, page: number, pageSize: number): Promise<Page<DeckSummary>> {
+  const searchParams = new URLSearchParams(pageParams(page, pageSize));
+  if (params.search) searchParams.set('search', params.search);
+  if (params.sort) searchParams.set('sort', params.sort);
+  if (params.order) searchParams.set('order', params.order);
+  const response = await fetch(`${apiBaseUrl}/api/decks?${searchParams.toString()}`);
+  const items = await readJson<DeckSummary[]>(response);
+  return { items, total: totalFrom(response, items.length) };
+}
+
+/** The favorites deck without its cards (id and count); cards are paged through listCardsPage. */
+export async function getFavoritesDeck() {
+  const response = await fetch(`${apiBaseUrl}/api/favorites?include_cards=false`);
+  return readJson<DeckSummary>(response);
 }
 
 export async function getDeck(id: number, options: { includeCards?: boolean } = {}) {

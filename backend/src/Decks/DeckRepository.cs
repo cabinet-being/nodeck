@@ -48,7 +48,11 @@ public sealed class DeckRepository
         return await GetByIdAsync(deckId) ?? throw new InvalidOperationException("Created deck could not be read.");
     }
 
-    public async Task<IReadOnlyList<DeckSummary>> ListAsync(string? search, string sort, string order)
+    public async Task<IReadOnlyList<DeckSummary>> ListAsync(string? search, string sort, string order) =>
+        (await ListPageAsync(search, sort, order)).Items;
+
+    public async Task<(IReadOnlyList<DeckSummary> Items, long? Total)> ListPageAsync(string? search, string sort,
+        string order, int limit = 200, int offset = 0, bool includeTotal = false)
     {
         await using var connection = new MySqlConnection(_connectionString);
         var conditions = new List<string>();
@@ -69,6 +73,8 @@ public sealed class DeckRepository
             ? "d.created_at"
             : "d.id";
 
+        parameters.Add("Limit", limit);
+        parameters.Add("Offset", offset);
         var rows = await connection.QueryAsync<DbDeckSummary>(
             $"""
             SELECT
@@ -83,11 +89,14 @@ public sealed class DeckRepository
             {where}
             GROUP BY d.id, d.title, d.properties, d.metadata, d.system_key, d.created_at
             ORDER BY {orderColumn} {orderDirection}, d.id {orderDirection}
-            LIMIT 200;
+            LIMIT @Limit OFFSET @Offset;
             """,
             parameters);
 
-        return rows.Select(ToSummary).ToList();
+        long? total = includeTotal
+            ? await connection.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM decks d {where};", parameters)
+            : null;
+        return (rows.Select(ToSummary).ToList(), total);
     }
 
     public async Task<DeckDetails?> GetByIdAsync(long id, bool includeCards = true)
@@ -354,11 +363,11 @@ public sealed class DeckRepository
         return affectedRows > 0;
     }
 
-    public async Task<DeckDetails> GetFavoritesAsync()
+    public async Task<DeckDetails> GetFavoritesAsync(bool includeCards = true)
     {
         var deckId = await EnsureFavoritesDeckAsync();
 
-        return await GetByIdAsync(deckId) ?? throw new InvalidOperationException("Favorites deck could not be read.");
+        return await GetByIdAsync(deckId, includeCards) ?? throw new InvalidOperationException("Favorites deck could not be read.");
     }
 
     public async Task<DeckDetails> AddFavoriteAsync(long cardId)

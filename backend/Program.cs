@@ -1,3 +1,4 @@
+using MyApp.Api;
 using MySqlConnector;
 using MyApp.Api.Analysis;
 using MyApp.Api.Analysis.LearnedTags;
@@ -139,7 +140,8 @@ builder.Services.AddCors(options =>
     {
         policy.AllowAnyOrigin()
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .WithExposedHeaders(Paging.TotalHeader);
     });
 });
 

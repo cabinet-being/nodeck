@@ -1,38 +1,49 @@
 import * as React from 'react';
 import { Heart, Images } from 'lucide-react';
 
-import { removeFavorite } from '@/api/cards';
-import { getFavorites, type DeckCard } from '@/api/decks';
+import { listCardsPage, removeFavorite, type Card } from '@/api/cards';
+import { getFavoritesDeck } from '@/api/decks';
 import { cardLabel } from '@/components/card-tile';
 import { deckCardCountLabel } from '@/components/deck-stack';
 import { EmptyState } from '@/components/empty-state';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { pageCountOf, Pagination, useClampPage, usePageScroll } from '@/components/pagination';
 import { useVisualCardView, VisualCardViewToggle, VisualCardWall, VisualCardWallSkeleton } from '@/components/visual-card-wall';
+import { parsePositiveInt, useUrlState } from '@/hooks/use-url-state';
+
+const pageSize = 48;
 
 export function FavoritesPage({
   onNavigate,
 }: {
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }) {
-  const [cards, setCards] = React.useState<DeckCard[]>([]);
+  const [cards, setCards] = React.useState<Card[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [page, setPage] = useUrlState('page', 1, { parse: parsePositiveInt });
   const [error, setError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [retryKey, setRetryKey] = React.useState(0);
   const [removingCardId, setRemovingCardId] = React.useState<number | null>(null);
   const [view, setView] = useVisualCardView();
+  const pageCount = pageCountOf(total, pageSize);
+  useClampPage(page, pageCount, !isLoading && !error, setPage);
+  usePageScroll(page);
 
   React.useEffect(() => {
     let active = true;
     setError(null);
     setIsLoading(true);
 
-    getFavorites()
-      .then((deck) => { if (active) setCards(deck.cards); })
+    // The favorites deck is read without its cards; its cards are paged in deck order.
+    getFavoritesDeck()
+      .then((deck) => listCardsPage({ deckId: deck.id, sort: 'position' }, page, pageSize))
+      .then((result) => { if (active) { setCards(result.items); setTotal(result.total); } })
       .catch((requestError) => { if (active) setError(requestError.message); })
       .finally(() => { if (active) setIsLoading(false); });
 
     return () => { active = false; };
-  }, [retryKey]);
+  }, [retryKey, page]);
 
   return (
     <section className="flex flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
@@ -41,7 +52,7 @@ export function FavoritesPage({
           <Heart className="text-primary size-5 fill-current" aria-hidden="true" />
           Favorites
           {!isLoading && !error ? (
-            <span className="text-muted-foreground text-base font-normal tabular-nums">· {deckCardCountLabel(cards.length)}</span>
+            <span className="text-muted-foreground text-base font-normal tabular-nums">· {deckCardCountLabel(total)}</span>
           ) : null}
         </h1>
         {cards.length > 0 ? <VisualCardViewToggle view={view} onChange={setView} /> : null}
@@ -54,13 +65,13 @@ export function FavoritesPage({
         </div>
       ) : null}
 
-      {isLoading ? <VisualCardWallSkeleton count={12} /> : null}
+      {isLoading && cards.length === 0 ? <VisualCardWallSkeleton count={12} /> : null}
       {!isLoading && !error && cards.length === 0 ? (
         <EmptyState icon={Heart} title="No favorites yet"
           action={<a href="/gallery" onClick={onNavigate} className={buttonVariants({ variant: 'outline' })}><Images className="size-4" /> Browse gallery</a>} />
       ) : null}
 
-      {!isLoading && cards.length > 0 ? (
+      {cards.length > 0 ? (
         <VisualCardWall
           cards={cards}
           view={view}
@@ -84,6 +95,7 @@ export function FavoritesPage({
           }}
         />
       ) : null}
+      <Pagination page={page} pageCount={pageCount} disabled={isLoading} onPageChange={setPage} />
     </section>
   );
 
@@ -94,6 +106,9 @@ export function FavoritesPage({
     try {
       await removeFavorite(cardId);
       setCards((current) => current.filter((card) => card.id !== cardId));
+      setTotal((current) => Math.max(0, current - 1));
+      // Refill the page from the next one.
+      setRetryKey((key) => key + 1);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to remove favorite.');
     } finally {

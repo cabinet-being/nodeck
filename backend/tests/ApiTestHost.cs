@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using MyApp.Api.Catalog;
+using MyApp.Api.Decks;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Dapper;
@@ -42,7 +45,9 @@ internal sealed class ApiTestHost : IAsyncDisposable
         Client = client;
     }
 
-    public static async Task<ApiTestHost> CreateAsync(IDictionary<string, string?>? settings = null)
+    /// <param name="withLibraryApi">Also set up and map the deck, favorite and catalog endpoints.</param>
+    public static async Task<ApiTestHost> CreateAsync(IDictionary<string, string?>? settings = null,
+        bool withLibraryApi = false)
     {
         var builder = new MySqlConnectionStringBuilder(
             Environment.GetEnvironmentVariable("NODECK_TEST_CONNECTION_STRING")!);
@@ -80,6 +85,12 @@ internal sealed class ApiTestHost : IAsyncDisposable
             await initializer.InitializeAsync();
             await initializer.InitializeCreationRequestsAsync();
             await initializer.InitializeContentHashAsync();
+            if (withLibraryApi)
+            {
+                await new DeckDatabaseInitializer(configuration).InitializeAsync();
+                await new CatalogDatabaseInitializer(configuration, NullLogger<CatalogDatabaseInitializer>.Instance)
+                    .InitializeAsync();
+            }
 
             var host = WebApplication.CreateBuilder();
             host.WebHost.UseUrls("http://127.0.0.1:0");
@@ -91,6 +102,12 @@ internal sealed class ApiTestHost : IAsyncDisposable
             host.Services.AddSingleton<AnalysisQueueRepository>();
             host.Services.AddSingleton<SpeechAnalysisQueueRepository>();
             host.Services.AddSingleton<PreviewService>();
+            if (withLibraryApi)
+            {
+                host.Services.AddScoped<DeckRepository>();
+                host.Services.AddScoped<CatalogRepository>();
+                host.Services.AddScoped<CardCatalogRepository>();
+            }
             app = host.Build();
             // Surface unhandled exceptions in the response body so test failures are diagnosable.
             app.Use(async (context, next) =>
@@ -105,6 +122,12 @@ internal sealed class ApiTestHost : IAsyncDisposable
                 }
             });
             app.MapCardEndpoints();
+            if (withLibraryApi)
+            {
+                app.MapDeckEndpoints();
+                app.MapFavoriteEndpoints();
+                app.MapCatalogEndpoints();
+            }
             await app.StartAsync();
             var address = app.Services.GetRequiredService<IServer>().Features
                 .Get<IServerAddressesFeature>()!.Addresses.Single();

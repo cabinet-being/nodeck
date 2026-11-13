@@ -18,7 +18,12 @@ public sealed class CatalogRepository
     /// <summary>Lists up to 200 tags. <paramref name="byUsage"/> puts the most used tags first;
     /// without a search it then lists tags that are in use plus every user-created tag.</summary>
     public async Task<IReadOnlyList<TagEntry>> ListTagsAsync(string? search, bool byUsage = false,
-        string? category = null)
+        string? category = null) =>
+        (await ListTagsPageAsync(search, byUsage, category)).Items;
+
+    /// <summary>A page of tags in the same order as <see cref="ListTagsAsync"/>, with an optional total.</summary>
+    public async Task<(IReadOnlyList<TagEntry> Items, long? Total)> ListTagsPageAsync(string? search,
+        bool byUsage = false, string? category = null, int limit = 200, int offset = 0, bool includeTotal = false)
     {
         await using var connection = await OpenAsync();
         var term = NormalizeSearch(search);
@@ -37,11 +42,11 @@ public sealed class CatalogRepository
                   ) used
                   JOIN tags tf ON tf.id = used.tag_id
                   WHERE 1 = 1 {categoryFilter}
-                  GROUP BY tag_id ORDER BY SUM(uses) DESC, MIN(tf.name), tag_id LIMIT 200
+                  GROUP BY tag_id
                   """
                 : $"""
                   SELECT tf.id AS tag_id, 1 AS match_priority FROM tags tf
-                  WHERE 1 = 1 {categoryFilter} ORDER BY tf.name, tf.id LIMIT 200
+                  WHERE 1 = 1 {categoryFilter} /*page*/
                   """
             : $"""
               SELECT tag_id, MIN(match_priority) AS match_priority
@@ -56,6 +61,11 @@ public sealed class CatalogRepository
               WHERE 1 = 1 {categoryFilter}
               GROUP BY tag_id
               """;
+        // Listing the whole catalog by name pages inside the candidate query: the catalog can
+        // hold a full Danbooru import, and the outer query computes usage counts per row.
+        var pageInside = term is null && !byUsage;
+        var countCandidates = candidates.Replace("/*page*/", "");
+        candidates = candidates.Replace("/*page*/", pageInside ? " ORDER BY tf.name, tf.id LIMIT @Limit OFFSET @Offset" : "");
         var prefix = term is null ? null : term
             .Replace("!", "!!", StringComparison.Ordinal)
             .Replace("%", "!%", StringComparison.Ordinal)
@@ -69,10 +79,15 @@ public sealed class CatalogRepository
                        WHERE r.relation_type = 'tagged_with' AND r.to_card_id = t.legacy_card_id)) AS ReferenceCount
             FROM ({candidates}) candidates
             JOIN tags t ON t.id = candidates.tag_id
-            ORDER BY candidates.match_priority, {(byUsage ? "ReferenceCount DESC, " : "")}t.name, t.id LIMIT 200;
-            """, new { Search = term, Prefix = prefix, Category = category })).ToList();
+            ORDER BY candidates.match_priority, {(byUsage ? "ReferenceCount DESC, " : "")}t.name, t.id
+            {(pageInside ? "" : "LIMIT @Limit OFFSET @Offset")};
+            """, new { Search = term, Prefix = prefix, Category = category, Limit = limit, Offset = offset })).ToList();
         await AddAliasesAsync(connection, entries);
-        return entries;
+        long? total = includeTotal
+            ? await connection.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM ({countCandidates}) candidates;",
+                new { Search = term, Prefix = prefix, Category = category })
+            : null;
+        return (entries, total);
     }
 
     public async Task<TagEntry?> GetTagAsync(long id)
@@ -177,10 +192,15 @@ public sealed class CatalogRepository
         throw new CatalogConflictException("This tag is protected or still assigned to cards.");
     }
 
-    public async Task<IReadOnlyList<SourceEntry>> ListSourcesAsync(string? search)
+    public async Task<IReadOnlyList<SourceEntry>> ListSourcesAsync(string? search) =>
+        (await ListSourcesPageAsync(search)).Items;
+
+    public async Task<(IReadOnlyList<SourceEntry> Items, long? Total)> ListSourcesPageAsync(string? search,
+        int limit = 200, int offset = 0, bool includeTotal = false)
     {
         await using var connection = await OpenAsync();
-        return (await connection.QueryAsync<SourceEntry>("""
+        var normalized = NormalizeSearch(search);
+        var items = (await connection.QueryAsync<SourceEntry>("""
             SELECT s.id, s.name, s.legacy_card_id IS NOT NULL AS IsLegacy,
                    s.name_conflict AS NameConflict,
                    ((SELECT COUNT(*) FROM card_sources cs
@@ -188,8 +208,14 @@ public sealed class CatalogRepository
                     + (SELECT COUNT(*) FROM card_relations r
                        WHERE r.relation_type = 'sourced_from' AND r.to_card_id = s.legacy_card_id)) AS ReferenceCount
             FROM sources s WHERE @Search IS NULL OR LOCATE(@Search, s.name) > 0
-            ORDER BY s.name, s.id LIMIT 200;
-            """, new { Search = NormalizeSearch(search) })).ToList();
+            ORDER BY s.name, s.id LIMIT @Limit OFFSET @Offset;
+            """, new { Search = normalized, Limit = limit, Offset = offset })).ToList();
+        long? total = includeTotal
+            ? await connection.ExecuteScalarAsync<long>(
+                "SELECT COUNT(*) FROM sources s WHERE @Search IS NULL OR LOCATE(@Search, s.name) > 0;",
+                new { Search = normalized })
+            : null;
+        return (items, total);
     }
 
     public async Task<SourceEntry?> GetSourceAsync(long id)

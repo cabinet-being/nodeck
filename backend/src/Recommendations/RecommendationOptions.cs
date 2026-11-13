@@ -49,6 +49,11 @@ public sealed class RecommendationOptions
     public int ContextCandidateTagLimit { get; set; } = 24;
     public double ContextAffinityFactor { get; set; } = 0.25;
 
+    // Paged feeds rank at most this many cards; it is also the largest reported total.
+    public int MaxRankedCards { get; set; } = 500;
+    // Today's picks scans at most this many cards in the day's order (file checks included).
+    public int DailyScanLimit { get; set; } = 5000;
+
     // Rarer tags and more informative categories count more (see tags.category).
     public Dictionary<string, double> CategoryMultipliers { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {

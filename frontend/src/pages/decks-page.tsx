@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Layers3, MoreHorizontal, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 
-import { listDecks, type DeckSummary } from '@/api/decks';
+import { listDecksPage, type DeckSummary } from '@/api/decks';
 import { DeckStack } from '@/components/deck-stack';
 import { DeleteDeckDialog } from '@/components/delete-deck-dialog';
 import { EmptyState } from '@/components/empty-state';
@@ -10,7 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Menu, MenuContent, MenuItem, MenuLinkItem, MenuTrigger } from '@/components/ui/menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useUrlState } from '@/hooks/use-url-state';
+import { pageCountOf, Pagination, useClampPage, usePageScroll, useResetPage } from '@/components/pagination';
+import { parsePositiveInt, useUrlState } from '@/hooks/use-url-state';
+
+const pageSize = 30;
 
 export function DecksPage({
   onNavigate,
@@ -26,19 +29,25 @@ export function DecksPage({
   const [isLoading, setIsLoading] = React.useState(true);
   const [retryKey, setRetryKey] = React.useState(0);
   const [deckToDelete, setDeckToDelete] = React.useState<DeckSummary | null>(null);
+  const [page, setPage] = useUrlState('page', 1, { parse: parsePositiveInt });
+  const [total, setTotal] = React.useState(0);
+  const pageCount = pageCountOf(total, pageSize);
+  useResetPage(setPage, [order, search]);
+  useClampPage(page, pageCount, !isLoading && !error, setPage);
+  usePageScroll(page);
 
   React.useEffect(() => {
     let active = true;
     setIsLoading(true);
     setError(null);
 
-    listDecks({ search: search || undefined, sort: 'created_at', order })
-      .then((result) => { if (active) setDecks(result); })
+    listDecksPage({ search: search || undefined, sort: 'created_at', order }, page, pageSize)
+      .then((result) => { if (active) { setDecks(result.items); setTotal(result.total); } })
       .catch((requestError) => { if (active) setError(requestError.message); })
       .finally(() => { if (active) setIsLoading(false); });
 
     return () => { active = false; };
-  }, [order, search, retryKey]);
+  }, [order, search, retryKey, page]);
 
   const newDeck = (
     <a href="/decks/new" onClick={onNavigate} className={buttonVariants()}>
@@ -122,12 +131,15 @@ export function DecksPage({
         </div>
       ) : null}
 
+      <Pagination page={page} pageCount={pageCount} total={total} disabled={isLoading} onPageChange={setPage} />
+
       <DeleteDeckDialog
         deck={deckToDelete}
         onClose={() => setDeckToDelete(null)}
         onDeleted={(id) => {
           setDecks((current) => current.filter((deck) => deck.id !== id));
           setDeckToDelete(null);
+          setRetryKey((key) => key + 1);
         }}
       />
     </section>

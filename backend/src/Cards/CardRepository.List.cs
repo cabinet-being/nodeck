@@ -24,10 +24,14 @@ public sealed partial class CardRepository
             types, mediaType, search, excludeContainedMedia, tagIds, sourceId,
             catalogTagIds, catalogSourceId, sort, order, limit, offset));
 
-    public async Task<IReadOnlyList<CardSummary>> ListAsync(CardListQuery query)
+    public async Task<IReadOnlyList<CardSummary>> ListAsync(CardListQuery query) =>
+        (await ListPageAsync(query)).Items;
+
+    /// <summary>One page of cards; <see cref="CardListPage.Total"/> is set when the query asks for it.</summary>
+    public async Task<CardListPage> ListPageAsync(CardListQuery query)
     {
         var (types, mediaType, search, excludeContainedMedia, tagIds, sourceId,
-            catalogTagIds, catalogSourceId, sort, order, limit, offset, deckId) = query;
+            catalogTagIds, catalogSourceId, sort, order, limit, offset, deckId, includeTotal) = query;
         var positionSort = string.Equals(sort, "position", StringComparison.OrdinalIgnoreCase);
         if (positionSort && deckId is null)
             throw new ArgumentException("sort=position requires deck_id.", nameof(query));
@@ -210,15 +214,23 @@ public sealed partial class CardRepository
             """,
             parameters);
 
-        return rows.Select(row => ToSummary(new DbCard(
+        long? total = null;
+        if (includeTotal)
+            total = await connection.ExecuteScalarAsync<long>(
+                $"SELECT COUNT(*) FROM cards {deckJoin} {where};", parameters);
+
+        var items = rows.Select(row => ToSummary(new DbCard(
                 row.Id, row.Type, row.Title, row.Preview, row.Properties, row.Metadata, row.IsFavorite))
             with
             {
                 DeckPosition = row.DeckPosition,
                 MembershipProperties = deckId is null ? null : CardMetadata.ParseOptionalJson(row.MembershipProperties),
             }).ToList();
+        return new CardListPage(items, total);
     }
 }
+
+public sealed record CardListPage(IReadOnlyList<CardSummary> Items, long? Total);
 
 internal sealed class DbListCard
 {

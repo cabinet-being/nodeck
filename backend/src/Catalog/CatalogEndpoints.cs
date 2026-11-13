@@ -5,13 +5,18 @@ public static class CatalogEndpoints
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder app)
     {
         var tags = app.MapGroup("/api/tags");
-        tags.MapGet("", async (CatalogRepository repository, string? search, string? sort, string? category) =>
+        tags.MapGet("", async (CatalogRepository repository, HttpResponse response, string? search, string? sort,
+            string? category, int? limit, int? offset, string? include_total) =>
         {
             if (sort is not (null or "name" or "usage"))
                 return Results.BadRequest(new { error = "sort must be name or usage." });
             if (category is not (null or "general" or "artist" or "character" or "copyright" or "meta" or "custom"))
                 return Results.BadRequest(new { error = "category must be general, artist, character, copyright, meta or custom." });
-            return Results.Ok(await repository.ListTagsAsync(search, sort == "usage", category));
+            if (Paging.Validate(limit, offset) is { } pagingError) return Results.BadRequest(new { error = pagingError });
+            var (items, total) = await repository.ListTagsPageAsync(search, sort == "usage", category,
+                limit ?? 200, offset ?? 0, Paging.WantsTotal(include_total));
+            if (total is long count) Paging.SetTotal(response, count);
+            return Results.Ok(items);
         });
         tags.MapGet("/{id:long}", async (long id, CatalogRepository repository) =>
             await repository.GetTagAsync(id) is { } tag ? Results.Ok(tag) : Results.NotFound());
@@ -29,7 +34,15 @@ public static class CatalogEndpoints
                 await repository.DeleteTagAsync(id) ? Results.NoContent() : Results.NotFound()));
 
         var sources = app.MapGroup("/api/sources");
-        sources.MapGet("", (CatalogRepository repository, string? search) => repository.ListSourcesAsync(search));
+        sources.MapGet("", async (CatalogRepository repository, HttpResponse response, string? search,
+            int? limit, int? offset, string? include_total) =>
+        {
+            if (Paging.Validate(limit, offset) is { } pagingError) return Results.BadRequest(new { error = pagingError });
+            var (items, total) = await repository.ListSourcesPageAsync(search, limit ?? 200, offset ?? 0,
+                Paging.WantsTotal(include_total));
+            if (total is long count) Paging.SetTotal(response, count);
+            return Results.Ok(items);
+        });
         sources.MapGet("/{id:long}", async (long id, CatalogRepository repository) =>
             await repository.GetSourceAsync(id) is { } source ? Results.Ok(source) : Results.NotFound());
         sources.MapPost("", async (SourceRequest request, CatalogRepository repository) =>

@@ -695,6 +695,62 @@ public sealed class RecommendationTests
     }
 
     [DatabaseFact]
+    public async Task RankedFeedPagesLineUpWithOneLongRequestAndReportTotal()
+    {
+        await using var scope = await RecommendationScope.CreateAsync();
+        var tag = await scope.AddTagAsync("paged feed");
+        var all = new List<long>();
+        for (var i = 0; i < 7; i++)
+        {
+            var id = await scope.AddCardAsync("media", $"feed {i}");
+            if (i % 2 == 0) await scope.AssignTagAsync(id, tag);
+            all.Add(id);
+        }
+        await scope.VoteAsync(all[0], 1, DateTime.UtcNow.Date);
+
+        var whole = await scope.GetItemsAsync("/api/recommendations?mode=pages&limit=50");
+        var paged = new List<JsonElement>();
+        for (var offset = 0; offset < whole.Length; offset += 3)
+        {
+            using var response = await scope.Client.GetAsync(
+                $"/api/recommendations?mode=pages&limit=3&offset={offset}&include_total=true");
+            using var body = await ReadJsonAsync(response);
+            Assert.Equal(whole.Length, body.RootElement.GetProperty("total").GetInt32());
+            paged.AddRange(body.RootElement.GetProperty("items").EnumerateArray().Select(item => item.Clone()));
+        }
+
+        Assert.Equal(whole.Select(CardId), paged.Select(CardId));
+    }
+
+    [DatabaseFact]
+    public async Task DailyFeedPagesLineUpWithOneLongRequestAndReportTotal()
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 8, 12, 0, 0, TimeSpan.Zero));
+        await using var scope = await RecommendationScope.CreateAsync(clock);
+        for (var index = 0; index < 7; index++)
+        {
+            var id = await scope.AddCardAsync("media", $"daily page {index}");
+            await scope.SetCreatedAtAsync(id, new DateTime(2026, 11, 6, 12, 0, 0, DateTimeKind.Utc));
+        }
+
+        using var wholeResponse = await scope.Client.GetAsync("/api/recommendations/daily?timeZone=Europe/Kyiv&limit=50");
+        using var wholeBody = await ReadJsonAsync(wholeResponse);
+        var whole = wholeBody.RootElement.GetProperty("items").EnumerateArray().Select(CardId).ToArray();
+        var paged = new List<long>();
+        for (var offset = 0; offset < 9; offset += 3)
+        {
+            using var response = await scope.Client.GetAsync(
+                $"/api/recommendations/daily?timeZone=Europe/Kyiv&limit=3&offset={offset}&include_total=true");
+            using var body = await ReadJsonAsync(response);
+            Assert.Equal(7, body.RootElement.GetProperty("total").GetInt64());
+            paged.AddRange(body.RootElement.GetProperty("items").EnumerateArray().Select(CardId));
+        }
+
+        Assert.Equal(7, whole.Length);
+        Assert.Equal(whole, paged);
+    }
+
+    [DatabaseFact]
     public async Task ArtistTagOutranksGeneralTagOfEqualFrequency()
     {
         await using var scope = await RecommendationScope.CreateAsync();

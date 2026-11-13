@@ -25,8 +25,11 @@ public static class RecommendationEndpoints
             (!int.TryParse(limitValue.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out limit) ||
              limit is < 1 or > 50))
             return Results.BadRequest(new { error = "Limit must be from 1 to 50." });
+        if (!TryReadOffset(query, out var offset))
+            return Results.BadRequest(new { error = "Offset must be a nonnegative integer." });
 
-        return Results.Ok(await repository.GetDailyAsync(timeZone!, limit, cancellationToken));
+        return Results.Ok(await repository.GetDailyAsync(timeZone!, limit, offset,
+            Paging.WantsTotal(query["include_total"].ToString()), cancellationToken));
     }
 
     private static async Task<IResult> GetAsync(HttpRequest request, RecommendationRepository repository,
@@ -52,9 +55,21 @@ public static class RecommendationEndpoints
             contextCardId = parsedId;
         }
 
-        var items = await repository.GetAsync(mode, limit, contextCardId, cancellationToken);
-        return items is null
+        if (!TryReadOffset(query, out var offset))
+            return Results.BadRequest(new { error = "Offset must be a nonnegative integer." });
+
+        var page = await repository.GetPageAsync(mode, limit, offset,
+            Paging.WantsTotal(query["include_total"].ToString()), contextCardId, cancellationToken);
+        return page is null
             ? Results.NotFound(new { error = "Context card not found." })
-            : Results.Ok(new { items, mode });
+            : Results.Ok(new { items = page.Items, mode, total = page.Total });
+    }
+
+    private static bool TryReadOffset(IQueryCollection query, out int offset)
+    {
+        offset = 0;
+        return !query.TryGetValue("offset", out var value) ||
+            (int.TryParse(value.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out offset) &&
+             offset <= 100_000);
     }
 }

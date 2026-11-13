@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { ChevronLeft, ChevronRight, Images, Layers3, SearchX, Sparkles } from 'lucide-react';
+import { Images, Layers3, SearchX, Sparkles } from 'lucide-react';
 
-import { listCards, type Card } from '@/api/cards';
+import { listCardsPage, type Card } from '@/api/cards';
 import { getSource, getTag, type Source, type Tag } from '@/api/catalog';
 import { EmptyState } from '@/components/empty-state';
 import { FilterBar, type CatalogFilters } from '@/components/filter-bar';
+import { pageCountOf, Pagination, usePageScroll } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
 import {
@@ -48,7 +49,7 @@ export function CardBrowser({
   emptyMessage?: string;
 }) {
   const [cards, setCards] = React.useState<Card[]>([]);
-  const [hasNextPage, setHasNextPage] = React.useState(false);
+  const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [retryKey, setRetryKey] = React.useState(0);
@@ -87,7 +88,7 @@ export function CardBrowser({
     let active = true;
     setError(null);
     setLoading(true);
-    listCards({
+    listCardsPage({
       ...(deckId === null
         ? pagesMode
           ? { types: ['media'], sort: 'created_at' as const, order: 'desc' as const }
@@ -98,19 +99,16 @@ export function CardBrowser({
       catalogTags: parseIds(catalogTagIds || null),
       catalogSource: parseSingleId(catalogSourceId),
       search: search || undefined,
-      limit: pageSize + 1,
-      offset: (page - 1) * pageSize,
-    }).then((results) => {
+    }, page, pageSize).then((result) => {
       if (!active) return;
-      const pageCards = results.slice(0, pageSize);
-      setCards(pageCards);
-      setHasNextPage(results.length > pageSize);
-      onPageLoadedRef.current?.({ count: pageCards.length, page });
+      setCards(result.items);
+      setTotal(result.total);
+      onPageLoadedRef.current?.({ count: result.items.length, page });
     })
       .catch((cause) => {
         if (!active) return;
         setCards([]);
-        setHasNextPage(false);
+        setTotal(0);
         setError(cause instanceof Error ? cause.message : 'Unable to load cards.');
       })
       .finally(() => { if (active) setLoading(false); });
@@ -159,6 +157,9 @@ export function CardBrowser({
     else next.set('page', String(nextPage));
     navigateWith(next);
   }
+
+  usePageScroll(page);
+  const pageCount = pageCountOf(total, pageSize);
 
   const filtersActive = search !== '' || catalogTagIds !== '' || catalogSourceId !== '' || legacyActive;
 
@@ -211,13 +212,10 @@ export function CardBrowser({
           renderActions={renderActions ? (index) => renderActions(cards[index], index) : undefined}
         />
       ) : null}
-      {!error && (page > 1 || hasNextPage) ? <nav className="flex items-center justify-center gap-3 py-2" aria-label="Pages">
-        <Button type="button" variant="outline" disabled={loading || page <= 1}
-          onClick={() => goToPage(page - 1)}><ChevronLeft className="size-4" />Previous</Button>
-        <span className="text-muted-foreground text-sm tabular-nums">Page {page}</span>
-        <Button type="button" variant="outline" disabled={loading || !hasNextPage}
-          onClick={() => goToPage(page + 1)}>Next<ChevronRight className="size-4" /></Button>
-      </nav> : null}
+      {!error ? (
+        <Pagination page={page} pageCount={Math.max(pageCount, page)} total={total} disabled={loading}
+          onPageChange={goToPage} />
+      ) : null}
     </div>
   );
 }

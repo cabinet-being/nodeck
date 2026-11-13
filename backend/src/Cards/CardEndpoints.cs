@@ -281,7 +281,9 @@ public static class CardEndpoints
         string? order,
         int? limit,
         int? offset,
-        string? deck_id)
+        string? deck_id,
+        string? include_total,
+        HttpResponse response)
     {
         if (!TryReadTypes(type, types, out var requestedTypes, out var typeError))
         {
@@ -303,10 +305,10 @@ public static class CardEndpoints
         if (deckId is null && string.Equals(effectiveSort, "position", StringComparison.OrdinalIgnoreCase))
             return Results.BadRequest(new { error = "sort=position requires deck_id." });
 
-        IReadOnlyList<CardSummary> cards;
+        CardListPage cards;
         try
         {
-            cards = await repository.ListAsync(new CardListQuery(
+            cards = await repository.ListPageAsync(new CardListQuery(
                 requestedTypes,
                 mediaType ?? media_type,
                 search,
@@ -319,14 +321,16 @@ public static class CardEndpoints
                 order ?? "desc",
                 limit ?? 200,
                 offset ?? 0,
-                deckId));
+                deckId,
+                Paging.WantsTotal(include_total)));
         }
         catch (KeyNotFoundException)
         {
             return Results.NotFound(new { error = "Deck not found." });
         }
 
-        return Results.Ok(cards);
+        if (cards.Total is long total) Paging.SetTotal(response, total);
+        return Results.Ok(cards.Items);
     }
 
     private static async Task<IResult> GetCardAsync(CardRepository repository, long id)

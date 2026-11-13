@@ -9,7 +9,12 @@ using MySqlConnector;
 namespace MyApp.Api.Recommendations;
 
 public sealed record RecommendationItem(CardSummary Card, double Score);
-public sealed record DailyRecommendationResult(IReadOnlyList<RecommendationItem> Items, string LocalDate, string TimeZone);
+public sealed record RecommendationPage(IReadOnlyList<RecommendationItem> Items, int? Total);
+public sealed record DailyRecommendationResult(IReadOnlyList<RecommendationItem> Items, string LocalDate, string TimeZone)
+{
+    /// <summary>Number of cards in today's order; set when the request asks for it.</summary>
+    public long? Total { get; init; }
+}
 
 public sealed class RecommendationRepository
 {
@@ -28,8 +33,13 @@ public sealed class RecommendationRepository
         _previewService = previewService;
     }
 
-    public async Task<DailyRecommendationResult> GetDailyAsync(TimeZoneInfo timeZone, int limit,
-        CancellationToken cancellationToken = default)
+    public Task<DailyRecommendationResult> GetDailyAsync(TimeZoneInfo timeZone, int limit,
+        CancellationToken cancellationToken = default) =>
+        GetDailyAsync(timeZone, limit, 0, false, cancellationToken);
+
+    /// <summary>A page of today's picks: the library in the day's stable order, readable cards only.</summary>
+    public async Task<DailyRecommendationResult> GetDailyAsync(TimeZoneInfo timeZone, int limit, int offset,
+        bool includeTotal, CancellationToken cancellationToken = default)
     {
         var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_timeProvider.GetUtcNow(), timeZone).DateTime);
         var dateText = localDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -40,13 +50,7 @@ public sealed class RecommendationRepository
 
         // SHA2 keeps the local day's order stable. Page through that order so
         // unavailable files cannot consume result slots before the limit.
-        const string dailySql = """
-            SELECT c.id AS Id, c.type AS Type, c.title AS Title, c.preview AS Preview,
-                   c.properties AS Properties, c.metadata AS Metadata,
-                   CASE WHEN EXISTS (
-                       SELECT 1 FROM deck_cards dc JOIN decks d ON d.id = dc.deck_id
-                       WHERE dc.card_id = c.id AND d.system_key = 'favorites'
-                   ) THEN 1 ELSE 0 END AS IsFavorite
+        const string dailyFilter = """
             FROM cards c
             WHERE c.type IN ('media', 'comic', 'set')
               AND (@IncludeToday = 1 OR c.created_at < @UtcStart OR c.created_at IS NULL)
@@ -76,18 +80,28 @@ public sealed class RecommendationRepository
                                    AND newer.vote_date > v.vote_date))
                     )
               )
+            """;
+        var dailySql = $"""
+            SELECT c.id AS Id, c.type AS Type, c.title AS Title, c.preview AS Preview,
+                   c.properties AS Properties, c.metadata AS Metadata,
+                   CASE WHEN EXISTS (
+                       SELECT 1 FROM deck_cards dc JOIN decks d ON d.id = dc.deck_id
+                       WHERE dc.card_id = c.id AND d.system_key = 'favorites'
+                   ) THEN 1 ELSE 0 END AS IsFavorite
+            {dailyFilter}
             ORDER BY SHA2(CONCAT(@LocalDate, '|', @TimeZone, '|', c.id), 256), c.id
             LIMIT @PageSize OFFSET @Offset;
             """;
 
+        var wanted = offset + limit;
         async Task<List<CardRow>> ScanAsync(bool includeToday)
         {
             const int pageSize = 100;
-            const int maxPages = 50;
-            var available = new List<CardRow>(limit);
-            // Cap filesystem and SQL work at 5,000 candidates; a larger library
-            // can return fewer than limit if its available cards lie beyond the cap.
-            for (var pageNumber = 0; pageNumber < maxPages && available.Count < limit; pageNumber++)
+            var maxPages = Math.Max(1, _options.DailyScanLimit / pageSize);
+            var available = new List<CardRow>(Math.Min(wanted, 1000));
+            // Cap filesystem and SQL work at DailyScanLimit candidates; a larger library
+            // can return fewer cards if its available cards lie beyond the cap.
+            for (var pageNumber = 0; pageNumber < maxPages && available.Count < wanted; pageNumber++)
             {
                 var page = (await connection.QueryAsync<CardRow>(new CommandDefinition(dailySql,
                     new { UtcStart = utcStart, IncludeToday = includeToday ? 1 : 0,
@@ -100,7 +114,7 @@ public sealed class RecommendationRepository
                 foreach (var card in page)
                 {
                     if (availableIds.Contains(card.Id)) available.Add(card);
-                    if (available.Count == limit) break;
+                    if (available.Count == wanted) break;
                 }
                 if (page.Length < pageSize) break;
             }
@@ -108,15 +122,46 @@ public sealed class RecommendationRepository
         }
 
         // Today's uploads are a cold-start fallback only when no older card can be read.
+        var includeToday = false;
         var cards = await ScanAsync(false);
-        if (cards.Count == 0) cards = await ScanAsync(true);
-        return new DailyRecommendationResult(cards.Select(card => new RecommendationItem(ToSummary(card), 0)).ToArray(),
-            dateText, timeZone.Id);
+        if (cards.Count == 0)
+        {
+            includeToday = true;
+            cards = await ScanAsync(true);
+        }
+        long? total = null;
+        if (includeTotal)
+        {
+            // Counted in SQL (file availability is checked only for scanned pages), capped
+            // like the scan so the last reported page can always be reached.
+            var counted = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
+                $"SELECT COUNT(*) {dailyFilter};",
+                new { UtcStart = utcStart, IncludeToday = includeToday ? 1 : 0 },
+                cancellationToken: cancellationToken));
+            total = Math.Min(counted, _options.DailyScanLimit);
+            // Unreadable files are skipped; when the scan ran out early the count is exact.
+            if (cards.Count < wanted) total = Math.Min(total.Value, cards.Count);
+        }
+        return new DailyRecommendationResult(cards.Skip(offset).Take(limit)
+                .Select(card => new RecommendationItem(ToSummary(card), 0)).ToArray(),
+            dateText, timeZone.Id) { Total = total };
     }
 
     public async Task<IReadOnlyList<RecommendationItem>?> GetAsync(string mode, int limit,
+        long? contextCardId, CancellationToken cancellationToken = default) =>
+        (await GetPageAsync(mode, limit, 0, false, contextCardId, cancellationToken))?.Items;
+
+    /// <summary>
+    /// One page of the ranked feed. The ranking is deterministic, so pages line up; with
+    /// <paramref name="includeTotal"/> everything up to <see cref="RecommendationOptions.MaxRankedCards"/>
+    /// is ranked to report how many cards the feed holds.
+    /// </summary>
+    public async Task<RecommendationPage?> GetPageAsync(string mode, int limit, int offset, bool includeTotal,
         long? contextCardId, CancellationToken cancellationToken = default)
     {
+        var rankLimit = includeTotal
+            ? Math.Max(_options.MaxRankedCards, 1)
+            : Math.Min(offset + limit, Math.Max(_options.MaxRankedCards, limit));
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         var o = _options;
         var viewCutoff = now.AddDays(-o.ViewWindowDays);
@@ -266,7 +311,7 @@ public sealed class RecommendationRepository
             candidateIds.UnionWith(suggested);
         }
 
-        if (candidateIds.Count == 0) return [];
+        if (candidateIds.Count == 0) return new RecommendationPage([], includeTotal ? 0 : null);
         var ids = candidateIds.ToArray();
         var relationshipIds = contextCardId is long contextForRelation
             ? ids.Append(contextForRelation).Distinct().ToArray() : ids;
@@ -449,9 +494,9 @@ public sealed class RecommendationRepository
         var familyCounts = new Dictionary<long, int>();
         var selectedTagCounts = new Dictionary<long, int>();
         var selectedScores = new Dictionary<long, double>();
-        var rankedIds = new List<long>(limit);
+        var rankedIds = new List<long>(Math.Min(rankLimit, eligible.Length));
         var remaining = eligible.Select(pair => pair.Key).ToList();
-        while (rankedIds.Count < limit)
+        while (rankedIds.Count < rankLimit)
         {
             long? bestId = null;
             var bestScore = double.NegativeInfinity;
@@ -489,7 +534,9 @@ public sealed class RecommendationRepository
                 foreach (var tagId in selectedTags)
                     selectedTagCounts[tagId] = selectedTagCounts.GetValueOrDefault(tagId) + 1;
         }
-        if (rankedIds.Count == 0) return [];
+        int? total = includeTotal ? rankedIds.Count : null;
+        var pageIds = rankedIds.Skip(offset).Take(limit).ToList();
+        if (pageIds.Count == 0) return new RecommendationPage([], total);
 
         var cards = await connection.QueryAsync<CardRow>(new CommandDefinition("""
             SELECT c.id AS Id, c.type AS Type, c.title AS Title, c.preview AS Preview,
@@ -499,11 +546,11 @@ public sealed class RecommendationRepository
                        WHERE dc.card_id = c.id AND d.system_key = 'favorites'
                    ) THEN 1 ELSE 0 END AS IsFavorite
             FROM cards c WHERE c.id IN @Ids AND c.type IN ('media', 'comic', 'set');
-            """, new { Ids = rankedIds }, cancellationToken: cancellationToken));
+            """, new { Ids = pageIds }, cancellationToken: cancellationToken));
         var byId = cards.ToDictionary(card => card.Id);
-        return rankedIds.Where(byId.ContainsKey)
+        return new RecommendationPage(pageIds.Where(byId.ContainsKey)
             .Select(id => new RecommendationItem(ToSummary(byId[id]), Math.Round(selectedScores[id], 3)))
-            .ToArray();
+            .ToArray(), total);
     }
 
     /// <summary>

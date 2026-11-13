@@ -13,4 +13,5 @@ public sealed record CardListQuery(
     string Order,
     int Limit = 200,
     int Offset = 0,
-    long? DeckId = null);
+    long? DeckId = null,
+    bool IncludeTotal = false);

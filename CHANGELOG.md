@@ -2,6 +2,14 @@
 
 All notable changes to nodeck are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Page selection on long lists.** Gallery, deck pages, Manage cards, Tags, Sources, Decks, Favorites, For you and Today's picks show numbered pages with the total count (and a "go to page" field when there are more than seven). The page is kept in the URL, so links and Back return to it. Tags and sources are no longer cut off at 200, and For you and Today's picks are no longer limited to one screen (For you ranks up to `Recommendations:MaxRankedCards`, default 500).
+- List APIs accept `limit`/`offset` and, with `include_total=true`, report the number of matching items in the `X-Total-Count` header (`/api/cards`, `/api/tags`, `/api/sources`, `/api/decks`); `/api/recommendations` and `/api/recommendations/daily` accept `offset` and return `total`. `GET /api/favorites?include_cards=false` returns the favorites deck without its cards.
+- **Own video player with looping.** Videos (single cards, comic and set pages) play in nodeck's player instead of the browser's: loop the whole video (on by default and remembered), loop an A–B segment, playback speed 0.25–2×, frame stepping, volume, and fullscreen. Keys while the player is focused: Space/K play, ←/→ seek 5 s, ↑/↓ volume, M mute, R loop, A segment, `,`/`.` frame, `[`/`]` speed, F fullscreen.
+
 ## [0.1.4] — 2026-11-12
 
 ### Fixed

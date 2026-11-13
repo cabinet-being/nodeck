@@ -1,3 +1,4 @@
+import { totalFrom, type Page } from '@/api/paging';
 export type CardRelation = {
   id: number;
   fromCardId: number;
@@ -65,6 +66,7 @@ export type CardRelations = {
 };
 
 export type CardListParams = {
+  includeTotal?: boolean;
   type?: string;
   types?: string[];
   mediaType?: string;
@@ -134,7 +136,7 @@ export const relationTypes = [
   'related_to',
 ] as const;
 
-export async function listCards(params: CardListParams = {}) {
+async function fetchCardList(params: CardListParams) {
   const searchParams = new URLSearchParams();
 
   if (params.type) searchParams.set('type', params.type);
@@ -151,10 +153,23 @@ export async function listCards(params: CardListParams = {}) {
   if (params.order) searchParams.set('order', params.order);
   if (params.limit) searchParams.set('limit', String(params.limit));
   if (params.offset) searchParams.set('offset', String(params.offset));
+  if (params.includeTotal) searchParams.set('include_total', 'true');
 
-  const response = await fetch(`${apiBaseUrl}/api/cards?${searchParams.toString()}`);
+  return fetch(`${apiBaseUrl}/api/cards?${searchParams.toString()}`);
+}
 
-  return readJson<Card[]>(response);
+export async function listCards(params: CardListParams = {}) {
+  return readJson<Card[]>(await fetchCardList(params));
+}
+
+/** One page of cards (1-based) with the number of all matching cards. */
+export async function listCardsPage(params: Omit<CardListParams, 'limit' | 'offset' | 'includeTotal'>,
+  page: number, pageSize: number): Promise<Page<Card>> {
+  const response = await fetchCardList({
+    ...params, limit: pageSize, offset: (Math.max(1, page) - 1) * pageSize, includeTotal: true,
+  });
+  const items = await readJson<Card[]>(response);
+  return { items, total: totalFrom(response, items.length) };
 }
 
 export async function getCard(id: number) {

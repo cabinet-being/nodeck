@@ -13,9 +13,11 @@ public static class FavoriteEndpoints
         return app;
     }
 
-    private static async Task<IResult> GetFavoritesAsync(DeckRepository repository)
+    private static async Task<IResult> GetFavoritesAsync(DeckRepository repository, bool? include_cards)
     {
-        var favorites = await repository.GetFavoritesAsync();
+        // include_cards=false returns just the deck (with its id), so the page can list
+        // its cards page by page through GET /api/cards?deck_id=.
+        var favorites = await repository.GetFavoritesAsync(include_cards ?? true);
 
         return Results.Ok(favorites);
     }

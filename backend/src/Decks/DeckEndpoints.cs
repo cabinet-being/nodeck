@@ -42,15 +42,24 @@ public static class DeckEndpoints
 
     private static async Task<IResult> ListDecksAsync(
         DeckRepository repository,
+        HttpResponse response,
         string? search,
         string? sort,
-        string? order)
+        string? order,
+        int? limit,
+        int? offset,
+        string? include_total)
     {
-        var decks = await repository.ListAsync(
+        if (Paging.Validate(limit, offset) is { } pagingError) return Results.BadRequest(new { error = pagingError });
+        var (decks, total) = await repository.ListPageAsync(
             search,
             sort ?? "created_at",
-            order ?? "desc");
+            order ?? "desc",
+            limit ?? 200,
+            offset ?? 0,
+            Paging.WantsTotal(include_total));
 
+        if (total is long count) Paging.SetTotal(response, count);
         return Results.Ok(decks);
     }
 

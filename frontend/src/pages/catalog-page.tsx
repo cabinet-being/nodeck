@@ -2,7 +2,7 @@ import * as React from 'react';
 import { MoreHorizontal, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 
 import {
-  createSource, createTag, deleteSource, deleteTag, listSources, listTags,
+  createSource, createTag, deleteSource, deleteTag, listSourcesPage, listTagsPage,
   updateSource, updateTag, type Source, type Tag, type TagCategoryFilter,
 } from '@/api/catalog';
 import { EmptyState } from '@/components/empty-state';
@@ -13,7 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useUrlState } from '@/hooks/use-url-state';
+import { pageCountOf, Pagination, useClampPage, usePageScroll, useResetPage } from '@/components/pagination';
+import { parsePositiveInt, useUrlState } from '@/hooks/use-url-state';
 
 type Item = Tag | Source;
 type Category = 'all' | 'artist' | 'character' | 'copyright' | 'general' | 'meta' | 'custom';
@@ -27,9 +28,9 @@ const categoryChoices: { value: TagCategoryFilter; label: string }[] = [
   { value: 'custom', label: 'Custom' },
 ];
 
-// The API returns at most 200 entries per request; tag tabs ask the API for their
-// category (most used first), and the client filter below keeps the list consistent.
-const LOAD_LIMIT = 200;
+// Tag tabs ask the API for their category (most used first); the client filter below
+// keeps the list consistent while a request for another tab is still in flight.
+const PAGE_SIZE = 100;
 
 function matchesCategory(item: Item, category: Category) {
   if (category === 'all' || !('origin' in item)) return true;
@@ -58,23 +59,31 @@ export function CatalogPage({
   const [tagCategory, setTagCategory] = React.useState<TagCategoryFilter>('custom');
   const [formError, setFormError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  const [page, setPage] = useUrlState('page', 1, { parse: parsePositiveInt });
+  const [total, setTotal] = React.useState(0);
+  const pageCount = pageCountOf(total, PAGE_SIZE);
+  useResetPage(setPage, [kind, search, category]);
+  useClampPage(page, pageCount, !loading && !error, setPage);
+  usePageScroll(page);
 
   React.useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
-    const load = kind === 'tag'
-      ? listTags(search, 'usage', category === 'all' ? undefined : category)
-      : listSources(search);
+    const load: Promise<{ items: Item[]; total: number }> = kind === 'tag'
+      ? listTagsPage(search, 'usage', category === 'all' ? undefined : category, page, PAGE_SIZE)
+      : listSourcesPage(search, page, PAGE_SIZE);
     load.then((result) => {
-      if (active) setItems(result);
+      if (!active) return;
+      setItems(result.items);
+      setTotal(result.total);
     }).catch((cause) => {
       if (active) setError(cause instanceof Error ? cause.message : 'Unable to load catalog.');
     }).finally(() => {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [kind, search, revision, category]);
+  }, [kind, search, revision, category, page]);
 
   function openEditor(item: Item | 'new') {
     setEditing(item);
@@ -202,11 +211,7 @@ export function CatalogPage({
       {!loading && visible.length === 0 && !error ? (
         <EmptyState icon={SearchX} title={`No ${label.toLowerCase()} found`} />
       ) : null}
-      {!loading && items.length >= LOAD_LIMIT ? (
-        <p className="text-muted-foreground text-center text-xs">
-          {kind === 'tag' ? `Showing the ${LOAD_LIMIT} most used tags. Search to find others.` : `Showing the first ${LOAD_LIMIT}. Search to narrow the list.`}
-        </p>
-      ) : null}
+      <Pagination page={page} pageCount={pageCount} total={total} disabled={loading} onPageChange={setPage} />
 
       <Dialog open={editing !== null} title={editing === 'new' ? `New ${kind}` : `Edit ${kind}`}
         onOpenChange={(open) => { if (!open) setEditing(null); }}>

@@ -10,12 +10,15 @@ export type Recommendation = {
 export type RecommendationResponse = {
   items: Recommendation[];
   mode: RecommendationMode;
+  /** Present when requested with `includeTotal`. */
+  total?: number | null;
 };
 
 export type DailyRecommendationResponse = {
   items: Recommendation[];
   localDate: string;
   timeZone: string;
+  total?: number | null;
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '';
@@ -23,13 +26,19 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? '';
 export async function getRecommendations({
   mode = 'collections',
   limit = 20,
+  offset = 0,
+  includeTotal = false,
   contextCardId,
 }: {
   mode?: RecommendationMode;
   limit?: number;
+  offset?: number;
+  includeTotal?: boolean;
   contextCardId?: number;
 } = {}): Promise<RecommendationResponse> {
   const params = new URLSearchParams({ mode, limit: String(limit) });
+  if (offset > 0) params.set('offset', String(offset));
+  if (includeTotal) params.set('include_total', 'true');
   if (contextCardId !== undefined) params.set('contextCardId', String(contextCardId));
 
   const response = await fetch(`${apiBaseUrl}/api/recommendations?${params}`);
@@ -43,9 +52,12 @@ export async function getRecommendations({
   return body as RecommendationResponse;
 }
 
-export async function getDailyRecommendations(limit = 30): Promise<DailyRecommendationResponse> {
+export async function getDailyRecommendations(limit = 30,
+  { offset = 0, includeTotal = false }: { offset?: number; includeTotal?: boolean } = {}): Promise<DailyRecommendationResponse> {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const params = new URLSearchParams({ timeZone, limit: String(limit) });
+  if (offset > 0) params.set('offset', String(offset));
+  if (includeTotal) params.set('include_total', 'true');
   const response = await fetch(`${apiBaseUrl}/api/recommendations/daily?${params}`);
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {

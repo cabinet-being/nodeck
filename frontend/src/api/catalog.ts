@@ -1,3 +1,4 @@
+import { pageParams, totalFrom, type Page } from '@/api/paging';
 export type Tag = {
   id: number;
   name: string;
@@ -59,6 +60,29 @@ export const updateTag = (id: number, name: string, aliases: string[], category?
   request<Tag>(`/api/tags/${id}`, json({ name, aliases, ...(category ? { category } : {}) }, 'PUT'));
 export const deleteTag = (id: number) =>
   request<void>(`/api/tags/${id}`, { method: 'DELETE' });
+
+/** One page (1-based) of tags in the same order as {@link listTags}, with the total. */
+export async function listTagsPage(search: string, sort: 'usage' | 'name', category: TagCategoryFilter | undefined,
+  page: number, pageSize: number): Promise<Page<Tag>> {
+  const params = new URLSearchParams({ sort, ...pageParams(page, pageSize) });
+  if (search) params.set('search', search);
+  if (category) params.set('category', category);
+  return requestPage<Tag>(`/api/tags?${params.toString()}`);
+}
+
+export async function listSourcesPage(search: string, page: number, pageSize: number): Promise<Page<Source>> {
+  const params = new URLSearchParams(pageParams(page, pageSize));
+  if (search) params.set('search', search);
+  return requestPage<Source>(`/api/sources?${params.toString()}`);
+}
+
+async function requestPage<T>(path: string): Promise<Page<T>> {
+  const response = await fetch(`${baseUrl}${path}`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data?.error ?? 'Request failed.');
+  const items = (data ?? []) as T[];
+  return { items, total: totalFrom(response, items.length) };
+}
 
 export const listSources = (search = '') =>
   request<Source[]>(`/api/sources${search ? `?search=${encodeURIComponent(search)}` : ''}`);
