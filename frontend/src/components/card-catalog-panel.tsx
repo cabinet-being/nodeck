@@ -146,13 +146,19 @@ export function CardCatalogPanel({ cardId, metadata, extraGroups = [], onNavigat
                 ? [...current, suggestion.tagId] : current.filter((id) => id !== suggestion.tagId))} />
           </label>
         ) : null}
+        {/* The chip opens the tag like an accepted one; review actions appear on hover/focus, or via the
+            toggle on touch screens where there is no hover. */}
         <Tooltip label={confidenceLabel(suggestion.confidence)} side="top">
-          <button type="button" aria-expanded={open} aria-label={`Review suggested tag ${suggestion.name}`}
-            className="inline-flex min-w-0 max-w-full rounded-full pointer-coarse:min-h-10"
-            onClick={() => setOpenSuggestionId(open ? null : suggestion.tagId)}>
-            <NodeChip kind="tag" suggested label={suggestion.name} category={suggestion.category} origin={suggestion.origin} />
-          </button>
+          <span className="inline-flex min-w-0 max-w-full rounded-full pointer-coarse:min-h-10 pointer-coarse:items-center">
+            <NodeChip kind="tag" suggested label={suggestion.name} category={suggestion.category} origin={suggestion.origin}
+              href={chipHref(suggestion.tagId)} onNavigate={onNavigate} />
+          </span>
         </Tooltip>
+        <button type="button" aria-expanded={open} aria-label={`Review suggested tag ${suggestion.name}`}
+          className="text-muted-foreground hover:bg-foreground/10 hidden size-10 shrink-0 items-center justify-center rounded-full pointer-coarse:inline-flex"
+          onClick={() => setOpenSuggestionId(open ? null : suggestion.tagId)}>
+          <MoreHorizontal className="size-4" />
+        </button>
         <span data-open={open}
           className="bg-surface shadow-2 pointer-events-none invisible absolute top-full left-0 z-20 inline-flex items-center rounded-full border p-0.5 opacity-0 transition-opacity group-focus-within/s:pointer-events-auto group-focus-within/s:visible group-focus-within/s:opacity-100 group-hover/s:pointer-events-auto group-hover/s:visible group-hover/s:opacity-100 pointer-coarse:group-focus-within/s:invisible pointer-coarse:group-focus-within/s:opacity-0 pointer-coarse:group-hover/s:invisible pointer-coarse:group-hover/s:opacity-0 pointer-coarse:data-[open=true]:pointer-events-auto pointer-coarse:data-[open=true]:visible pointer-coarse:data-[open=true]:opacity-100">
           <Button type="button" size="icon-xs" variant="ghost" className="pointer-coarse:size-10"

@@ -10,6 +10,10 @@ All notable changes to nodeck are documented here. The format follows [Keep a Ch
 - List APIs accept `limit`/`offset` and, with `include_total=true`, report the number of matching items in the `X-Total-Count` header (`/api/cards`, `/api/tags`, `/api/sources`, `/api/decks`); `/api/recommendations` and `/api/recommendations/daily` accept `offset` and return `total`. `GET /api/favorites?include_cards=false` returns the favorites deck without its cards.
 - **Own video player with looping.** Videos (single cards, comic and set pages) play in nodeck's player instead of the browser's: loop the whole video (on by default and remembered), loop an A–B segment, playback speed 0.25–2×, frame stepping, volume, and fullscreen. Keys while the player is focused: Space/K play, ←/→ seek 5 s, ↑/↓ volume, M mute, R loop, A segment, `,`/`.` frame, `[`/`]` speed, F fullscreen.
 
+### Changed
+
+- **Suggested tags open like accepted ones.** Clicking a suggested tag on a card shows the gallery filtered by that tag. Accept, Reject and Correct still appear on hover or keyboard focus; on touch screens they open from the ··· button next to the tag.
+
 ## [0.1.4] — 2026-11-12
 
 ### Fixed
