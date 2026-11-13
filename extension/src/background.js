@@ -3,25 +3,29 @@ import { ext } from './ext.js';
 
 const MENU_MEDIA = 'nodeck-save-media';
 const MENU_GALLERY = 'nodeck-collect-page';
+const CONTEXTS = ['page', 'frame', 'image', 'video', 'audio', 'link', 'selection'];
 
 ext.runtime.onInstalled.addListener(async ({ reason }) => {
   await ext.contextMenus.removeAll();
   ext.contextMenus.create({
     id: MENU_MEDIA,
     title: 'Save to nodeck…',
-    contexts: ['image', 'video'],
+    contexts: CONTEXTS,
   });
   ext.contextMenus.create({
     id: MENU_GALLERY,
-    title: 'Save page images to nodeck as a comic or set…',
-    contexts: ['page', 'image', 'link', 'selection'],
+    title: 'Save page images to nodeck…',
+    contexts: CONTEXTS,
   });
   if (reason === 'install') ext.runtime.openOptionsPage();
 });
 
 ext.contextMenus.onClicked.addListener((info, tab) => {
+  // Without an image or video under the click (a site's cover layer), the page finds what is under the pointer.
+  const media = info.mediaType === 'image' || info.mediaType === 'video';
   if (info.menuItemId === MENU_MEDIA)
-    startJob(tab, { mode: 'single', srcUrl: info.srcUrl, mediaType: info.mediaType, frameId: info.frameId ?? 0 });
+    startJob(tab, { mode: 'single', srcUrl: media ? info.srcUrl : null, mediaType: media ? info.mediaType : null,
+      frameId: info.frameId ?? 0 });
   else if (info.menuItemId === MENU_GALLERY)
     startJob(tab, { mode: 'gallery', frameId: 0 });
 });
@@ -35,12 +39,13 @@ async function startJob(tab, { mode, srcUrl, mediaType, frameId }) {
   try {
     const target = { tabId: tab.id, frameIds: [frameId] };
     await ext.scripting.executeScript({ target, files: ['src/sites.js', 'src/page.js'] });
+    const hints = await readPageHints(target);
     const [result] = await ext.scripting.executeScript({
       target,
-      func: (mode, srcUrl, mediaType) => mode === 'single'
-        ? globalThis.nodeckPage.describe(srcUrl, mediaType)
-        : globalThis.nodeckPage.collect(),
-      args: [mode, srcUrl ?? null, mediaType ?? 'image'],
+      func: (mode, srcUrl, mediaType, hints) => mode === 'single'
+        ? globalThis.nodeckPage.describe(srcUrl, mediaType, hints)
+        : globalThis.nodeckPage.collect(hints),
+      args: [mode, srcUrl ?? null, mediaType ?? null, hints],
     });
     job = result?.result;
     if (!job) throw new Error('The page returned nothing.');
@@ -54,7 +59,7 @@ async function startJob(tab, { mode, srcUrl, mediaType, frameId }) {
       title: tab.title ?? '',
       tags: [],
       source: host ? { name: host, url: tab.url } : { name: '', url: '' },
-      items: srcUrl ? [{ url: srcUrl, fallbackUrl: null }] : [],
+      items: srcUrl ? [{ url: srcUrl, mediaType: mediaType ?? 'image', fallbackUrl: null }] : [],
       warning: `Could not read this page (${error?.message ?? error}). Tags were not filled in.`,
     };
   }
@@ -70,6 +75,34 @@ async function startJob(tab, { mode, srcUrl, mediaType, frameId }) {
     height: gallery ? 860 : 780,
   });
   return id;
+}
+
+/**
+ * Data that only the page's own scripts hold: the video list of players that build their stream in
+ * script (flashvars mediaDefinitions) and the X video files seen by x-hook.js.
+ */
+async function readPageHints(target) {
+  try {
+    const [result] = await ext.scripting.executeScript({
+      target,
+      world: 'MAIN',
+      func: () => {
+        const hints = {};
+        try {
+          for (const key of Object.keys(window)) {
+            const definitions = key.startsWith('flashvars_') ? window[key]?.mediaDefinitions : null;
+            if (Array.isArray(definitions)) {
+              hints.mediaDefinitions = definitions.map((d) => ({ format: d.format, videoUrl: d.videoUrl, quality: d.quality }));
+              break;
+            }
+          }
+        } catch { /* ignore */ }
+        try { if (window.__nodeckXMedia) hints.xMedia = JSON.parse(JSON.stringify(window.__nodeckXMedia)); } catch { /* ignore */ }
+        return hints;
+      },
+    });
+    return result?.result ?? {};
+  } catch { return {}; }
 }
 
 function safeHost(url) {

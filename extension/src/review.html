@@ -29,6 +29,7 @@
         <div class="segmented">
           <label><input type="radio" name="kind" value="comic" checked> Comic <small>pages in order</small></label>
           <label><input type="radio" name="kind" value="set"> Set <small>a group of images</small></label>
+          <label><input type="radio" name="kind" value="cards"> Cards <small>each file its own card</small></label>
         </div>
       </fieldset>
 
@@ -65,7 +66,7 @@
           <button type="button" id="removeSmall" title="Remove images smaller than 300 px on the short side">Remove small</button>
         </div>
       </div>
-      <p class="hint">Drag pages to reorder them, or use the arrows. × removes a page.</p>
+      <p class="hint">Drag pages to reorder them, or use the arrows. × removes a page. To save just one picture, remove the others and choose Cards.</p>
       <ol class="grid" id="grid"></ol>
       <details class="removed" id="removedBox" hidden>
         <summary id="removedHeading">Removed</summary>

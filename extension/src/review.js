@@ -36,16 +36,27 @@ async function init() {
   renderTags();
   wireForm();
 
-  items = job.items.map((item, index) => ({ ...item, key: job.keys?.[index] ?? crypto.randomUUID(), state: 'loading' }));
+  items = job.items.map((item, index) => ({
+    ...item,
+    key: job.keys?.[index] ?? crypto.randomUUID(),
+    // An item without a URL carries the reason it cannot be saved (for example a streamed video).
+    state: item.url ? 'loading' : 'error',
+    removed: !item.url && gallery,
+  }));
   job.keys = items.map((item) => item.key);
   await persist();
-  if (items.length === 0) return showFatal(gallery ? 'No images were found on this page.' : 'Nothing to save.');
+  if (job.error) return showFatal(job.error);
+  if (items.length === 0) return showFatal(gallery ? 'No images or videos were found on this page.' : 'Nothing to save.');
   await allowReferer();
   render();
   await loadAll();
 }
 
 function showFatal(message) {
+  if (job?.mode !== 'gallery') {
+    $('preview').textContent = message;
+    $('preview').classList.add('error');
+  }
   $('status').textContent = message;
   $('status').className = 'status error';
   $('save').disabled = true;
@@ -141,10 +152,12 @@ async function loadAll() {
   const worker = async () => {
     while (next < items.length) {
       const item = items[next++];
+      if (item.state === 'error') { render(); continue; }
       try {
         await loadItem(item);
         item.state = 'ready';
-        if (job.mode === 'gallery' && item.width && Math.min(item.width, item.height) < 120) item.removed = true;
+        if (job.mode === 'gallery' && item.type.startsWith('image/') && item.width && Math.min(item.width, item.height) < 120)
+          item.removed = true;
       } catch (error) {
         item.state = 'error';
         item.error = error.message ?? String(error);
@@ -255,7 +268,7 @@ function renderSingle() {
   if (item.state === 'loading') {
     box.textContent = 'Loading…';
   } else if (item.state === 'error') {
-    box.textContent = `Could not load the file: ${item.error}`;
+    box.textContent = item.url ? `Could not load the file: ${item.error}` : item.error ?? 'Nothing to save.';
     box.classList.add('error');
   } else {
     const media = document.createElement(item.type.startsWith('video/') ? 'video' : 'img');
@@ -280,20 +293,16 @@ function pageTile(item, index, count) {
   li.dataset.index = String(index);
   const thumb = document.createElement('div');
   thumb.className = 'thumb';
-  if (item.state === 'ready') {
-    const img = document.createElement('img');
-    img.src = item.objectUrl;
-    img.alt = `Page ${index + 1}`;
-    img.draggable = false;
-    thumb.append(img);
-  } else {
+  if (item.state === 'ready') thumb.append(mediaThumb(item, `Page ${index + 1}`));
+  else {
     thumb.textContent = 'Loading…';
   }
   const number = document.createElement('span');
   number.className = 'number';
   number.textContent = String(index + 1);
   const info = document.createElement('small');
-  info.textContent = item.cardId ? 'saved' : item.width ? `${item.width}×${item.height}` : '';
+  info.textContent = item.cardId ? 'saved' : [item.type?.startsWith('video/') && 'video',
+    item.width && `${item.width}×${item.height}`].filter(Boolean).join(' · ');
   const tools = document.createElement('div');
   tools.className = 'page-tools';
   tools.append(
@@ -324,19 +333,33 @@ function removedTile(item) {
   li.className = 'page removed-page';
   const button = document.createElement('button');
   button.type = 'button';
-  button.title = item.error ? `Could not load: ${item.error}` : 'Put this page back';
+  button.title = item.error ? (item.url ? `Could not load: ${item.error}` : item.error) : 'Put this page back';
   if (item.state === 'ready') {
-    const img = document.createElement('img');
-    img.src = item.objectUrl;
-    img.alt = 'Removed page';
-    button.append(img);
+    button.append(mediaThumb(item, 'Removed page'));
   } else {
-    button.textContent = item.state === 'error' ? 'Failed' : '…';
+    button.textContent = item.state === 'error' ? (item.mediaType === 'video' ? 'Video: cannot save' : 'Failed') : '…';
   }
   button.disabled = item.state !== 'ready' || saving || saved;
   button.addEventListener('click', () => { item.removed = false; render(); });
   li.append(button);
   return li;
+}
+
+function mediaThumb(item, label) {
+  if (item.type?.startsWith('video/')) {
+    const video = document.createElement('video');
+    video.src = `${item.objectUrl}#t=0.5`;
+    video.muted = true;
+    video.preload = 'metadata';
+    video.setAttribute('aria-label', label);
+    video.draggable = false;
+    return video;
+  }
+  const img = document.createElement('img');
+  img.src = item.objectUrl;
+  img.alt = label;
+  img.draggable = false;
+  return img;
 }
 
 function iconButton(text, label, disabled, onClick, extraClass = '') {
@@ -377,11 +400,18 @@ function updateSave() {
     return;
   }
   const kept = items.filter((item) => !item.removed);
-  const kind = document.querySelector('input[name="kind"]:checked').value;
+  const kind = selectedKind();
+  const count = `${kept.length} ${kept.length === 1 ? 'file' : 'files'}`;
   button.disabled = saving || kept.length === 0 || kept.some((item) => item.state !== 'ready');
-  button.textContent = saving ? 'Saving…' : `Save ${kept.length} page${kept.length === 1 ? '' : 's'} as a ${kind}`;
+  button.textContent = saving ? 'Saving…'
+    : kind === 'cards' ? `Save ${count} as ${kept.length === 1 ? 'a card' : 'separate cards'}`
+    : `Save ${count} as a ${kind}`;
 }
 document.addEventListener('change', (event) => { if (event.target.name === 'kind') updateSave(); });
+
+function selectedKind() {
+  return document.querySelector('input[name="kind"]:checked')?.value ?? 'comic';
+}
 
 // ---------- saving ----------
 
@@ -394,8 +424,28 @@ async function save() {
   try {
     const title = $('title').value.trim();
     let card;
+    let cards = null;
     if (job.mode === 'single') {
       card = await uploadItem(items[0], title);
+    } else if (selectedKind() === 'cards') {
+      // Each file becomes its own card with the tags and source; no comic or set.
+      const kept = items.filter((item) => !item.removed);
+      let done = kept.filter((item) => item.cardId).length;
+      showProgress(done, kept.length);
+      for (const [index, item] of kept.entries()) {
+        if (item.cardId) continue;
+        await uploadItem(item, kept.length > 1 && title ? `${title} (${index + 1})` : title);
+        showProgress(++done, kept.length);
+        render();
+      }
+      cards = kept.map((item) => item.cardId);
+      for (const id of cards) {
+        if (job.catalogDone?.includes(id)) continue;
+        warnings.push(...await applyCatalog(id));
+        (job.catalogDone ??= []).push(id);
+        await persist();
+      }
+      card = { id: cards[0], title: kept.length === 1 ? title : '' };
     } else {
       const kept = items.filter((item) => !item.removed);
       let done = kept.filter((item) => item.cardId).length;
@@ -411,17 +461,17 @@ async function save() {
         }
       };
       await Promise.all(Array.from({ length: 3 }, worker));
-      const kind = document.querySelector('input[name="kind"]:checked').value;
+      const kind = selectedKind();
       job.collectionKey ??= crypto.randomUUID();
       await persist();
       card = await api.createCollection(kind, title, kept.map((item) => item.cardId), job.collectionKey);
       showProgress(kept.length + 1, kept.length + 1);
     }
-    warnings.push(...await applyCatalog(card.id));
+    if (!cards) warnings.push(...await applyCatalog(card.id));
     saved = true;
     job.savedCardId = card.id;
     await persist();
-    showSaved(card, warnings);
+    showSaved(card, warnings, cards);
   } catch (error) {
     setStatus(`Not saved: ${error.message}${hasSavedPages() ? ' Pages already uploaded are kept; Save again continues.' : ''}`, 'error');
   } finally {
@@ -469,11 +519,12 @@ function showProgress(done, total) {
   $('progressBar').style.width = `${Math.round((done / total) * 100)}%`;
 }
 
-function showSaved(card, warnings) {
+function showSaved(card, warnings, cards = null) {
   const status = $('status');
   status.className = 'status ok';
   status.replaceChildren();
-  status.append(`Saved${card.title ? ` “${card.title}”` : ''}. `);
+  status.append(cards && cards.length > 1 ? `Saved ${cards.length} cards. First card: `
+    : `Saved${card.title ? ` “${card.title}”` : ''}. `);
   const link = document.createElement('a');
   link.href = api.cardUrl(card.id);
   link.target = '_blank';

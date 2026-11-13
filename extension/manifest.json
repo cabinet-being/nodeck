@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Save to nodeck",
   "short_name": "nodeck",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Save images, videos and whole comic or gallery pages from any site into your nodeck library.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -32,5 +32,32 @@
     "activeTab",
     "declarativeNetRequestWithHostAccess"
   ],
-  "host_permissions": ["<all_urls>"]
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/context.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://mobile.x.com/*",
+        "https://mobile.twitter.com/*"
+      ],
+      "js": [
+        "src/x-hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
 }
