@@ -28,6 +28,7 @@ The backend exposes an ASP.NET Core Minimal API powered by .NET 9 and MySQL. The
 - Reusable tags and sources that can be assigned to content cards.
 - Comics and sets with ordered child media; decks can reference cards from anywhere in the library.
 - **Library → Duplicates** finds identical files and pictures that look alike and merges each group into one card without losing tags, decks, favorites, pages, votes or views.
+- **Library → Browser extension** offers a Chrome and Firefox extension: right-click an image or video on any site to save it with the site's tags and its source, or collect a comic or gallery page, drop and reorder pages, and save it as a comic or set.
 - Card pages record a view after two uninterrupted seconds of visible, loaded media or playing video. They also offer a daily thumbs-up, neutral, or thumbs-down vote, separate from Favorites.
 - Media uploads recognize JPEG, PNG, WebP, GIF, MP4, MOV, and WebM from file content. The original is retained; video that fails the current browser compatibility check also gets an H.264/AAC MP4 playback copy.
 - GIF and video uploads generate a short animated preview and a still poster. The edit page lets you choose the preview start time or reset it to automatic selection. Animated WebP files stay images and get a static first-frame preview.
@@ -196,6 +197,26 @@ Uploads, replacements, and preview overrides each take one processing slot per f
 | `Media:MaxImagePixels` | `50000000` | Largest accepted still or WebP image, in pixels. |
 
 The frame sampler that feeds image analysis runs ffmpeg outside this slot limit.
+
+## Browser extension
+
+The extension in `extension/` saves things from any web page into nodeck. One set of sources builds both the Chrome (and Edge, Brave, other Chromium) and the Firefox package; the Docker image includes both.
+
+- **One image or video:** right-click it → **Save to nodeck…**. A small window shows the file and fills in the title (the image's alt text or the page title), tags the site lists, the site as a source and the page link as the source URL. Remove or add tags (`artist:name`, `character:name`, `copyright:name`, `general:name`, `meta:name`; anything else is a custom tag), then **Save**; the window links to the new card. On a booru post page it saves the original file rather than the resized sample.
+- **A comic, manga chapter or gallery page:** click the extension's toolbar button, or right-click the page → **Save page images to nodeck as a comic or set…**. The window lists the page's images in order (lazy-loaded images and thumbnails that link to the full image included; images under 120 px are set aside). Remove pages with ×, reorder them by dragging or with the arrows, **Reverse order** or **Remove small** (under 300 px), choose **Comic** or **Set**, then save. Each page is uploaded as a media card and the comic or set is created from them with the tags and source. If saving stops halfway, **Save** again continues without uploading pages twice.
+- Tags and sources are matched by name or alias (`long hair` and `long_hair` count as the same) and created when missing, with the category the site gave. A tag or source that cannot be applied is listed after saving; the card is kept.
+- Files are downloaded by the extension with the page as Referer (many image hosts refuse other requests); if that fails, through the page itself, which also covers `blob:` images. JPEG, PNG, WebP, GIF, MP4, WebM and MOV are uploaded as they are; other images (AVIF, BMP, SVG) are converted to PNG. Streaming videos that only exist as media segments cannot be saved.
+- Site rules live in `extension/src/sites.js` (Danbooru, Gelbooru, Safebooru, Rule 34, yande.re, Konachan, e621, Pixiv, X, DeviantArt, ArtStation, E-Hentai, nhentai). Each rule is a few CSS selectors or small functions; on other sites the extension uses `meta` keywords, `article:tag`, `rel="tag"` links, the author and `og:site_name`. Sites change their pages, so a rule may need updating.
+
+**Installing.** Open **Library → Browser extension** in nodeck and download the package for your browser. Each download contains the address it came from, so the extension saves to that nodeck; it can be changed (and tested) in the extension's settings.
+
+- **Chrome and other Chromium browsers** install packaged extensions only from the Chrome Web Store or through enterprise policy; a `.crx` from your own server is refused. For a private, self-hosted extension the practical way is **Load unpacked**: unpack the zip into a folder you keep, open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and pick the folder. It stays installed across restarts. To update, download again, replace the folder's contents and press the reload button on the extension's card.
+- **Firefox** (128 or newer) installs only add-ons signed by Mozilla. To try it, load the zip from `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** (removed on restart). To keep it, sign the zip for yourself as an unlisted add-on on addons.mozilla.org (free, needs a Mozilla account), or use Firefox Developer Edition, Nightly or ESR with `xpinstall.signatures.required` set to `false` and install the zip from **about:addons**.
+- There is no bookmarklet: a script running inside an `https` site may not send files to nodeck at an `http` address on your network, and cannot read images from other servers.
+
+The extension asks for access to all sites so it can read tags and download images from the page you are on and send them to nodeck; it does nothing until you use the menu item or the button.
+
+`node extension/build.mjs` builds `extension/dist/chrome/` and `extension/dist/firefox/` (unpacked, for loading during development) and the two zips; the Docker build runs it and copies the zips to `/app/extension` (`NODECK_EXTENSION_DIR` overrides the location). `GET /api/extension` lists the packages, and `GET /api/extension/{chrome|firefox}` returns one with a `defaults.json` holding the address it was downloaded from.
 
 ## Interest signals
 
