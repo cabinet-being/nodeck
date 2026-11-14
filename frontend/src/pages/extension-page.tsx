@@ -26,11 +26,12 @@ export function ExtensionPage() {
       <div className="grid gap-2">
         <h1 className="text-2xl font-semibold">Browser extension</h1>
         <p className="text-muted-foreground max-w-prose text-sm">
-          Save pictures, videos and whole comic pages from any site straight into nodeck. Right-click an image or a
-          video and choose <b className="text-foreground">Save to nodeck…</b>: the title, tags the site shows (artists,
-          characters, series, general tags), the site as a source and the page link are filled in, and you can edit
-          them before saving. For a manga chapter or a gallery, click the extension&apos;s toolbar button: it collects
-          the page&apos;s images in order, and you remove extra ones, reorder pages and save them as a comic or a set.
+          Save pictures, videos and whole comic pages from any site straight into nodeck. Click the extension&apos;s
+          toolbar button and a panel lists the images and videos of the page; choose the ones you want, put them in
+          order and save them as separate cards (the default), a comic or a set. Right-click an image or a video and
+          choose <b className="text-foreground">Save to nodeck…</b> to save just that one. The title, tags the site
+          shows (artists, characters, series, general tags), the site as a source and the page link are filled in and
+          can be edited. nodeck downloads the files itself, and each file shows its progress until it is saved.
         </p>
         {info ? (
           <p className="text-muted-foreground text-sm">

@@ -190,6 +190,17 @@
     return null;
   }
 
+  /** What the page itself shows: used as the preview, so nothing large is downloaded to look at it. */
+  function displayedSrc(el) {
+    if (el?.tagName !== 'IMG') return el ? backgroundImage(el) : null;
+    const src = el.currentSrc || el.src;
+    return src && !src.startsWith('data:') ? src : null;
+  }
+
+  function posterOf(video) {
+    return absolute(video?.getAttribute?.('poster')) ?? (absolute(meta('og:image')) || null);
+  }
+
   function findElement(srcUrl, mediaType) {
     const selector = mediaType === 'video' ? 'video' : 'img';
     return [...document.querySelectorAll(selector)].find((el) => el.currentSrc === srcUrl || el.src === srcUrl ||
@@ -253,17 +264,21 @@
       title: info.title || (alt.length >= 3 && alt.length <= 200 ? alt : pageTitle(rule, ctx)),
       tags: readTags(rule, info.tags),
       source: info.source ?? sourceInfo(rule, ctx),
+      needsSession: !!rule?.needsSession,
       items: [],
     };
     if (!srcUrl && !element) {
       job.error = 'There is no image or video under the pointer. Use “Save page images to nodeck…” to choose from everything on the page.';
     } else if (mediaType === 'video') {
       const video = await resolveVideo(element, srcUrl, rule, ctx, warnings);
-      job.items = [{ url: video.url, mediaType: 'video', error: video.error ?? null }];
+      job.items = [{ url: video.url, mediaType: 'video', error: video.error ?? null, thumbUrl: posterOf(element) }];
     } else {
       const original = await call(rule?.original, ctx, warnings);
-      const url = absolute(original) ?? absolute(srcUrl) ?? srcUrl;
-      job.items = [{ url, mediaType: 'image', fallbackUrl: url !== srcUrl ? srcUrl : null }];
+      // A thumbnail that links to its full image, or has a larger srcset/lazy source, saves the larger file.
+      const larger = element?.tagName === 'IMG' ? imageUrl(element, rule) : null;
+      const url = absolute(original) ?? larger ?? absolute(srcUrl) ?? srcUrl;
+      job.items = [{ url, mediaType: 'image', fallbackUrl: url !== srcUrl ? srcUrl : null,
+        thumbUrl: displayedSrc(element) ?? srcUrl }];
     }
     if (warnings.length) job.warning = warnings.join(' ');
     return job;
@@ -289,7 +304,9 @@
       fallbackUrl: item.fallbackUrl ?? null,
       width: item.width ?? 0,
       height: item.height ?? 0,
+      tiny: !!item.tiny,
       error: item.error ?? null,
+      thumbUrl: item.thumbUrl ?? (item.mediaType === 'video' ? null : item.fallbackUrl ?? item.url ?? null),
     }));
     return {
       mode: 'gallery',
@@ -298,6 +315,7 @@
       title: info.title || pageTitle(rule, ctx),
       tags: readTags(rule, info.tags),
       source: info.source ?? sourceInfo(rule, ctx),
+      needsSession: !!rule?.needsSession,
       items,
       warning: warnings.length ? warnings.join(' ') : undefined,
     };
@@ -310,17 +328,20 @@
       if (el.tagName === 'VIDEO') {
         if (el.getBoundingClientRect().width < 100 && !el.src && !el.querySelector('source')) continue;
         const video = await resolveVideo(el, null, rule, ctx, warnings);
-        items.push({ url: video.url, mediaType: 'video', error: video.error ?? null });
+        items.push({ url: video.url, mediaType: 'video', error: video.error ?? null, thumbUrl: posterOf(el) });
         continue;
       }
       const url = imageUrl(el, rule);
       if (!url) continue;
       const fallback = el.currentSrc || el.src;
+      const shown = el.getBoundingClientRect();
+      const naturalSmall = el.naturalWidth && Math.min(el.naturalWidth, el.naturalHeight) < 120 && url === fallback;
       items.push({
         url,
+        thumbUrl: displayedSrc(el) ?? url,
         fallbackUrl: fallback && fallback !== url && !fallback.startsWith('data:') ? fallback : null,
-        width: el.naturalWidth || Number(el.getAttribute('width')) || 0,
-        height: el.naturalHeight || Number(el.getAttribute('height')) || 0,
+        // Icons, avatars and logos: shown small, or the file itself is small. They start unchosen.
+        tiny: !!(naturalSmall || (shown.width && shown.height && Math.min(shown.width, shown.height) < 80)),
       });
       if (items.length >= 500) break;
     }
@@ -330,7 +351,7 @@
   /** Fetches a file the way the page sees it (cookies, blob: URLs) and returns it as a data URL. */
   async function fetchAsDataUrl(url) {
     const response = await fetch(url, { credentials: 'include' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`The site answered ${response.status}.`);
     const blob = await response.blob();
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();

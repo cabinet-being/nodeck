@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Save to nodeck",
   "short_name": "nodeck",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Save images, videos and whole comic or gallery pages from any site into your nodeck library.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -11,11 +11,12 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Collect this page's images for nodeck",
+    "default_title": "Save to nodeck",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
-    }
+    },
+    "default_popup": "src/popup.html"
   },
   "background": {
     "service_worker": "src/background.js",

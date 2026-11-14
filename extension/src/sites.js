@@ -13,7 +13,9 @@
 //   fullImage(url) URL of the full-size file for a thumbnail URL (gallery pages)
 //   video(ctx)  async; a downloadable video file for the <video> in ctx.element (or the page),
 //               or { error } saying why there is none
-//   collect(ctx)   async; the files of the page in order: [{ url, mediaType, fallbackUrl, error }];
+//   needsSession   true when files are served only to the logged-in browser; they are then sent from
+//               the browser instead of nodeck downloading them itself
+//   collect(ctx)   async; the files of the page in order: [{ url, mediaType, fallbackUrl, thumbUrl, error }];
 //               return null to use the generic collector (all <img> and <video> in page order)
 //
 // ctx = { doc, url (URL of the page), h (helpers from page.js), hints (data read from the page's
@@ -52,7 +54,8 @@
     const body = post?.body;
     if (!body) return [];
     const files = [];
-    const image = (img) => img?.originalUrl && files.push({ url: img.originalUrl, fallbackUrl: img.thumbnailUrl ?? null });
+    const image = (img) => img?.originalUrl && files.push({
+      url: img.originalUrl, fallbackUrl: img.thumbnailUrl ?? null, thumbUrl: img.thumbnailUrl ?? null });
     const file = (f) => f?.url && MEDIA_EXTENSION.test(f.extension ?? '') &&
       files.push({ url: f.url, mediaType: /^(mp4|webm|mov)$/i.test(f.extension) ? 'video' : 'image' });
     for (const block of body.blocks ?? []) {
@@ -163,9 +166,10 @@
       collect: ({ doc, url }) => {
         if (url.searchParams.get('s') !== 'view') return null;
         const video = doc.querySelector('#gelcomVideoPlayer source[src], video#gelcomVideoPlayer[src]')?.src;
-        if (video) return [{ url: video, mediaType: 'video' }];
-        const image = linkByText(doc, /^original image$/i) ?? doc.querySelector('#image')?.src;
-        return image ? [{ url: image, fallbackUrl: doc.querySelector('#image')?.src ?? null }] : null;
+        if (video) return [{ url: video, mediaType: 'video', thumbUrl: doc.querySelector('#gelcomVideoPlayer')?.getAttribute('poster') ?? null }];
+        const sample = doc.querySelector('#image')?.src ?? null;
+        const image = linkByText(doc, /^original image$/i) ?? sample;
+        return image ? [{ url: image, fallbackUrl: sample, thumbUrl: sample ?? image }] : null;
       },
     },
     {
@@ -225,13 +229,16 @@
         const id = pixivArtworkId(ctx.url);
         if (!id) return null;
         return (await pixivPages(ctx.h, id)).map((page) => ({
-          url: page.urls.original, fallbackUrl: page.urls.regular ?? null, width: page.width, height: page.height,
+          url: page.urls.original, fallbackUrl: page.urls.regular ?? null, thumbUrl: page.urls.small ?? page.urls.regular,
+          width: page.width, height: page.height,
         }));
       },
     },
     {
       name: 'Pixiv Fanbox',
       hosts: ['fanbox.cc'],
+      // Files are only served to the logged-in browser, so nodeck cannot download them itself.
+      needsSession: true,
       async info(ctx) {
         const id = fanboxPostId(ctx.url);
         if (!id) return null;
@@ -280,10 +287,11 @@
         if (!article) return null;
         const items = [];
         for (const el of article.querySelectorAll('img[src*="pbs.twimg.com/media/"], video')) {
-          if (el.tagName === 'IMG') items.push({ url: xOriginal(el.src), fallbackUrl: el.src });
+          if (el.tagName === 'IMG') items.push({ url: xOriginal(el.src), fallbackUrl: el.src, thumbUrl: el.src });
           else {
             const url = xVideo(ctx, el);
-            items.push(url ? { url, mediaType: 'video' } : { url: null, mediaType: 'video', error: X_VIDEO_MISSING });
+            const thumbUrl = el.getAttribute('poster');
+            items.push(url ? { url, mediaType: 'video', thumbUrl } : { url: null, mediaType: 'video', error: X_VIDEO_MISSING, thumbUrl });
           }
         }
         return items;
@@ -302,7 +310,8 @@
       async collect(ctx) {
         if (!/view_video/.test(ctx.url.pathname)) return null;
         const url = await phVideo(ctx);
-        return [url ? { url, mediaType: 'video' } : { url: null, mediaType: 'video', error: STREAM_ONLY }];
+        const thumbUrl = ctx.doc.querySelector('meta[property="og:image"]')?.content ?? null;
+        return [url ? { url, mediaType: 'video', thumbUrl } : { url: null, mediaType: 'video', error: STREAM_ONLY, thumbUrl }];
       },
     },
     {

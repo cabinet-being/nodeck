@@ -75,6 +75,14 @@ export class Nodeck {
     return this.request('/api/cards', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: form });
   }
 
+  /** nodeck downloads the file itself (the page is sent as Referer); see POST /api/cards/import-url. */
+  importUrl({ url, referer, pageUrl, title }, idempotencyKey) {
+    return this.request('/api/cards/import-url', this.json('POST',
+      { url, referer: /^https?:/.test(referer ?? '') ? referer : null, pageUrl: /^https?:/.test(pageUrl ?? '') ? pageUrl : null,
+        title: title || null },
+      { 'Idempotency-Key': idempotencyKey }));
+  }
+
   createCollection(type, title, childCardIds, idempotencyKey) {
     return this.request('/api/cards/collections', this.json('POST',
       { type, title: title || null, childCardIds, moveFromOtherCollections: false },
