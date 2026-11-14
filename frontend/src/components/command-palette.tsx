@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
-import { CornerDownLeft, Globe, Image, Search, Tag } from 'lucide-react';
+import { CornerDownLeft, Globe, Image, Search, Shuffle, Tag } from 'lucide-react';
 
 import { listCards } from '@/api/cards';
 import { listSources, listTags } from '@/api/catalog';
@@ -13,6 +13,8 @@ type PaletteItem = {
   hint?: string;
   icon: React.ComponentType<{ className?: string }>;
   path: string;
+  /** Runs instead of navigating to path. */
+  run?: () => void;
 };
 
 type Results = { cards: PaletteItem[]; tags: PaletteItem[]; sources: PaletteItem[] };
@@ -29,10 +31,12 @@ export function CommandPalette({
   open,
   onOpenChange,
   onNavigateTo,
+  onRandomCard,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onNavigateTo: (path: string) => void;
+  onRandomCard?: () => void;
 }) {
   const [query, setQuery] = React.useState('');
   const [results, setResults] = React.useState<Results>(emptyResults);
@@ -107,9 +111,12 @@ export function CommandPalette({
 
   const sections = React.useMemo(() => {
     const needle = trimmed.toLowerCase();
-    const matchedActions = needle
-      ? actions.filter((item) => item.label.toLowerCase().includes(needle))
+    const allActions: PaletteItem[] = onRandomCard
+      ? [{ id: 'action:random', label: 'Random card', hint: 'Open', icon: Shuffle, path: '', run: onRandomCard }, ...actions]
       : actions;
+    const matchedActions = needle
+      ? allActions.filter((item) => item.label.toLowerCase().includes(needle))
+      : allActions;
     const list: { title: string; items: PaletteItem[] }[] = [];
     if (trimmed) {
       list.push({
@@ -127,7 +134,7 @@ export function CommandPalette({
     list.push({ title: 'Sources', items: results.sources });
     list.push({ title: trimmed ? 'Go to' : 'Navigate', items: matchedActions });
     return list.filter((section) => section.items.length > 0);
-  }, [trimmed, results]);
+  }, [trimmed, results, onRandomCard]);
 
   const flat = React.useMemo(() => sections.flatMap((section) => section.items), [sections]);
   const activeIndex = Math.min(active, Math.max(flat.length - 1, 0));
@@ -135,7 +142,8 @@ export function CommandPalette({
   function choose(item: PaletteItem | undefined) {
     if (!item) return;
     onOpenChange(false);
-    onNavigateTo(item.path);
+    if (item.run) item.run();
+    else onNavigateTo(item.path);
   }
 
   function onKeyDown(event: React.KeyboardEvent) {

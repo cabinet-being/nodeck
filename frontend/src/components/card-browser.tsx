@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { BookOpen, CheckSquare, Images, Layers, Layers3, Plus, SearchX, Sparkles, X } from 'lucide-react';
+import { BookOpen, CheckSquare, Images, Layers, Layers3, Plus, SearchX, Shuffle, Sparkles, X } from 'lucide-react';
 
 import { listCardsPage, type Card } from '@/api/cards';
 import { getSource, getTag, type Source, type Tag } from '@/api/catalog';
@@ -10,6 +10,7 @@ import { FilterBar, type CatalogFilters } from '@/components/filter-bar';
 import { pageCountOf, Pagination, usePageScroll } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
+import { useRandomCard } from '@/hooks/use-random-card';
 import {
   useVisualCardView,
   VisualCardViewToggle,
@@ -80,6 +81,21 @@ export function CardBrowser({
   const [selected, setSelected] = React.useState<SortableCard[]>([]);
   const [composerMode, setComposerMode] = React.useState<ComposerMode | null>(null);
   const [lastComposerMode, setLastComposerMode] = React.useState<ComposerMode>('comic');
+  const random = useRandomCard(onNavigateTo);
+
+  /** A random card from what this view lists: the same filters, mode and deck. */
+  function openRandomFromView() {
+    void random.openRandom({
+      ...(deckId === null
+        ? pagesMode
+          ? { types: ['media'], excludeContainedMedia: false }
+          : { types: ['media', 'comic', 'set'], excludeContainedMedia: true }
+        : { deckId, collapsePages: !pagesMode }),
+      catalogTags: parseIds(catalogTagIds || null),
+      catalogSource: parseSingleId(catalogSourceId),
+      search: search || undefined,
+    });
+  }
 
   React.useEffect(() => {
     setSelecting(false);
@@ -225,6 +241,12 @@ export function CardBrowser({
             <CheckSquare className="size-3.5" aria-hidden="true" />
             {selecting ? 'Done' : 'Select'}
           </Button>
+          <Button type="button" variant="outline" size="sm" disabled={random.busy || total === 0}
+            title={random.message ?? 'Open a random card from this view'} onClick={openRandomFromView}>
+            <Shuffle className="size-3.5" aria-hidden="true" />
+            Random
+          </Button>
+          {random.message ? <span className="text-muted-foreground text-xs" role="status">{random.message}</span> : null}
           <VisualCardViewToggle view={view} onChange={setView} />
         </div>
       </div>

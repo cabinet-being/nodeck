@@ -21,6 +21,7 @@ public static class CardEndpoints
         group.MapPost("/{id:long}/children/{childId:long}/move", MoveChildAsync);
         group.MapGet("/creation-requests/{scope}/{key}", GetCreationRequestAsync);
         group.MapGet("", ListCardsAsync);
+        group.MapGet("/random", GetRandomCardAsync);
         group.MapGet("/{id:long}", GetCardAsync);
         group.MapPut("/{id:long}", UpdateCardAsync);
         group.MapPut("/{id:long}/preview", UpdatePreviewStartAsync);
@@ -334,6 +335,68 @@ public static class CardEndpoints
 
         if (cards.Total is long total) Paging.SetTotal(response, total);
         return Results.Ok(cards.Items);
+    }
+
+    /// <summary>
+    /// A random card ID for the same filters as the card list. Without a type it picks a media,
+    /// comic or set; outside a deck it skips pages of comics and sets unless exclude_contained_media=false.
+    /// </summary>
+    private static async Task<IResult> GetRandomCardAsync(
+        CardRepository repository,
+        string? type,
+        string? media_type,
+        string? types,
+        string? catalog_tags,
+        string? catalog_source,
+        string? search,
+        string? exclude_contained_media,
+        string? collapse_pages,
+        string? deck_id,
+        string? exclude)
+    {
+        if (!TryReadTypes(type, types, out var requestedTypes, out var typeError))
+            return Results.BadRequest(new { error = typeError });
+        long? deckId = null;
+        if (deck_id is not null)
+        {
+            if (!long.TryParse(deck_id, out var parsedDeckId) || parsedDeckId < 1)
+                return Results.BadRequest(new { error = "deck_id must be a positive integer." });
+            deckId = parsedDeckId;
+        }
+        long? excludeId = null;
+        if (exclude is not null)
+        {
+            if (!long.TryParse(exclude, out var parsedExclude) || parsedExclude < 1)
+                return Results.BadRequest(new { error = "exclude must be a positive card ID." });
+            excludeId = parsedExclude;
+        }
+        // In a deck every member counts, pages included, unless asked otherwise.
+        var excludePages = exclude_contained_media is null ? deckId is null : IsTruthy(exclude_contained_media);
+
+        long? id;
+        try
+        {
+            id = await repository.GetRandomIdAsync(new CardListQuery(
+                requestedTypes.Count > 0 ? requestedTypes : ["media", "comic", "set"],
+                media_type,
+                search,
+                excludePages,
+                [],
+                null,
+                ParseLongList(catalog_tags),
+                ParseLongOrNull(catalog_source),
+                "id",
+                "asc",
+                DeckId: deckId,
+                CollapsePages: IsTruthy(collapse_pages)), excludeId);
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound(new { error = "Deck not found." });
+        }
+        return id is long cardId
+            ? Results.Ok(new { id = cardId })
+            : Results.NotFound(new { error = "No card matches these filters." });
     }
 
     private static async Task<IResult> GetCardAsync(CardRepository repository, long id)

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ChevronDown, Ellipsis, Plus, Search } from 'lucide-react';
+import { ChevronDown, Ellipsis, Plus, Search, Shuffle } from 'lucide-react';
 
 import { CommandPalette } from '@/components/command-palette';
 import { ThemeToggle, useTheme } from '@/components/theme';
@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from '@/components/ui/menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Sheet } from '@/components/ui/sheet';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { Tooltip, TooltipProvider } from '@/components/ui/tooltip';
+import { useRandomCard } from '@/hooks/use-random-card';
 import { cn } from '@/lib/utils';
 import { isRouteActive, routes } from '@/routes';
 
@@ -57,6 +58,18 @@ function AddMenu({ onNavigateTo, compact }: { onNavigateTo: (path: string) => vo
         ))}
       </MenuContent>
     </Menu>
+  );
+}
+
+function RandomCardButton({ onNavigateTo }: { onNavigateTo: (path: string) => void }) {
+  const { openRandom, busy, message } = useRandomCard(onNavigateTo);
+  return (
+    <Tooltip label={message ?? 'Random card'}>
+      <Button type="button" variant="ghost" size="icon" aria-label="Open a random card" disabled={busy}
+        onClick={() => void openRandom()}>
+        <Shuffle />
+      </Button>
+    </Tooltip>
   );
 }
 
@@ -129,6 +142,7 @@ function TopBar({
           <Button type="button" variant="ghost" size="icon" className="md:hidden" aria-label="Search" onClick={onOpenPalette}>
             <Search />
           </Button>
+          <RandomCardButton onNavigateTo={onNavigateTo} />
           <AddMenu onNavigateTo={onNavigateTo} compact={false} />
           <ThemeToggle className="hidden md:inline-flex" />
         </div>
@@ -225,6 +239,7 @@ function MobileTabBar({
 
 export function AppShell({ currentPath, onNavigate, onNavigateTo, children }: ShellProps) {
   const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const { openRandom } = useRandomCard(onNavigateTo);
 
   React.useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -248,7 +263,8 @@ export function AppShell({ currentPath, onNavigate, onNavigateTo, children }: Sh
         />
         <main className="min-w-0 pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">{children}</main>
         <MobileTabBar currentPath={currentPath} onNavigate={onNavigate} onNavigateTo={onNavigateTo} />
-        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNavigateTo={onNavigateTo} />
+        <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onNavigateTo={onNavigateTo}
+          onRandomCard={() => void openRandom()} />
       </div>
     </TooltipProvider>
   );

@@ -177,6 +177,36 @@ export async function listCardsPage(params: Omit<CardListParams, 'limit' | 'offs
   return { items, total: totalFrom(response, items.length) };
 }
 
+export type RandomCardParams = {
+  types?: string[];
+  /** Skip pages of comics and sets (the server default outside a deck). */
+  excludeContainedMedia?: boolean;
+  catalogTags?: number[];
+  catalogSource?: number;
+  search?: string;
+  deckId?: number;
+  /** In a deck: skip pages whose comic or set is also in the deck. */
+  collapsePages?: boolean;
+  /** A card not to return, such as the one already open. */
+  exclude?: number;
+};
+
+/** The ID of a random card matching the filters, or null when none matches. */
+export async function getRandomCardId(params: RandomCardParams = {}): Promise<number | null> {
+  const query = new URLSearchParams();
+  if (params.types && params.types.length > 0) query.set('types', params.types.join(','));
+  if (params.excludeContainedMedia !== undefined) query.set('exclude_contained_media', String(params.excludeContainedMedia));
+  if (params.catalogTags && params.catalogTags.length > 0) query.set('catalog_tags', params.catalogTags.join(','));
+  if (params.catalogSource) query.set('catalog_source', String(params.catalogSource));
+  if (params.search) query.set('search', params.search);
+  if (params.deckId) query.set('deck_id', String(params.deckId));
+  if (params.collapsePages) query.set('collapse_pages', 'true');
+  if (params.exclude) query.set('exclude', String(params.exclude));
+  const response = await fetch(`${apiBaseUrl}/api/cards/random?${query.toString()}`);
+  if (response.status === 404) return null;
+  return (await readJson<{ id: number }>(response)).id;
+}
+
 export async function getCard(id: number) {
   const response = await fetch(`${apiBaseUrl}/api/cards/${id}`);
 

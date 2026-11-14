@@ -30,15 +30,93 @@ public sealed partial class CardRepository
     /// <summary>One page of cards; <see cref="CardListPage.Total"/> is set when the query asks for it.</summary>
     public async Task<CardListPage> ListPageAsync(CardListQuery query)
     {
-        var (types, mediaType, search, excludeContainedMedia, tagIds, sourceId,
-            catalogTagIds, catalogSourceId, sort, order, limit, offset, deckId, includeTotal, collapsePages) = query;
+        var (_, _, _, _, _, _, _, _, sort, order, limit, offset, deckId, includeTotal, _) = query;
         var positionSort = string.Equals(sort, "position", StringComparison.OrdinalIgnoreCase);
         if (positionSort && deckId is null)
             throw new ArgumentException("sort=position requires deck_id.", nameof(query));
         if (limit is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(limit));
         if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
         await using var connection = new MySqlConnection(_connectionString);
+        var (where, deckJoin, parameters) = await BuildListFilterAsync(connection, query);
+        var orderDirection = string.Equals(order, "asc", StringComparison.OrdinalIgnoreCase)
+            ? "ASC"
+            : "DESC";
+        var orderColumn = string.Equals(sort, "created_at", StringComparison.OrdinalIgnoreCase)
+            ? "cards.created_at"
+            : "cards.id";
+        var orderBy = positionSort
+            ? "dc.position ASC, cards.id ASC"
+            : $"{orderColumn} {orderDirection}, cards.id {orderDirection}";
+        var deckColumns = deckId is null
+            ? "NULL AS DeckPosition, NULL AS MembershipProperties"
+            : "dc.position AS DeckPosition, dc.properties AS MembershipProperties";
+        parameters.Add("Limit", limit);
+        parameters.Add("Offset", offset);
+        var rows = await connection.QueryAsync<DbListCard>(
+            $"""
+            SELECT
+                cards.id AS {nameof(DbListCard.Id)},
+                cards.type AS {nameof(DbListCard.Type)},
+                cards.title AS {nameof(DbListCard.Title)},
+                cards.preview AS {nameof(DbListCard.Preview)},
+                cards.properties AS {nameof(DbListCard.Properties)},
+                cards.metadata AS {nameof(DbListCard.Metadata)},
+                {FavoriteSelectSql("cards.id")} AS {nameof(DbListCard.IsFavorite)},
+                {deckColumns},
+                (SELECT parent_relation.from_card_id FROM card_relations parent_relation
+                 WHERE parent_relation.to_card_id = cards.id AND parent_relation.relation_type = 'contains'
+                 LIMIT 1) AS {nameof(DbListCard.ParentCardId)}
+            FROM cards
+            {deckJoin}
+            {where}
+            ORDER BY {orderBy}
+            LIMIT @Limit OFFSET @Offset;
+            """,
+            parameters);
 
+        long? total = null;
+        if (includeTotal)
+            total = await connection.ExecuteScalarAsync<long>(
+                $"SELECT COUNT(*) FROM cards {deckJoin} {where};", parameters);
+
+        var items = rows.Select(row => ToSummary(new DbCard(
+                row.Id, row.Type, row.Title, row.Preview, row.Properties, row.Metadata, row.IsFavorite))
+            with
+            {
+                DeckPosition = row.DeckPosition,
+                MembershipProperties = deckId is null ? null : CardMetadata.ParseOptionalJson(row.MembershipProperties),
+                ParentCardId = row.ParentCardId,
+            }).ToList();
+        return new CardListPage(items, total);
+    }
+
+    /// <summary>
+    /// The ID of one random card matching the list filters (sort, order and paging are ignored),
+    /// or null when none does. It counts the matches and reads the one at a random offset of the
+    /// ID order, so no ORDER BY RAND() over the whole table is needed.
+    /// </summary>
+    public async Task<long?> GetRandomIdAsync(CardListQuery query, long? excludeId = null)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        var (where, deckJoin, parameters) = await BuildListFilterAsync(connection, query);
+        if (excludeId is long excluded)
+        {
+            where = where.Length == 0 ? "WHERE cards.id <> @ExcludeId" : $"{where} AND cards.id <> @ExcludeId";
+            parameters.Add("ExcludeId", excluded);
+        }
+        var count = await connection.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM cards {deckJoin} {where};", parameters);
+        if (count == 0) return null;
+        parameters.Add("Offset", Random.Shared.NextInt64(count));
+        return await connection.ExecuteScalarAsync<long?>(
+            $"SELECT cards.id FROM cards {deckJoin} {where} ORDER BY cards.id LIMIT 1 OFFSET @Offset;", parameters);
+    }
+
+    /// <summary>WHERE clause, deck join and parameters shared by the card list and the random pick.</summary>
+    private static async Task<(string Where, string DeckJoin, DynamicParameters Parameters)> BuildListFilterAsync(
+        MySqlConnection connection, CardListQuery query)
+    {
+        var (types, mediaType, search, excludeContainedMedia, tagIds, sourceId,
+            catalogTagIds, catalogSourceId, _, _, _, _, deckId, _, collapsePages) = query;
         var conditions = new List<string>();
         var parameters = new DynamicParameters();
 
@@ -201,60 +279,10 @@ public sealed partial class CardRepository
         }
 
         var where = conditions.Count > 0 ? $"WHERE {string.Join(" AND ", conditions)}" : "";
-        var orderDirection = string.Equals(order, "asc", StringComparison.OrdinalIgnoreCase)
-            ? "ASC"
-            : "DESC";
-        var orderColumn = string.Equals(sort, "created_at", StringComparison.OrdinalIgnoreCase)
-            ? "cards.created_at"
-            : "cards.id";
-        var orderBy = positionSort
-            ? "dc.position ASC, cards.id ASC"
-            : $"{orderColumn} {orderDirection}, cards.id {orderDirection}";
         var deckJoin = deckId is null
             ? ""
             : "JOIN deck_cards dc ON dc.card_id = cards.id AND dc.deck_id = @DeckId";
-        var deckColumns = deckId is null
-            ? "NULL AS DeckPosition, NULL AS MembershipProperties"
-            : "dc.position AS DeckPosition, dc.properties AS MembershipProperties";
-        parameters.Add("Limit", limit);
-        parameters.Add("Offset", offset);
-
-        var rows = await connection.QueryAsync<DbListCard>(
-            $"""
-            SELECT
-                cards.id AS {nameof(DbListCard.Id)},
-                cards.type AS {nameof(DbListCard.Type)},
-                cards.title AS {nameof(DbListCard.Title)},
-                cards.preview AS {nameof(DbListCard.Preview)},
-                cards.properties AS {nameof(DbListCard.Properties)},
-                cards.metadata AS {nameof(DbListCard.Metadata)},
-                {FavoriteSelectSql("cards.id")} AS {nameof(DbListCard.IsFavorite)},
-                {deckColumns},
-                (SELECT parent_relation.from_card_id FROM card_relations parent_relation
-                 WHERE parent_relation.to_card_id = cards.id AND parent_relation.relation_type = 'contains'
-                 LIMIT 1) AS {nameof(DbListCard.ParentCardId)}
-            FROM cards
-            {deckJoin}
-            {where}
-            ORDER BY {orderBy}
-            LIMIT @Limit OFFSET @Offset;
-            """,
-            parameters);
-
-        long? total = null;
-        if (includeTotal)
-            total = await connection.ExecuteScalarAsync<long>(
-                $"SELECT COUNT(*) FROM cards {deckJoin} {where};", parameters);
-
-        var items = rows.Select(row => ToSummary(new DbCard(
-                row.Id, row.Type, row.Title, row.Preview, row.Properties, row.Metadata, row.IsFavorite))
-            with
-            {
-                DeckPosition = row.DeckPosition,
-                MembershipProperties = deckId is null ? null : CardMetadata.ParseOptionalJson(row.MembershipProperties),
-                ParentCardId = row.ParentCardId,
-            }).ToList();
-        return new CardListPage(items, total);
+        return (where, deckJoin, parameters);
     }
 }
 
