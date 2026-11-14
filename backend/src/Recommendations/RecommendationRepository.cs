@@ -16,7 +16,7 @@ public sealed record DailyRecommendationResult(IReadOnlyList<RecommendationItem>
     public long? Total { get; init; }
 }
 
-public sealed class RecommendationRepository
+public sealed partial class RecommendationRepository
 {
     private readonly string _connectionString;
     private readonly TimeProvider _timeProvider;
@@ -159,6 +159,10 @@ public sealed class RecommendationRepository
     public async Task<RecommendationPage?> GetPageAsync(string mode, int limit, int offset, bool includeTotal,
         long? contextCardId, CancellationToken cancellationToken = default)
     {
+        // "Similar" ranks by the open card's content only; see RecommendationRepository.Similar.cs.
+        if (contextCardId is long similarTo)
+            return await GetSimilarPageAsync(mode, limit, offset, includeTotal, similarTo, cancellationToken);
+
         var rankLimit = includeTotal
             ? Math.Max(_options.MaxRankedCards, 1)
             : Math.Min(offset + limit, Math.Max(_options.MaxRankedCards, limit));
@@ -168,12 +172,6 @@ public sealed class RecommendationRepository
         var voteCutoff = now.Date.AddDays(-o.VoteWindowDays);
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-
-        if (contextCardId is long contextId &&
-            !await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
-                "SELECT COUNT(*) FROM cards WHERE id = @Id;", new { Id = contextId },
-                cancellationToken: cancellationToken)))
-            return null;
 
         // Each source is bounded before IDs are combined. The last source supplies the
         // newest top-level cards when the library has no interest signals.
@@ -210,29 +208,6 @@ public sealed class RecommendationRepository
             candidateIds.UnionWith(newestChildren);
         }
 
-        HashSet<long> contextTags = [];
-        long? contextFamilyId = null;
-        if (contextCardId is long contextCard)
-        {
-            var contextParent = await connection.ExecuteScalarAsync<long?>(new CommandDefinition("""
-                SELECT from_card_id FROM card_relations
-                WHERE to_card_id = @CardId AND relation_type = 'contains' LIMIT 1;
-                """, new { CardId = contextCard }, cancellationToken: cancellationToken));
-            contextFamilyId = contextParent ?? contextCard;
-            var contextMembers = new HashSet<long> { contextCard };
-            if (contextParent is long parentId) contextMembers.Add(parentId);
-            var contextChildren = await connection.QueryAsync<long>(new CommandDefinition("""
-                SELECT to_card_id FROM card_relations
-                WHERE from_card_id = @CardId AND relation_type = 'contains'
-                ORDER BY to_card_id DESC LIMIT 200;
-                """, new { CardId = contextCard }, cancellationToken: cancellationToken));
-            contextMembers.UnionWith(contextChildren);
-            contextTags = (await connection.QueryAsync<long>(new CommandDefinition(
-                "SELECT DISTINCT tag_id FROM card_tags WHERE card_id IN @Ids ORDER BY tag_id LIMIT 100;",
-                new { Ids = contextMembers.ToArray() }, cancellationToken: cancellationToken))).ToHashSet();
-            candidateIds.UnionWith(await GetContextCandidatesAsync(connection, contextTags, cancellationToken));
-        }
-
         // Build a bounded preference profile from actual assigned tags. Repeated daily
         // votes contribute repeatedly, while each source card and tag has a fixed cap.
         var profileViews = (await connection.QueryAsync<ViewRow>(new CommandDefinition("""
@@ -267,7 +242,7 @@ public sealed class RecommendationRepository
                 -o.VoteCardClamp, o.VoteCardClamp);
         }
 
-        // Pure profile from assigned tags of viewed/voted cards; context weights are kept apart.
+        // Pure profile from assigned tags of viewed/voted cards.
         var tagWeights = new Dictionary<long, double>();
         if (cardWeights.Count > 0)
         {
@@ -280,14 +255,9 @@ public sealed class RecommendationRepository
                 tagWeights[tag.TagId] = Math.Clamp(tagWeights.GetValueOrDefault(tag.TagId) +
                     cardWeights[tag.CardId], -o.TagProfileClamp, o.TagProfileClamp);
         }
-        double ContextWeight(long tagId) => contextTags.Contains(tagId) ? o.ContextTagWeight : 0;
-
-        // With a context card its shared tags already supplied the candidates (see
-        // GetContextCandidatesAsync); the profile then only adds a few cards of its own.
-        var strongestTags = tagWeights.Where(pair => pair.Value > 0 &&
-                !contextTags.Contains(pair.Key))
+        var strongestTags = tagWeights.Where(pair => pair.Value > 0)
             .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key)
-            .Take(contextTags.Count > 0 ? 2 : 8).Select(pair => pair.Key).ToArray();
+            .Take(8).Select(pair => pair.Key).ToArray();
         foreach (var tagId in strongestTags)
         {
             var related = await connection.QueryAsync<long>(new CommandDefinition("""
@@ -313,12 +283,10 @@ public sealed class RecommendationRepository
 
         if (candidateIds.Count == 0) return new RecommendationPage([], includeTotal ? 0 : null);
         var ids = candidateIds.ToArray();
-        var relationshipIds = contextCardId is long contextForRelation
-            ? ids.Append(contextForRelation).Distinct().ToArray() : ids;
         var parents = (await connection.QueryAsync<ParentRow>(new CommandDefinition("""
             SELECT to_card_id AS ChildId, from_card_id AS ParentId
             FROM card_relations WHERE relation_type = 'contains' AND to_card_id IN @Ids;
-            """, new { Ids = relationshipIds }, cancellationToken: cancellationToken)))
+            """, new { Ids = ids }, cancellationToken: cancellationToken)))
             .ToDictionary(row => row.ChildId, row => row.ParentId);
         long Family(long id) => parents.GetValueOrDefault(id, id);
         long Resolve(long id) => mode == "collections" && parents.TryGetValue(id, out var parentId)
@@ -343,10 +311,9 @@ public sealed class RecommendationRepository
         var scores = new Dictionary<long, double>();
         foreach (var id in ids) scores.TryAdd(Resolve(id), 0);
 
-        var scoringTagWeights = contextTags.Where(tagWeights.ContainsKey)
-            .Concat(tagWeights.Where(pair => pair.Value > 0 && !contextTags.Contains(pair.Key))
-                .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key).Take(32).Select(pair => pair.Key))
-            .Concat(tagWeights.Where(pair => pair.Value < 0 && !contextTags.Contains(pair.Key))
+        var scoringTagWeights = tagWeights.Where(pair => pair.Value > 0)
+                .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key).Take(32).Select(pair => pair.Key)
+            .Concat(tagWeights.Where(pair => pair.Value < 0)
                 .OrderBy(pair => pair.Value).ThenBy(pair => pair.Key).Take(16).Select(pair => pair.Key))
             .ToDictionary(tagId => tagId, tagId => tagWeights[tagId]);
         // Load assigned tags once for both preference scoring and diversity. The
@@ -373,7 +340,7 @@ public sealed class RecommendationRepository
         // Specificity: rare tags and informative categories count more. One GROUP BY
         // over card_tags (idx_card_tags_tag) covers every tag that can contribute.
         // Every candidate tag needs a specificity: affinity is a mean over all of a card's tags.
-        var involvedTags = scoringTagWeights.Keys.Concat(contextTags)
+        var involvedTags = scoringTagWeights.Keys
             .Concat(tagsByCard.Values.SelectMany(tags => tags)).Distinct().ToArray();
         var specificity = await GetSpecificityAsync(connection, involvedTags, cancellationToken);
         double Spec(long tagId) => specificity.GetValueOrDefault(tagId);
@@ -383,9 +350,6 @@ public sealed class RecommendationRepository
         // for almost every card of a familiar genre and stopped telling cards apart.
         // Leave-one-out: a card's own share of the profile is removed first.
         var profileMax = scoringTagWeights.Values.Select(Math.Abs).DefaultIfEmpty(0).Max();
-        // "Similar" is about the context card; the viewer's taste only breaks near-ties.
-        var affinityWeight = o.WAffinity * (contextTags.Count > 0 ? o.ContextAffinityFactor : 1.0);
-        var contextSpecTotal = contextTags.Sum(Spec);
         foreach (var (cardId, tags) in tagsByCard)
         {
             if (!scores.ContainsKey(cardId)) continue;
@@ -403,17 +367,13 @@ public sealed class RecommendationRepository
                 // The prior shrinks sparsely tagged cards toward zero: one shared generic tag
                 // must not look like a perfect match.
                 if (specTotal > 0)
-                    scores[cardId] += affinityWeight * o.AffinityScale * weighted / (specTotal + o.AffinitySpecPrior);
+                    scores[cardId] += o.WAffinity * o.AffinityScale * weighted / (specTotal + o.AffinitySpecPrior);
             }
-            if (contextSpecTotal > 0)
-                scores[cardId] += o.WContext * o.ContextScale *
-                    tags.Where(contextTags.Contains).Sum(Spec) / contextSpecTotal;
         }
 
         // Pending suggestions count like assigned tags, scaled by confidence and
-        // limited to tags the profile or context already values.
-        var valuedTags = scoringTagWeights.Where(pair => pair.Value > 0).Select(pair => pair.Key)
-            .Concat(contextTags).Distinct().ToArray();
+        // limited to tags the profile already values.
+        var valuedTags = scoringTagWeights.Where(pair => pair.Value > 0).Select(pair => pair.Key).ToArray();
         if (valuedTags.Length > 0)
         {
             var pending = await connection.QueryAsync<SuggestionRow>(new CommandDefinition("""
@@ -434,7 +394,7 @@ public sealed class RecommendationRepository
             }
             foreach (var ((resolved, tagId), confidence) in seenPairs)
                 suggestScores[resolved] = suggestScores.GetValueOrDefault(resolved) + confidence *
-                    Math.Max(tagWeights.GetValueOrDefault(tagId), ContextWeight(tagId)) * Spec(tagId);
+                    tagWeights.GetValueOrDefault(tagId) * Spec(tagId);
             foreach (var (cardId, value) in suggestScores)
                 if (scores.ContainsKey(cardId))
                     scores[cardId] += o.WSuggest * Math.Min(o.SuggestCap, value);
@@ -482,7 +442,6 @@ public sealed class RecommendationRepository
         // child vote suppresses the whole collapsed group in collections mode.
         var availableIds = await GetAvailableIdsAsync(connection, scores.Keys.ToArray(), cancellationToken);
         var eligible = scores.Where(pair => availableIds.Contains(pair.Key) &&
-                Family(pair.Key) != contextFamilyId &&
                 !latestNegativeIds.Contains(pair.Key) &&
                 (mode == "collections"
                     ? !negativeFamilies.Contains(pair.Key)
@@ -588,35 +547,6 @@ public sealed class RecommendationRepository
                 Math.Log(1 + topLevelCount);
         }
         return specificity;
-    }
-
-    /// <summary>
-    /// Cards that share the most specific tags with the context card, best first. Each tag
-    /// counts with its specificity, so a shared artist or character outweighs many shared
-    /// generic tags, and every card in the library can be found, not only the newest ones.
-    /// </summary>
-    private async Task<IEnumerable<long>> GetContextCandidatesAsync(MySqlConnection connection,
-        IReadOnlyCollection<long> contextTags, CancellationToken cancellationToken)
-    {
-        if (contextTags.Count == 0) return [];
-        var specificity = await GetSpecificityAsync(connection, contextTags.ToArray(), cancellationToken);
-        var weights = specificity.Where(pair => pair.Value > 0)
-            .OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key)
-            .Take(_options.ContextCandidateTagLimit)
-            .Select(pair => new { t = pair.Key, w = Math.Round(pair.Value, 6) })
-            .ToArray();
-        if (weights.Length == 0) return [];
-        return await connection.QueryAsync<long>(new CommandDefinition("""
-            SELECT ct.card_id
-            FROM card_tags ct
-            JOIN JSON_TABLE(@Weights, '$[*]' COLUMNS (
-                tag_id BIGINT PATH '$.t', weight DOUBLE PATH '$.w')) jt ON jt.tag_id = ct.tag_id
-            JOIN cards c ON c.id = ct.card_id AND c.type IN ('media', 'comic', 'set')
-            GROUP BY ct.card_id
-            ORDER BY SUM(jt.weight) DESC, ct.card_id DESC
-            LIMIT @Limit;
-            """, new { Weights = System.Text.Json.JsonSerializer.Serialize(weights),
-                Limit = _options.ContextCandidateLimit }, cancellationToken: cancellationToken));
     }
 
     private async Task<HashSet<long>> GetAvailableIdsAsync(MySqlConnection connection, long[] ids,

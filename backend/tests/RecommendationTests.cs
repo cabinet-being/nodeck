@@ -21,7 +21,7 @@ using MySqlConnector;
 namespace MyApp.Api.Tests;
 
 [Collection("Collection database")]
-public sealed class RecommendationTests
+public sealed partial class RecommendationTests
 {
     [DatabaseFact]
     public async Task ColdStartReturnsEligibleCardsWithFiniteScores()
@@ -991,6 +991,8 @@ public sealed class RecommendationTests
         private readonly WebApplication _app;
         private readonly MySqlConnection _connection;
         public HttpClient Client { get; }
+        public MySqlConnection Connection => _connection;
+        public string AppDataRoot => _appDataRoot;
 
         private RecommendationScope(string adminConnectionString, string databaseName, string appDataRoot,
             WebApplication app, MySqlConnection connection, HttpClient client)
@@ -1042,6 +1044,10 @@ public sealed class RecommendationTests
                 await new InterestDatabaseInitializer(configuration).InitializeAsync();
                 await new CatalogDatabaseInitializer(configuration, NullLogger<CatalogDatabaseInitializer>.Instance)
                     .InitializeTagSuggestionsAsync();
+                // The rest of the catalog schema (card_sources, card_visual_features...) used by "Similar".
+                var catalogSql = await File.ReadAllTextAsync(Path.Combine(directory.FullName, "database/init/002_catalog.sql"));
+                foreach (var statement in catalogSql.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    await connection.ExecuteAsync(statement);
 
                 var host = WebApplication.CreateBuilder();
                 host.WebHost.UseUrls("http://127.0.0.1:0");
