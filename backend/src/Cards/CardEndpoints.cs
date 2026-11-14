@@ -8,7 +8,7 @@ namespace MyApp.Api.Cards;
 
 public static class CardEndpoints
 {
-    private const int TooEarlyStatusCode = 425;
+    internal const int TooEarlyStatusCode = 425;
 
     public static IEndpointRouteBuilder MapCardEndpoints(this IEndpointRouteBuilder app)
     {
@@ -16,6 +16,7 @@ public static class CardEndpoints
 
         group.MapPost("", CreateCardAsync);
         group.MapPost("/collections", CreateExistingCollectionAsync);
+        group.MapPost("/import-url", MediaUrlImport.ImportAsync);
         group.MapPost("/duplicates", FindDuplicatesAsync);
         group.MapPost("/{id:long}/children/{childId:long}/move", MoveChildAsync);
         group.MapGet("/creation-requests/{scope}/{key}", GetCreationRequestAsync);
@@ -88,7 +89,7 @@ public static class CardEndpoints
         };
     }
 
-    private static IResult CreationResponse(CardCreationResult result) => result.Status switch
+    internal static IResult CreationResponse(CardCreationResult result) => result.Status switch
     {
         CardCreationStatus.Created => Results.Created($"/api/cards/{result.Card!.Id}", result.Card),
         CardCreationStatus.Replayed => Results.Ok(result.Card),
@@ -97,7 +98,7 @@ public static class CardEndpoints
         _ => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
     };
 
-    private static bool TryReadCreationKey(HttpRequest request, out string? key, out string? error)
+    internal static bool TryReadCreationKey(HttpRequest request, out string? key, out string? error)
     {
         key = null;
         error = null;
@@ -116,7 +117,7 @@ public static class CardEndpoints
         Guid.TryParseExact(value, "D", out var parsed) &&
         string.Equals(value, parsed.ToString("D"), StringComparison.Ordinal);
 
-    private static bool IsRetryableLockError(MySqlException exception) =>
+    internal static bool IsRetryableLockError(MySqlException exception) =>
         exception.Number is 1205 or 1213;
 
     private static async Task<IResult> UpdateCollectionChildrenAsync(

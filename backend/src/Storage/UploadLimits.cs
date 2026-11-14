@@ -12,6 +12,12 @@ public static class UploadLimits
     public const string ConfigurationKey = "NODECK_MAX_UPLOAD_MB";
     public const long DefaultMaxUploadMegabytes = 8192;
 
+    /// <summary>The configured limit in bytes (the same one that applies to uploads).</summary>
+    public static long MaxBytes(IConfiguration configuration) =>
+        long.TryParse(configuration[ConfigurationKey], out var megabytes) && megabytes is >= 1 and <= 1024 * 1024
+            ? megabytes * 1024 * 1024
+            : DefaultMaxUploadMegabytes * 1024 * 1024;
+
     public static WebApplicationBuilder AddUploadLimits(this WebApplicationBuilder builder)
     {
         var configured = builder.Configuration[ConfigurationKey];
